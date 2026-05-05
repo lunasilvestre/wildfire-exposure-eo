@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+*.egg-info/
+build/
+dist/
+
+# uv
+.uv/
+
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data — inputs are pulled fresh, not committed (except AOI + taxonomy + crosswalks)
+data/raw/
+data/intermediate/
+data/cache/
+!data/aoi/
+!data/taxonomy/
+!data/crosswalks/
+
+# Outputs — generated, not committed (except STAC catalog under stac/)
+outputs/
+!outputs/.gitkeep
+
+# Model checkpoints — never committed; distribute via GitHub releases
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# MLflow / experiment tracking
+mlruns/
+mlflow.db
+wandb/

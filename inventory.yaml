@@ -1,0 +1,87 @@
+# inventory.yaml — source of truth for the wildfire-exposure-eo STAC catalog.
+# Mirrors the cheias-pt-stac inventory.yaml pattern.
+# Run: uv run wildfire-exposure-eo build-catalog to regenerate stac/
+
+r2_base: "https://data.wildfire-exposure-eo.example"  # placeholder, edit during dev
+titiler_base: "https://titiler.cheias.pt"             # reuse existing infra
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Collection skeleton — to be filled in during dev as artifacts are produced.
+# Each collection corresponds to a stage in the pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+
+collections:
+
+  fuel-class:
+    title: "Fuel-class segmentation (ICNF taxonomy + Scott & Burgan crosswalk)"
+    description: "Per-tile fuel-class predictions over the pilot AOI, derived from Sentinel-2 L2A imagery."
+    group: wildfire-exposure-eo
+    r2_pattern: "fuel-class/{run_id}/{tile_id}.tif"
+    bbox: [-8.5, 39.7, -7.5, 40.4]   # placeholder — will be updated when AOI is frozen
+    crs: "EPSG:4326"
+    bands: 1
+    dtype: uint8
+    nodata: 255
+    statistics: { min: 0, max: 8 }
+    classmap:
+      0: "non-fuel"
+      1: "grass"
+      2: "shrub-low"
+      3: "shrub-tall"
+      4: "broadleaf-open"
+      5: "broadleaf-closed"
+      6: "conifer-open"
+      7: "conifer-closed"
+      8: "mixed-forest"
+    temporal:
+      resolution: per-run
+      start: null
+      end: null
+    provenance:
+      requires:
+        - sentinel-2-l2a
+        - esa-worldcover-2021
+        - icnf-fuel-map
+      model_id: "fuel-class-segformer-b0"
+      model_version: "0.0.1"
+
+  exposure-raster:
+    title: "Wildfire exposure raster (per-tile composite score)"
+    description: "Composite exposure raster aggregated from fuel class, canopy height, slope, and historical-burn priors."
+    group: wildfire-exposure-eo
+    r2_pattern: "exposure-raster/{run_id}/{tile_id}.tif"
+    bbox: [-8.5, 39.7, -7.5, 40.4]
+    crs: "EPSG:4326"
+    bands: 1
+    dtype: float32
+    nodata: -9999.0
+    statistics: { min: 0.0, max: 1.0 }
+    rescale: [0.0, 1.0]
+    colormap: ylorrd
+    temporal:
+      resolution: per-run
+      start: null
+      end: null
+    provenance:
+      requires:
+        - fuel-class
+        - cop-dem-glo-30
+        - eth-canopy-height-2020
+        - icnf-burned-areas
+
+  exposure-assets:
+    title: "Per-asset wildfire-exposure score (GeoParquet)"
+    description: "OSM-derived critical-infrastructure assets, scored for wildfire exposure with full provenance."
+    group: wildfire-exposure-eo
+    asset_pattern: "exposure-assets/{run_id}.parquet"
+    format: "GeoParquet"
+    crs: "EPSG:4326"
+    schema_ref: "src/wildfire_exposure_eo/schemas/scored_asset.py"
+    temporal:
+      resolution: per-run
+      start: null
+      end: null
+    provenance:
+      requires:
+        - exposure-raster
+        - osm-critical-infrastructure

@@ -1,0 +1,124 @@
+# Critical infrastructure taxonomy
+# ─────────────────────────────────
+# Defines OSM membership rules for each asset class probed by this project.
+# This file is itself a citable artifact; treat it as load-bearing.
+#
+# Schema:
+#   classes:
+#     <class_id>:
+#       name:                  human-readable
+#       osm_filters:           list of OSM tag filters (Overpass-friendly)
+#       buffer_radius_m:       per-class default for feature extraction
+#       criticality_weight:    portfolio-aggregation weight (0–1)
+#       license_attribution:   required attribution string for downstream use
+#       notes:                 free-form
+
+version: "0.1.0-draft"
+license_global: "OSM data © OpenStreetMap contributors, ODbL"
+
+classes:
+
+  power.transmission_line:
+    name: "Transmission line (≥ 60 kV)"
+    osm_filters:
+      - 'way["power"="line"]["voltage"~"^([6-9][0-9]{4}|[1-9][0-9]{5,})$"]'
+    buffer_radius_m: 30
+    criticality_weight: 1.00
+    notes: "Voltage filter is regex-based; refine in audit step against actual OSM data."
+
+  power.distribution_line:
+    name: "Distribution line (< 60 kV or unspecified)"
+    osm_filters:
+      - 'way["power"="line"]["voltage"!~"^([6-9][0-9]{4}|[1-9][0-9]{5,})$"]'
+      - 'way["power"="minor_line"]'
+    buffer_radius_m: 20
+    criticality_weight: 0.70
+
+  power.substation:
+    name: "Substation"
+    osm_filters:
+      - 'node["power"="substation"]'
+      - 'way["power"="substation"]'
+      - 'relation["power"="substation"]'
+    buffer_radius_m: 100
+    criticality_weight: 0.95
+
+  power.transformer:
+    name: "Transformer"
+    osm_filters:
+      - 'node["power"="transformer"]'
+      - 'way["power"="transformer"]'
+    buffer_radius_m: 30
+    criticality_weight: 0.50
+
+  power.tower:
+    name: "Pylon / tower"
+    osm_filters:
+      - 'node["power"="tower"]'
+    buffer_radius_m: 20
+    criticality_weight: 0.40
+
+  emergency.fire_station:
+    name: "Fire station"
+    osm_filters:
+      - 'node["amenity"="fire_station"]'
+      - 'way["amenity"="fire_station"]'
+    buffer_radius_m: 75
+    criticality_weight: 0.95
+
+  emergency.hospital:
+    name: "Hospital"
+    osm_filters:
+      - 'node["amenity"="hospital"]'
+      - 'way["amenity"="hospital"]'
+    buffer_radius_m: 100
+    criticality_weight: 1.00
+
+  emergency.police:
+    name: "Police station"
+    osm_filters:
+      - 'node["amenity"="police"]'
+      - 'way["amenity"="police"]'
+    buffer_radius_m: 75
+    criticality_weight: 0.80
+
+  education.school:
+    name: "School"
+    osm_filters:
+      - 'node["amenity"="school"]'
+      - 'way["amenity"="school"]'
+    buffer_radius_m: 75
+    criticality_weight: 0.85
+
+  telecom.tower:
+    name: "Telecommunications tower"
+    osm_filters:
+      - 'node["man_made"="communications_tower"]'
+      - 'node["tower:type"="communication"]'
+      - 'way["man_made"="communications_tower"]'
+    buffer_radius_m: 30
+    criticality_weight: 0.60
+
+  water.treatment_plant:
+    name: "Water / wastewater treatment plant"
+    osm_filters:
+      - 'node["man_made"="water_works"]'
+      - 'way["man_made"="water_works"]'
+      - 'way["man_made"="wastewater_plant"]'
+    buffer_radius_m: 100
+    criticality_weight: 0.85
+
+  water.reservoir:
+    name: "Reservoir"
+    osm_filters:
+      - 'way["landuse"="reservoir"]'
+      - 'way["natural"="water"]["water"="reservoir"]'
+    buffer_radius_m: 100
+    criticality_weight: 0.50
+
+  transport.railway:
+    name: "Railway"
+    osm_filters:
+      - 'way["railway"="rail"]'
+    buffer_radius_m: 25
+    criticality_weight: 0.60

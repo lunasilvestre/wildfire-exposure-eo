@@ -1,0 +1,66 @@
+# ICNF → Scott & Burgan FBFM40 crosswalk
+# ──────────────────────────────────────
+# Maps ICNF Carta de Combustíveis Florestais classes onto the Scott & Burgan
+# (2005) FBFM40 international fuel-model framework, plus an internal severity
+# weight used in the exposure score.
+#
+# To be filled in during dev (after fetching and reading the ICNF legend).
+# This file ships as a stub so the contract is visible from day one.
+
+version: "0.0.1-stub"
+status: "STUB — requires ICNF legend extraction in PRE_DEV_CHECKLIST §E"
+
+source_taxonomy: "ICNF — Carta de Combustíveis Florestais"
+target_taxonomy: "Scott & Burgan FBFM40 (Scott & Burgan, 2005)"
+
+internal_classes:
+  # The model produces one of these. They are coarser than ICNF and FBFM40 by design.
+  - id: 0
+    code: "non-fuel"
+    description: "Non-vegetated or non-flammable surface"
+    severity_weight: 0.00
+  - id: 1
+    code: "grass"
+    description: "Annual or perennial grass"
+    severity_weight: 0.40
+  - id: 2
+    code: "shrub-low"
+    description: "Low-stature shrub (< 1 m)"
+    severity_weight: 0.55
+  - id: 3
+    code: "shrub-tall"
+    description: "Tall-stature shrub (≥ 1 m)"
+    severity_weight: 0.75
+  - id: 4
+    code: "broadleaf-open"
+    description: "Open-canopy broadleaf forest"
+    severity_weight: 0.50
+  - id: 5
+    code: "broadleaf-closed"
+    description: "Closed-canopy broadleaf forest"
+    severity_weight: 0.60
+  - id: 6
+    code: "conifer-open"
+    description: "Open-canopy conifer forest"
+    severity_weight: 0.75
+  - id: 7
+    code: "conifer-closed"
+    description: "Closed-canopy conifer forest"
+    severity_weight: 0.90
+  - id: 8
+    code: "mixed-forest"
+    description: "Mixed broadleaf-conifer forest"
+    severity_weight: 0.70
+
+crosswalk:
+  # ICNF code → internal class id, Scott & Burgan reference, comment.
+  # Populate during dev once the ICNF legend is captured under data/raw/icnf/.
+  # Placeholder rows below to be replaced.
+  - icnf_code: "TODO"
+    internal_class_id: null
+    fbfm40_reference: null
+    comment: "Populate this table after section E of PRE_DEV_CHECKLIST.md is complete."
+
+references:
+  - "Scott, J. H., & Burgan, R. E. (2005). Standard fire behavior fuel models: a comprehensive set for use with Rothermel's surface fire spread model. Gen. Tech. Rep. RMRS-GTR-153."
+  - "ICNF — Cartografia Nacional de Áreas Ardidas; Carta de Combustíveis Florestais. https://www.icnf.pt/"
