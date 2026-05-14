@@ -124,6 +124,7 @@ requires explicit human approval in-session before it ships. Surface it as a que
 - *"Let me just hardcode this AOI for now."* — No. Edit `data/aoi/pilot.geojson`.
 - *"I'll use Shapefile for this output, it's simpler."* — No. GeoParquet.
 - *"This score correlates with risk so let's call it a probability."* — No. Read non-negotiable #6.
+- *"Prithvi burn-scar inference is essentially ignition prediction."* — No. We detect burn *scars* — visible post-event spectral signatures of fires that already happened. Ignition prediction is a forecasting task this project does not perform. Phrase carefully in README, docs, and any external write-up.
 - *"I'll skip pyright on this file, it has too many errors."* — No. Fix or `# pyright: ignore[<reason>]` per line with a justification comment.
 - *"Let me add `<heavy-dep>` to make this faster."* — Pause. Justify in writing first.
 - *"I'll commit a generated artifact under `data/`."* — No. `data/` is inputs only. Generated files go to `outputs/` (gitignored except for STAC catalog under `stac/`).

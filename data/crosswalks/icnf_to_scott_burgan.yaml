@@ -1,66 +1,367 @@
 # ICNF → Scott & Burgan FBFM40 crosswalk
 # ──────────────────────────────────────
-# Maps ICNF Carta de Combustíveis Florestais classes onto the Scott & Burgan
-# (2005) FBFM40 international fuel-model framework, plus an internal severity
-# weight used in the exposure score.
+# Maps ICNF / Portuguese surface fuel classes onto the Scott & Burgan (2005)
+# FBFM40 international fuel-model framework, plus the project's internal
+# severity weight used in the exposure score.
 #
-# To be filled in during dev (after fetching and reading the ICNF legend).
-# This file ships as a stub so the contract is visible from day one.
+# Status of each section:
+#   • internal_classes  — STABLE (project-internal, set by the model output schema)
+#   • fbfm40_reference  — STABLE (public-domain Scott & Burgan 2005 / LANDFIRE)
+#   • icnf_taxonomy     — PROVISIONAL (built from Fernandes 2009 + Sá et al. 2023;
+#                          must be re-derived from the actual ICNF Carta de
+#                          Combustíveis Florestais legend before training)
+#   • crosswalk         — PROVISIONAL (depends on icnf_taxonomy)
+#
+# Closes PRE_DEV_CHECKLIST.md items E.2 and E.3 to a usable v0.2 stub.
 
-version: "0.0.1-stub"
-status: "STUB — requires ICNF legend extraction in PRE_DEV_CHECKLIST §E"
+version: "0.2.0-stub"
+status: "PROVISIONAL — ICNF section requires legend extraction from the actual CCF raster legend before training"
 
-source_taxonomy: "ICNF — Carta de Combustíveis Florestais"
+source_taxonomy: "ICNF — Carta de Combustíveis Florestais (CCF) + Fernandes (2009) Portuguese fuel-model groups"
 target_taxonomy: "Scott & Burgan FBFM40 (Scott & Burgan, 2005)"
 
+# ──────────────────────────────────────
+# 0. Source inputs — operational taxonomies the pipeline reads
+# ──────────────────────────────────────
+# The pipeline has four external taxonomies to keep aligned.
+#
+#   DGT COSc 2024 fuel-cover  ──┐  (4 classes, open CC-BY-4.0, training input)
+#                               │
+#   DGT COS 2023 LULC          ──┤  (species-level codes, training input)
+#                               │
+#   Sentinel-2 spectral features ─┘  (canopy openness, broadleaf/conifer split)
+#                               │
+#                               ▼
+#                       Internal classes  (9 — what the model predicts)
+#                               │
+#                               ├── crosswalk to ICNF CCF taxonomy (FUTURE alignment)
+#                               ├── crosswalk to FBFM40 (fire-behaviour modelling)
+#                               └── crosswalk to NFFL-13 via EFFIS European Fuel Map (intl reference)
+#
+# ICNF CCF is the eventual alignment target but is NOT the training input —
+# its raster has no public direct-download URL (verified 2026-05-07 against
+# geocatalogo.icnf.pt, sigservices.icnf.pt, fogos.icnf.pt). Pursue via the
+# ICNF geocatálogo account or institutional request. Until then the operational
+# input is the DGT pair (COSc + COS) which together carry enough signal for the
+# 9-class internal taxonomy with Sentinel-2/Sentinel-1 features.
+
+source_inputs:
+  primary_label_source:
+    id: "dgt-cosc"
+    name: "DGT Carta de Ocupação do Solo Conjuntural"
+    role: "OPERATIONAL_INPUT — coarse fuel-cover weak labels"
+    license: "CC-BY 4.0"
+    classes: 4   # Dense Forest, Open Forest, Shrubland, Spontaneous herbaceous
+    url: "https://www.dgterritorio.gov.pt/COSc2023-Carta-de-Ocupacao-do-Solo-Conjuntural-de-2023"
+    download: "https://cdd.dgterritorio.gov.pt/"
+    notes: "Annual 10-m raster derived from Sentinel-2 via DGT SMOS pipeline. Coarse but open and reproducible. Confirmed fetchable in PRE_DEV_CHECKLIST §B.6."
+
+  fine_label_source:
+    id: "dgt-cos"
+    name: "DGT Carta de Ocupação do Solo (COS) 2018 v3 / 2023 v1"
+    role: "OPERATIONAL_INPUT — species-level weak labels (Pinus, Eucalyptus, Quercus splits)"
+    license: "CC-BY 4.0"
+    classes: ~80
+    url: "https://www.dgterritorio.gov.pt/dados-abertos"
+    notes: "Vector LULC with species-level forest codes. Resolves COSc's broadleaf/conifer ambiguity. Confirmed fetchable in PRE_DEV_CHECKLIST §B.6."
+
+  international_reference:
+    id: "effis-fuel-map"
+    name: "EFFIS European Fuel Map"
+    role: "REFERENCE — 13-class NFFL crosswalk anchor for international readability"
+    license: "Free, no auth"
+    classes: 13
+    url: "https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/fuels"
+    download: "https://forest-fire.emergency.copernicus.eu/applications/data-and-services"
+    paper: "Aragoneses et al. 2023 — https://essd.copernicus.org/articles/15/1287/2023/"
+    notes: "NFFL is the predecessor of FBFM40; included so non-Portuguese reviewers can read our fuel classes without a Portugal-specific lookup."
+
+  national_alignment_target:
+    id: "icnf-ccf"
+    name: "ICNF Carta de Combustíveis Florestais"
+    role: "FUTURE_ALIGNMENT — national authority taxonomy (see icnf_taxonomy block below)"
+    license: "ICNF, requires account / institutional request"
+    classes: ~16  # estimated from Fernandes 2009 + Sá et al. 2023; verify on legend extraction
+    url: "https://geocatalogo.icnf.pt/"
+    notes: "No public direct-download URL as of 2026-05-07. Pursue via geocatálogo registration; held in icnf_taxonomy: as PROVISIONAL until then."
+
+  recent_burn_source:
+    id: "prithvi-burn-scar"
+    name: "Prithvi-EO 2.0 burn-scar downstream task"
+    role: "DERIVED_FEATURE_SOURCE — produces recent_burn_share_12mo (Stage 1b)"
+    license: "Apache 2.0 (Prithvi-EO 2.0)"
+    classes: 2   # binary: burned / not-burned
+    url: "https://github.com/NASA-IMPACT/Prithvi-EO-2.0"
+    framework: "terratorch>=1.2"
+    notes: "Detects burn SCARS (post-event spectral signatures), not ignitions. Inference-only over Sentinel-2 L2A imagery for the trailing 12 months. Exact Hugging Face model ID is verified at audit time (CLAUDE.md non-negotiable #1) and pinned in inventory.yaml under the burn-scar-recent collection."
+
+# ──────────────────────────────────────
+# 1. Internal classes — what the model actually predicts
+# ──────────────────────────────────────
 internal_classes:
-  # The model produces one of these. They are coarser than ICNF and FBFM40 by design.
   - id: 0
     code: "non-fuel"
-    description: "Non-vegetated or non-flammable surface"
+    description: "Non-vegetated or non-flammable surface (water, urban, bare rock, ice)"
     severity_weight: 0.00
   - id: 1
     code: "grass"
-    description: "Annual or perennial grass"
+    description: "Annual or perennial grass, including agricultural pasture"
     severity_weight: 0.40
   - id: 2
     code: "shrub-low"
-    description: "Low-stature shrub (< 1 m)"
+    description: "Low-stature shrub (< 1 m) — matos baixos"
     severity_weight: 0.55
   - id: 3
     code: "shrub-tall"
-    description: "Tall-stature shrub (≥ 1 m)"
+    description: "Tall-stature shrub (>= 1 m) — matos altos, including dense Cytisus / Erica / Cistus"
     severity_weight: 0.75
   - id: 4
     code: "broadleaf-open"
-    description: "Open-canopy broadleaf forest"
+    description: "Open-canopy broadleaf forest (cork oak, holm oak, oak coppice)"
     severity_weight: 0.50
   - id: 5
     code: "broadleaf-closed"
-    description: "Closed-canopy broadleaf forest"
+    description: "Closed-canopy broadleaf forest including dense eucalyptus plantation"
     severity_weight: 0.60
   - id: 6
     code: "conifer-open"
-    description: "Open-canopy conifer forest"
+    description: "Open-canopy conifer forest (maritime pine on shallow soils, regenerating stands)"
     severity_weight: 0.75
   - id: 7
     code: "conifer-closed"
-    description: "Closed-canopy conifer forest"
+    description: "Closed-canopy conifer forest (mature Pinus pinaster / Pinus pinea)"
     severity_weight: 0.90
   - id: 8
     code: "mixed-forest"
-    description: "Mixed broadleaf-conifer forest"
+    description: "Mixed broadleaf-conifer stand"
     severity_weight: 0.70
 
-crosswalk:
-  # ICNF code → internal class id, Scott & Burgan reference, comment.
-  # Populate during dev once the ICNF legend is captured under data/raw/icnf/.
-  # Placeholder rows below to be replaced.
-  - icnf_code: "TODO"
-    internal_class_id: null
-    fbfm40_reference: null
-    comment: "Populate this table after section E of PRE_DEV_CHECKLIST.md is complete."
+# ──────────────────────────────────────
+# 2. FBFM40 reference — full Scott & Burgan (2005) class list
+# ──────────────────────────────────────
+# Codes follow LANDFIRE's numeric encoding. Letter prefix encodes fuel type:
+#   NB = non-burnable, GR = grass, GS = grass-shrub, SH = shrub,
+#   TU = timber-understory, TL = timber-litter, SB = slash-blowdown.
+# Source: https://landfire.gov/fuel/fbfm40
+fbfm40_reference:
+  non_burnable:
+    - { code: "NB1", landfire_id: 91, name: "Urban / Developed" }
+    - { code: "NB2", landfire_id: 92, name: "Snow / Ice" }
+    - { code: "NB3", landfire_id: 93, name: "Agricultural" }
+    - { code: "NB8", landfire_id: 98, name: "Open Water" }
+    - { code: "NB9", landfire_id: 99, name: "Bare Ground" }
+  grass:
+    - { code: "GR1", landfire_id: 101, name: "Short, sparse, dry-climate grass" }
+    - { code: "GR2", landfire_id: 102, name: "Low load, dry-climate grass" }
+    - { code: "GR3", landfire_id: 103, name: "Low load, very coarse, humid-climate grass" }
+    - { code: "GR4", landfire_id: 104, name: "Moderate load, dry-climate grass" }
+    - { code: "GR5", landfire_id: 105, name: "Low load, humid-climate grass" }
+    - { code: "GR6", landfire_id: 106, name: "Moderate load, humid-climate grass" }
+    - { code: "GR7", landfire_id: 107, name: "High load, dry-climate grass" }
+    - { code: "GR8", landfire_id: 108, name: "High load, very coarse, humid-climate grass" }
+    - { code: "GR9", landfire_id: 109, name: "Very high load, humid-climate grass" }
+  grass_shrub:
+    - { code: "GS1", landfire_id: 121, name: "Low load, dry-climate grass-shrub" }
+    - { code: "GS2", landfire_id: 122, name: "Moderate load, dry-climate grass-shrub" }
+    - { code: "GS3", landfire_id: 123, name: "Moderate load, humid-climate grass-shrub" }
+    - { code: "GS4", landfire_id: 124, name: "High load, humid-climate grass-shrub" }
+  shrub:
+    - { code: "SH1", landfire_id: 141, name: "Low load, dry-climate shrub" }
+    - { code: "SH2", landfire_id: 142, name: "Moderate load, dry-climate shrub" }
+    - { code: "SH3", landfire_id: 143, name: "Moderate load, humid-climate shrub" }
+    - { code: "SH4", landfire_id: 144, name: "Low load, humid-climate timber-shrub" }
+    - { code: "SH5", landfire_id: 145, name: "High load, dry-climate shrub" }
+    - { code: "SH6", landfire_id: 146, name: "Low load, humid-climate shrub" }
+    - { code: "SH7", landfire_id: 147, name: "Very high load, dry-climate shrub" }
+    - { code: "SH8", landfire_id: 148, name: "High load, humid-climate shrub" }
+    - { code: "SH9", landfire_id: 149, name: "Very high load, humid-climate shrub" }
+  timber_understory:
+    - { code: "TU1", landfire_id: 161, name: "Low load, dry-climate timber-grass-shrub" }
+    - { code: "TU2", landfire_id: 162, name: "Moderate load, humid-climate timber-shrub" }
+    - { code: "TU3", landfire_id: 163, name: "Moderate load, humid-climate timber-grass-shrub" }
+    - { code: "TU4", landfire_id: 164, name: "Dwarf conifer with understory" }
+    - { code: "TU5", landfire_id: 165, name: "Very high load, dry-climate timber-shrub" }
+  timber_litter:
+    - { code: "TL1", landfire_id: 181, name: "Low load, compact conifer litter" }
+    - { code: "TL2", landfire_id: 182, name: "Low load, broadleaf litter" }
+    - { code: "TL3", landfire_id: 183, name: "Moderate load, conifer litter" }
+    - { code: "TL4", landfire_id: 184, name: "Small downed logs" }
+    - { code: "TL5", landfire_id: 185, name: "High load, conifer litter" }
+    - { code: "TL6", landfire_id: 186, name: "Moderate load, broadleaf litter" }
+    - { code: "TL7", landfire_id: 187, name: "Large downed logs" }
+    - { code: "TL8", landfire_id: 188, name: "Long-needle litter" }
+    - { code: "TL9", landfire_id: 189, name: "Very high load, broadleaf litter" }
+  slash_blowdown:
+    - { code: "SB1", landfire_id: 201, name: "Low load activity fuel (slash)" }
+    - { code: "SB2", landfire_id: 202, name: "Moderate load activity fuel or low load blowdown" }
+    - { code: "SB3", landfire_id: 203, name: "High load activity fuel or moderate load blowdown" }
+    - { code: "SB4", landfire_id: 204, name: "High load blowdown" }
 
+# ──────────────────────────────────────
+# 3. ICNF / Portuguese taxonomy — PROVISIONAL
+# ──────────────────────────────────────
+# This block is a working scaffold derived from Portuguese fuel-model
+# literature (Fernandes 2009; Sá et al. 2023). The actual ICNF Carta de
+# Combustíveis Florestais (CCF) raster ships its own legend; that legend
+# overrides what is below. Action item: download the CCF raster + .lyr
+# legend from ICNF SIG portal, capture the official codes, replace this
+# section.
+#
+# The taxonomy below uses the seven fuel-type groups that recur across
+# Portuguese fire-behaviour publications, each with the typical sub-codes.
+icnf_taxonomy:
+  pasture_grass:
+    - { code: "Pa", name: "Pastagem / Pasture", description: "Continuous herbaceous cover, low to moderate biomass" }
+  shrub_low:
+    - { code: "M-low", name: "Matos baixos", description: "Low shrubs (< 1 m), e.g. young Erica / Cistus regrowth post-fire" }
+  shrub_tall:
+    - { code: "M-tall", name: "Matos altos / densos", description: "Tall, dense shrub (>= 1 m), e.g. mature Cytisus, Ulex europaeus, dense Erica arborea" }
+  pine:
+    - { code: "Pp-young", name: "Pinhal jovem (Pinus pinaster)", description: "Young / regenerating maritime pine, dense understory" }
+    - { code: "Pp-mature", name: "Pinhal maduro (Pinus pinaster)", description: "Mature maritime pine, fuel mostly in litter and understory" }
+    - { code: "Pn", name: "Pinheiro-manso (Pinus pinea)", description: "Stone pine — open structure, lower hazard than P. pinaster" }
+  eucalyptus:
+    - { code: "Eu-young", name: "Eucaliptal jovem (Eucalyptus globulus)", description: "Young eucalyptus coppice or first-rotation, high flammability" }
+    - { code: "Eu-mature", name: "Eucaliptal maduro", description: "Mature eucalyptus, bark and litter accumulation amplifies surface fire" }
+  oak_broadleaf:
+    - { code: "Qs", name: "Sobreiral (Quercus suber)", description: "Cork oak woodland, often with managed shrub understory" }
+    - { code: "Qi", name: "Azinhal (Quercus ilex / rotundifolia)", description: "Holm oak woodland (Mediterranean)" }
+    - { code: "Qd", name: "Carvalhal (Quercus pyrenaica / robur / faginea)", description: "Deciduous oak woodland (Norte / Centro)" }
+  mixed_forest:
+    - { code: "MF", name: "Floresta mista", description: "Mixed broadleaf-conifer, no single species dominant" }
+  non_burnable_pt:
+    - { code: "Ag", name: "Áreas agrícolas (sem ardível contínuo)", description: "Cultivated land — irrigated horticulture, vineyard rows, orchards" }
+    - { code: "Ur", name: "Áreas urbanas / artificializadas", description: "Built-up surfaces" }
+    - { code: "Wt", name: "Massas de água", description: "Inland water bodies" }
+    - { code: "Br", name: "Solo nu / rocha", description: "Bare soil or rock outcrop" }
+
+# ──────────────────────────────────────
+# 4. Crosswalk — PROVISIONAL
+# ──────────────────────────────────────
+# Maps ICNF code → internal class → representative FBFM40 code for fire-
+# behaviour modelling. The FBFM40 mapping uses humid-climate variants by
+# default since continental Portugal's coastal Centro-Norte regime is
+# closer to "humid" than "dry-climate" Mediterranean for most of the year.
+# Inland Centro / Sul AOIs may justify swapping in the dry-climate twin.
+crosswalk:
+  - icnf_code: "Pa"
+    internal_class_id: 1
+    fbfm40_primary: "GR2"
+    fbfm40_alternates: ["GR1", "GR4"]
+    comment: "Low to moderate dry-climate grass; bump to GR4 if continuous and well-cured"
+
+  - icnf_code: "M-low"
+    internal_class_id: 2
+    fbfm40_primary: "SH1"
+    fbfm40_alternates: ["GS1", "SH2"]
+    comment: "Use GS1 if grass component is significant"
+
+  - icnf_code: "M-tall"
+    internal_class_id: 3
+    fbfm40_primary: "SH5"
+    fbfm40_alternates: ["SH7", "SH9"]
+    comment: "SH7 for very dense Ulex/Cytisus stands; SH9 only if humid"
+
+  - icnf_code: "Pp-young"
+    internal_class_id: 6
+    fbfm40_primary: "TU5"
+    fbfm40_alternates: ["TU1", "SH5"]
+    comment: "Young P. pinaster with shrub understory — high-load timber-shrub"
+
+  - icnf_code: "Pp-mature"
+    internal_class_id: 7
+    fbfm40_primary: "TL3"
+    fbfm40_alternates: ["TL5", "TU2"]
+    comment: "Closed-canopy P. pinaster — needle-litter dominant"
+
+  - icnf_code: "Pn"
+    internal_class_id: 6
+    fbfm40_primary: "TL3"
+    fbfm40_alternates: ["TL1", "TU1"]
+    comment: "Stone pine, more open than P. pinaster"
+
+  - icnf_code: "Eu-young"
+    internal_class_id: 5
+    fbfm40_primary: "SH7"
+    fbfm40_alternates: ["TU5", "SH5"]
+    comment: "Young eucalyptus has shrub-class behaviour; spotting risk underrepresented in FBFM40 — note in metadata"
+
+  - icnf_code: "Eu-mature"
+    internal_class_id: 5
+    fbfm40_primary: "TL9"
+    fbfm40_alternates: ["TU5", "TL6"]
+    comment: "Mature eucalyptus — broadleaf litter heavy with bark; spotting/long-distance ember caveat applies"
+
+  - icnf_code: "Qs"
+    internal_class_id: 4
+    fbfm40_primary: "TL2"
+    fbfm40_alternates: ["TL6", "TU2"]
+    comment: "Cork oak with managed understory — broadleaf litter"
+
+  - icnf_code: "Qi"
+    internal_class_id: 4
+    fbfm40_primary: "TL2"
+    fbfm40_alternates: ["TL6"]
+    comment: "Holm oak — typically Mediterranean dry"
+
+  - icnf_code: "Qd"
+    internal_class_id: 5
+    fbfm40_primary: "TL6"
+    fbfm40_alternates: ["TL2", "TL9"]
+    comment: "Deciduous oak — moderate broadleaf litter load"
+
+  - icnf_code: "MF"
+    internal_class_id: 8
+    fbfm40_primary: "TU2"
+    fbfm40_alternates: ["TL3", "TL6"]
+    comment: "Mixed broadleaf-conifer stand"
+
+  - icnf_code: "Ag"
+    internal_class_id: 0
+    fbfm40_primary: "NB3"
+    fbfm40_alternates: []
+    comment: "Agricultural — generally non-burnable in fire-spread terms"
+
+  - icnf_code: "Ur"
+    internal_class_id: 0
+    fbfm40_primary: "NB1"
+    fbfm40_alternates: []
+    comment: "Urban / developed"
+
+  - icnf_code: "Wt"
+    internal_class_id: 0
+    fbfm40_primary: "NB8"
+    fbfm40_alternates: []
+    comment: "Water body"
+
+  - icnf_code: "Br"
+    internal_class_id: 0
+    fbfm40_primary: "NB9"
+    fbfm40_alternates: []
+    comment: "Bare ground / rock"
+
+# ──────────────────────────────────────
+# 5. Open questions for ICNF legend extraction
+# ──────────────────────────────────────
+# When the actual ICNF CCF legend is captured, verify and update:
+#   - Whether ICNF uses Anderson-13 (NFFL 1–13) or its own numeric scheme;
+#     if Anderson-13, an Anderson-13 → FBFM40 crosswalk is needed (Scott
+#     & Burgan 2005 publishes the canonical one).
+#   - Whether eucalyptus has a dedicated CCF code or is folded into a generic
+#     "broadleaf forest" class (the Portuguese literature treats Eu separately;
+#     the official cartography may not).
+#   - The exact handling of post-fire regeneration (TSLF — time since last
+#     fire) — Fernandes/Sá show this matters for the matos vs grass call.
+#   - Whether agricultural mosaics (olive, vineyard) get burnable codes when
+#     surrounded by abandoned land — likely yes in the SGIF taxonomy.
+
+# ──────────────────────────────────────
+# References
+# ──────────────────────────────────────
 references:
-  - "Scott, J. H., & Burgan, R. E. (2005). Standard fire behavior fuel models: a comprehensive set for use with Rothermel's surface fire spread model. Gen. Tech. Rep. RMRS-GTR-153."
-  - "ICNF — Cartografia Nacional de Áreas Ardidas; Carta de Combustíveis Florestais. https://www.icnf.pt/"
+  - "Scott, J. H., & Burgan, R. E. (2005). Standard fire behavior fuel models: a comprehensive set for use with Rothermel's surface fire spread model. USFS RMRS-GTR-153."
+  - "Anderson, H. E. (1982). Aids to determining fuel models for estimating fire behavior. USFS GTR-INT-122."
+  - "Fernandes, P. M. (2009). Combining forest structure data and fuel modelling to classify fire hazard in Portugal. Annals of Forest Science 66(4), 415."
+  - "Sá, A.C.L., Benali, A., Aparicio, B.A., et al. (2023). A method to produce a flexible and customized fuel models dataset. MethodsX 10, 102218."
+  - "LANDFIRE FBFM40 reference: https://landfire.gov/fuel/fbfm40"
+  - "ICNF Cartografia Nacional — https://geocatalogo.icnf.pt/"

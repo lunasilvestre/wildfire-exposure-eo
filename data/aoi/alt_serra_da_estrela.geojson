@@ -1,0 +1,36 @@
+{
+  "type": "FeatureCollection",
+  "name": "wildfire-exposure-eo alt AOI — Serra da Estrela",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Serra da Estrela (Manteigas / Covilhã / Guarda)",
+        "iso3166_2": "PT-09",
+        "description": "Alternative pilot AOI centered on the August 2022 Serra da Estrela fire — Portugal's largest single fire in 50 years, ~25,000 ha burned, primarily inside the Parque Natural da Serra da Estrela. Spans Manteigas, Covilhã, Guarda and Celorico da Beira municipalities.",
+        "rationale": "Strong recent burn signal (2022), high-quality Copernicus EMS reference perimeters (EMSR618), iconic case study, abundant ICNF Áreas Ardidas history, dense forest fuel.",
+        "source": "Alternative for PRE_DEV_CHECKLIST.md item D — see docs/aoi_rationale.md.",
+        "bbox_wgs84": [-7.727, 40.215, -7.373, 40.485],
+        "approx_size_km": "~30 x ~30",
+        "primary_district": "Guarda (PT-09)",
+        "secondary_districts": ["Castelo Branco (PT-05)"]
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-7.727, 40.215],
+            [-7.373, 40.215],
+            [-7.373, 40.485],
+            [-7.727, 40.485],
+            [-7.727, 40.215]
+          ]
+        ]
+      }
+    }
+  ]
+}

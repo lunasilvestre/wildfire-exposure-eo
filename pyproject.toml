@@ -5,70 +5,95 @@ description = "STAC-native wildfire exposure scoring for OSM critical infrastruc
 authors = [{ name = "Nelson Silvestre", email = "lunasilvestre@gmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 
 # ---------------------------------------------------------------------------
 # Pinned for reproducibility. Lockfile is the source of truth at runtime;
 # this section is the human-readable contract.
 # Any addition requires a one-line justification in the PR description.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Dependency policy
+# ---------------------------------------------------------------------------
+# Lower bounds express required capability ("I need the feature added in X.Y").
+# Upper bounds are intentionally absent: uv.lock is the source of truth at
+# install time, and preemptive caps cause more resolver pain than they prevent.
+# We trust each upstream package to constrain its own peers (e.g., torchgeo
+# will pin torch when it has to). Re-pin only after observing real breakage,
+# never preemptively.
+# See: Schreiner, "Should You Use Upper Bound Version Constraints?"
+#      https://iscinumpy.dev/post/bound-version-constraints/
+# ---------------------------------------------------------------------------
 dependencies = [
     # EO / STAC stack
-    "pystac-client>=0.8,<0.9",
-    "stackstac>=0.5,<0.6",
-    "odc-stac>=0.3,<0.4",
-    "rioxarray>=0.17,<0.18",
-    "rasterio>=1.4,<2.0",
-    "xarray>=2024.10,<2025.0",
-    "dask[complete]>=2024.10,<2025.0",
-    "pystac>=1.11,<2.0",
+    "pystac-client>=0.8",
+    "stackstac>=0.5",
+    "odc-stac>=0.3",
+    "rioxarray>=0.17",
+    "rasterio>=1.4",
+    "xarray>=2024.10",
+    "dask[complete]>=2024.10",
+    "pystac>=1.11",
+    # NASA Earthdata auth helper. Handles the URS bearer-token + S3 redirect
+    # chain for HLS / LP DAAC assets so we don't reimplement it. Justified by
+    # PRE_DEV_CHECKLIST item B.21 (Earthdata Login required for HLS).
+    "earthaccess>=0.11",
 
     # Vector / OSM
-    "geopandas>=1.0,<2.0",
-    "shapely>=2.0,<3.0",
-    "pyproj>=3.7,<4.0",
-    "fiona>=1.10,<2.0",
-    "duckdb>=1.1,<2.0",
-    "pyarrow>=18.0,<19.0",
-    "osmnx>=1.9,<2.0",          # convenience for OSM queries; alternative to raw Overpass
+    "geopandas>=1.0",
+    "shapely>=2.0",
+    "pyproj>=3.7",
+    "fiona>=1.10",
+    "duckdb>=1.1",
+    "pyarrow>=18.0",
+    "osmnx>=1.9",               # convenience for OSM queries; alternative to raw Overpass
 
-    # ML — baseline path (mandatory)
-    "torch>=2.4,<3.0",
-    "torchvision>=0.19,<0.20",
-    "transformers>=4.45,<5.0",
-    "torchgeo>=0.6,<0.7",
+    # ML — baseline path (mandatory).
+    # The PyTorch ecosystem is interlocked; the floors below are the minima
+    # that satisfy terratorch 1.2's transitive requirements. We let upstream
+    # packages constrain each other for upper bounds.
+    "torch>=2.6",
+    "torchvision>=0.21",
+    "torchgeo>=0.9",            # 0.9 ships SOFTCON weights that terratorch 1.2 imports
+    "transformers>=4.50",
+    "lightning>=2.4",           # explicit; was transitive via terratorch
+    "peft>=0.13",               # LoRA fine-tuning, explicit
+    "safetensors>=0.4",         # modern checkpoint format
 
-    # ML — foundation-model path (optional but pinned)
-    "terratorch>=0.5,<0.6",
+    # ML — foundation-model path (Prithvi-EO 2.0, Clay v1.5).
+    # Optional in spirit (the SegFormer baseline must ship without it),
+    # mandatory in deps so a clean install includes it.
+    "terratorch>=1.2",
 
     # Validation, schemas
-    "pydantic>=2.9,<3.0",
-    "jsonschema>=4.23,<5.0",
-    "stac-validator>=3.5,<4.0",
+    "pydantic>=2.9",
+    "jsonschema>=4.23",
+    "stac-validator>=3.5",
 
     # CLI / app
-    "typer>=0.13,<0.14",
-    "rich>=13.9,<14.0",
-    "pyyaml>=6.0,<7.0",
+    "typer>=0.13",
+    "rich>=13.9",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+# Same lower-bound-only policy as the main `dependencies` block.
 dev = [
-    "pytest>=8.3,<9.0",
-    "pytest-cov>=5.0,<6.0",
-    "hypothesis>=6.115,<7.0",
-    "ruff>=0.7,<0.8",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.115",
+    "ruff>=0.7",
     "pyright>=1.1.385",
-    "pre-commit>=4.0,<5.0",
+    "pre-commit>=4.0",
     "ipykernel",
 ]
 
 serve = [
-    "fastapi>=0.115,<0.116",
-    "uvicorn[standard]>=0.32,<0.33",
-    "asyncpg>=0.30,<0.31",
-    "sqlalchemy[asyncio]>=2.0,<3.0",
-    "alembic>=1.14,<2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "asyncpg>=0.30",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.14",
 ]
 
 [project.scripts]
@@ -86,7 +111,7 @@ packages = ["src/wildfire_exposure_eo"]
 # ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "scripts", "tests"]
 
 [tool.ruff.lint]
@@ -102,7 +127,14 @@ select = [
     "ARG",              # unused arguments
     "RUF",              # ruff-specific
 ]
-ignore = []
+ignore = [
+    "B008",     # function call in argument defaults — idiomatic for Typer (typer.Option)
+    "RUF001",   # ambiguous Unicode in strings — we use ×, ≥, ≤, ≈ intentionally
+    "RUF002",   # ambiguous Unicode in docstrings — same reason
+    "TCH003",   # stdlib imports in type-checking block — Path is used at runtime via Typer defaults
+                # (old name; newer ruff remaps to TC003 and emits a harmless deprecation warning.
+                # Kept as TCH003 for compatibility with pinned ruff in .pre-commit-config.yaml.)
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ARG001"]
@@ -115,7 +147,7 @@ ignore = []
 include = ["src", "scripts", "tests"]
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 
 # ---------------------------------------------------------------------------
 # Pytest

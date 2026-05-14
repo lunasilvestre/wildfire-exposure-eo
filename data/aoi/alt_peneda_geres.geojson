@@ -1,0 +1,36 @@
+{
+  "type": "FeatureCollection",
+  "name": "wildfire-exposure-eo alt AOI — Peneda-Gerês",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Peneda-Gerês National Park (Viana do Castelo flank)",
+        "iso3166_2": "PT-16",
+        "description": "Alternative pilot AOI centered on the July–August 2025 Peneda-Gerês fire — started 26 July 2025 inside the PNPG, the single largest event of the worst Portuguese fire season since 2017 (>200,000 ha nationally, 2.3% of national territory). Most severe district response of the season was Viana do Castelo with ~622 firefighters deployed.",
+        "rationale": "Most recent extreme-burn case at AOI-freeze time, protected-area context (PNPG / Rede Natura 2000), trans-district fire behaviour, contrasts the Centro pilot with a Norte-mountain regime (granite, shrub-dominated fuel, different fire-weather drivers).",
+        "source": "Alternative for PRE_DEV_CHECKLIST.md item D — see docs/aoi_rationale.md.",
+        "bbox_wgs84": [-8.452, 41.715, -8.087, 41.985],
+        "approx_size_km": "~30 x ~30",
+        "primary_district": "Viana do Castelo (PT-16)",
+        "secondary_districts": ["Braga (PT-03)", "Vila Real (PT-17)"]
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.452, 41.715],
+            [-8.087, 41.715],
+            [-8.087, 41.985],
+            [-8.452, 41.985],
+            [-8.452, 41.715]
+          ]
+        ]
+      }
+    }
+  ]
+}

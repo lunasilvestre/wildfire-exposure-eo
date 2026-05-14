@@ -1,0 +1,61 @@
+# Pre-commit hooks for wildfire-exposure-eo
+# ──────────────────────────────────────────
+# Mirrors the gates in CLAUDE.md → "Required commands before declaring a task
+# complete". Ruff (lint + format) and the small hygiene hooks run on every
+# commit. Pyright is `manual` stage — too slow to run on every commit, invoked
+# explicitly via:
+#
+#   uv run pre-commit run pyright --hook-stage manual --all-files
+#
+# Bump revs with: pre-commit autoupdate
+# Install on a fresh checkout with:
+#
+#   uv run pre-commit install
+#   uv run pre-commit install --hook-type pre-push
+#
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+      - id: check-yaml
+        # Allow custom tags in inventory.yaml (none today but future-proofing).
+        args: [--unsafe]
+      - id: check-toml
+      - id: check-added-large-files
+        # Block accidental commits of imagery, COGs, GeoParquet, checkpoints.
+        args: [--maxkb=2000]
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Pyright runs in the project venv so it sees pinned types from pyproject.
+  # Manual stage: invoke explicitly when type-relevant files change, or on
+  # pre-push via the optional pre-push hook installed above.
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (manual)
+        entry: uv run pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
+
+  # uv keeps pyproject.toml ↔ uv.lock consistent. This block warns if a commit
+  # touches pyproject.toml without bumping uv.lock.
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.4.27
+    hooks:
+      - id: uv-lock

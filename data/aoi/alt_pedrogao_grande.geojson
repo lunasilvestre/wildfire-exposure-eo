@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "name": "wildfire-exposure-eo alt AOI — Pedrógão Grande / Pampilhosa da Serra",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Pedrógão Grande / Pampilhosa da Serra (2017 mega-fire scar)",
+        "iso3166_2": "PT-10",
+        "description": "Alternative pilot AOI covering the 2017 mega-fire complex — the deadly June 2017 Pedrógão Grande fire (66 fatalities) and the October 2017 Centro complex that swept Pampilhosa da Serra and Lousã. Long-term reference signal for ICNF Áreas Ardidas, dense OSM critical-infrastructure coverage validated via scripts/00_overpass_smoke.py.",
+        "rationale": "Strongest historical-burn signal in continental Portugal, validated infra coverage, canonical reference for Portuguese fire research. Was the original pilot before being demoted to alternative — see docs/aoi_rationale.md.",
+        "source": "Originally pilot.geojson; renamed per AOI freeze on 2026-05-07.",
+        "bbox_wgs84": [-8.30, 39.80, -7.70, 40.30],
+        "approx_size_km": "~52 x ~55 (oversized vs 30 x 30 spec)",
+        "primary_district": "Leiria (PT-10)",
+        "secondary_districts": ["Coimbra (PT-06)", "Castelo Branco (PT-05)"],
+        "provenance_note": "Bbox matches the region validated in scripts/00_overpass_smoke.py (>0 power=tower features confirmed). Size exceeds 30 x 30 km spec — accepted as historical precedent."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.30, 39.80],
+            [-7.70, 39.80],
+            [-7.70, 40.30],
+            [-8.30, 40.30],
+            [-8.30, 39.80]
+          ]
+        ]
+      }
+    }
+  ]
+}

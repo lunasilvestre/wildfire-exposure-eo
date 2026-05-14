@@ -1,0 +1,76 @@
+# config/exposure_score.yaml
+# ───────────────────────────────────────────────────────────────────
+# Composite per-asset wildfire-exposure score.
+#
+# The score is a deliberately transparent linear combination of
+# normalised features. No black-box ensemble; any reviewer should be
+# able to read the formula here and reproduce a per-asset score by
+# hand if they had to.
+#
+# Output:    0.0 - 1.0 per asset, percentile-ranked within the AOI.
+# Semantics: RELATIVE rank, not a calibrated probability.
+#            See CLAUDE.md non-negotiable #6.
+#
+# Weights MUST sum to 1.0. CI asserts this.
+# ───────────────────────────────────────────────────────────────────
+
+version: "0.1.0"
+formula: "linear_combination"
+normalization: "percentile_rank_within_aoi"
+
+weights:
+  # Fuel character (Stage 1 model output)
+  fuel_class_severity_weight: 0.30   # crosswalk-derived per-class severity
+
+  # Vegetation structure (canopy height)
+  canopy_height_p90_m: 0.20          # ETH GCH 10m, p90 inside buffer
+
+  # Topographic forcing
+  slope_max_deg: 0.10                # Cop-DEM GLO-30, max slope inside buffer
+
+  # Burn history (decadal pattern; ICNF Áreas Ardidas, ~1-year publication lag)
+  historical_burn_share: 0.15
+
+  # Current-season burn signal (Prithvi-Burn-Scar inference on S2, last 12 months)
+  recent_burn_share_12mo: 0.10
+
+  # Recent spectral change (Sentinel-2 spring-vs-late-summer NBR delta)
+  nbr_delta_recent: 0.05
+
+  # Fire-weather multiplier (optional; IPMA daily FWI)
+  fwi_p95_recent_season: 0.10
+
+# ───────────────────────────────────────────────────────────────────
+# Feature normalisation
+# ───────────────────────────────────────────────────────────────────
+# Each feature is rank-transformed within the AOI before weighting,
+# producing comparable [0,1] inputs regardless of native units. This
+# eliminates the need for hand-tuned scaling and keeps the score
+# interpretable as "where does this asset sit in the AOI distribution
+# of feature X?"
+feature_normalization:
+  default: "percentile_rank"
+  per_feature_overrides: {}          # exceptions go here, with comments
+
+# ───────────────────────────────────────────────────────────────────
+# Aggregation across asset-class portfolios
+# ───────────────────────────────────────────────────────────────────
+# When asked "what is my circuit-level / municipality-level exposure?",
+# we aggregate per-asset scores weighted by `criticality_weight` from
+# data/taxonomy/critical_infrastructure.yaml.
+portfolio_aggregation:
+  method: "criticality_weighted_mean"
+  criticality_source: "data/taxonomy/critical_infrastructure.yaml"
+
+# ───────────────────────────────────────────────────────────────────
+# Calibration
+# ───────────────────────────────────────────────────────────────────
+# We REPORT calibration against historical-burn validation. We do NOT
+# promise calibrated probabilities. See docs/validation_report.md.
+calibration:
+  method: "report_only"
+  validation_target: "icnf-areas-ardidas-2017-2024"
+  metrics:
+    - "lift_chart"
+    - "spearman_rank_correlation"
+    - "brier_score"

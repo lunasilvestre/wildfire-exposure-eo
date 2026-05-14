@@ -1,0 +1,61 @@
+{
+  "type": "FeatureCollection",
+  "name": "smoke tile picked for alt_peneda_geres",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "smoke tile inside Peneda-Gerês National Park (Viana do Castelo flank)",
+        "iso3166_2": "PT-16",
+        "description": "~1 km × 1 km tile picked by scripts/pick_smoke_tile.py against alt_peneda_geres.geojson. Qualifies = power_tower≥1 AND building≥1 AND highway≥1 AND intersects ICNF burn.",
+        "bbox_wgs84": [
+          -8.204200000000018,
+          41.85900000000001,
+          -8.192400000000019,
+          41.86800000000001
+        ],
+        "picker_score": {
+          "towers": 3,
+          "buildings": 312,
+          "highways": 35,
+          "intersects_burn": true,
+          "qualifies": true,
+          "feature_total": 350
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -8.192400000000019,
+              41.85900000000001
+            ],
+            [
+              -8.192400000000019,
+              41.86800000000001
+            ],
+            [
+              -8.204200000000018,
+              41.86800000000001
+            ],
+            [
+              -8.204200000000018,
+              41.85900000000001
+            ],
+            [
+              -8.192400000000019,
+              41.85900000000001
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

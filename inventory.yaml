@@ -45,6 +45,31 @@ collections:
       model_id: "fuel-class-segformer-b0"
       model_version: "0.0.1"
 
+  burn-scar-recent:
+    title: "Recent burn-scar probability (Prithvi-Burn-Scar)"
+    description: "Per-tile burn-probability raster over the AOI for the trailing 12 months, derived by running the Prithvi-EO 2.0 burn-scar downstream task over Sentinel-2 L2A imagery. Fills the gap between the latest ICNF Áreas Ardidas vintage and current date."
+    group: wildfire-exposure-eo
+    r2_pattern: "burn-scar-recent/{run_id}/{tile_id}.tif"
+    bbox: [-8.598, 40.605, -8.242, 40.875]   # PT-01 Sever do Vouga pilot AOI
+    crs: "EPSG:4326"
+    bands: 1
+    dtype: float32
+    nodata: -9999.0
+    statistics: { min: 0.0, max: 1.0 }
+    rescale: [0.0, 1.0]
+    colormap: ylorrd
+    temporal:
+      resolution: per-run-with-trailing-12mo-window
+      start: null
+      end: null
+    provenance:
+      requires:
+        - sentinel-2-l2a
+      model_id: "prithvi-eo-2.0-burn-scar"
+      model_version: "TBD-at-audit"       # CLAUDE.md non-negotiable #1
+      framework: "terratorch>=1.2"
+      notes: "Detects burn SCARS (post-event), not ignitions. Threshold-binarised downstream for the per-asset recent_burn_share_12mo feature."
+
   exposure-raster:
     title: "Wildfire exposure raster (per-tile composite score)"
     description: "Composite exposure raster aggregated from fuel class, canopy height, slope, and historical-burn priors."
@@ -65,6 +90,7 @@ collections:
     provenance:
       requires:
         - fuel-class
+        - burn-scar-recent
         - cop-dem-glo-30
         - eth-canopy-height-2020
         - icnf-burned-areas

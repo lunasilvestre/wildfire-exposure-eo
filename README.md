@@ -8,12 +8,12 @@ A STAC-native pipeline that scores OpenStreetMap-derived critical infrastructure
 
 Critical infrastructure — power lines, substations, transformers, water-treatment plants, telecom towers, hospitals, schools, emergency-services facilities — is unevenly exposed to wildfire risk. Static hazard maps published by national agencies tend to be land-cover-driven, slow to update, and asset-agnostic. This project produces a per-asset wildfire-exposure score, derived from current-year EO data and validated against historical burn outcomes, scoped initially to a single Portuguese fire district as a methodology demonstrator.
 
-The methodology generalizes nationally and beyond. The pilot is intentionally small so that every claim in the README is reproducible end-to-end on a fresh clone in under 30 minutes on CPU with pretrained checkpoints.
+The methodology generalizes nationally and beyond. The pilot is intentionally small so that the demo target — end-to-end on a fresh clone in *target wall-clock* under 30 minutes on CPU with pretrained checkpoints — is achievable. Some stages (foundation-model fuel-class fine-tuning, full Prithvi-Burn-Scar inference) run on the `atlas` GPU host and are skipped or replaced with pre-baked artefacts in the CPU demo; see [`docs/methodology.md`](docs/methodology.md).
 
 ## What this is not
 
 - Not a fire-spread or fire-behaviour simulation. We score relative exposure, not absolute probability.
-- Not a replacement for utility-grade vegetation management products (e.g., Overstory). Those use sub-meter commercial imagery, proprietary canopy-instance segmentation, and customer-validated ground truth. This is a public-data demonstrator that mirrors the *operational shape* of those products under open-data constraints.
+- Not a replacement for commercial utility vegetation management products. Those use sub-meter commercial imagery, proprietary canopy-instance segmentation, and customer-validated ground truth. This is a public-data demonstrator that mirrors the *operational shape* of those products under open-data constraints.
 - Not deployed as a live service. The deliverable is a reproducible repo + STAC catalog + GeoParquet asset table.
 
 ## Architecture
@@ -54,7 +54,9 @@ The methodology generalizes nationally and beyond. The pilot is intentionally sm
 
 ## Pilot AOI
 
-Default: **Pampilhosa da Serra + Pedrógão Grande district**, central Portugal. ~30 × 30 km bbox covering a region with documented high historical burn frequency, sparse population, high-voltage REN transmission, and dense distribution-network OSM coverage. Frozen as a single GeoJSON in `data/aoi/pilot.geojson` so every artifact references the same geometry.
+**Sever do Vouga / Albergaria-a-Velha / Oliveira de Azeméis** (Aveiro, PT-01) — bbox `[-8.598, 40.605, -8.242, 40.875]`, ~30 × 30 km. Chosen for documented historical burn frequency, mixed eucalyptus / Pinus pinaster / shrubland cover typical of the Atlantic Centro-Norte regime, dense REN + distribution OSM coverage, and sparse population. See `docs/aoi_rationale.md` for the full justification and the three alternatives retained on disk. Frozen as a single GeoJSON in `data/aoi/pilot.geojson` so every artifact references the same geometry.
+
+A 1 × 1 km smoke AOI under `data/aoi/smoke.geojson`, centred on Sever do Vouga town, is the development-loop target.
 
 Generalizable to any AOI by editing `data/aoi/pilot.geojson` and re-running the pipeline.
 
@@ -79,13 +81,17 @@ All sources are public, STAC-native where possible, COG-friendly, and citable.
 
 | Layer | Source | Format | Role |
 |---|---|---|---|
+| DGT COSc 2023/2024 | DGT (SMOS, Sentinel-2 ML pipeline) | 10 m raster, CC-BY 4.0 | **PRIMARY** — coarse fuel-cover weak labels (4 classes) for fuel-class training |
+| DGT COS 2018 / 2023 | DGT INSPIRE | GeoPackage, CC-BY 4.0 | **PRIMARY** — species-level fine labels (Pinus, Eucalyptus, Quercus splits) |
+| EFFIS European Fuel Map | JRC / Copernicus | GeoTIFF, free | **REFERENCE** — international NFFL-13 crosswalk anchor |
+| Scott & Burgan FBFM40 | USFS / LANDFIRE | reference document | International fuel-model framework |
 | ICNF Áreas Ardidas | ICNF (Instituto da Conservação da Natureza e Florestas) | annual polygons (Shapefile/GPKG) | Validation ground truth, history feature |
-| ICNF Carta de Combustíveis Florestais | ICNF | raster | National fuel-class taxonomy |
-| Scott & Burgan FBFM40 | USFS / NREL | reference document | International fuel-model crosswalk |
+| ICNF Carta de Combustíveis Florestais | ICNF | raster | **FUTURE** — national alignment target; no public direct-download URL (2026-05-07) |
 | EFFIS Burned Area | JRC / Copernicus | annual polygons | Cross-border validation, EU-wide future scope |
 | VIIRS NRT Active Fire | NASA FIRMS | CSV / GeoJSON | Recent fires (optional, contextual) |
 | IPMA Daily FWI | IPMA | grid | Fire-weather multiplier (optional) |
-| Carta de Ocupação do Solo (COS) | DGT (Direção-Geral do Território) | vector | Portuguese land-cover reference |
+
+The full taxonomy chain — DGT COSc + COS (operational inputs) → 9 internal classes (model output) → ICNF CCF (future alignment) + NFFL-13 via EFFIS (international reference) + FBFM40 (fire-behaviour modelling) — is documented in [`data/crosswalks/icnf_to_scott_burgan.yaml`](data/crosswalks/icnf_to_scott_burgan.yaml).
 
 ### Critical infrastructure
 
@@ -122,11 +128,21 @@ Two stages, each with a documented baseline and an optional foundation-model var
 
 ### Stage 1 — fuel-class segmentation
 
-**Task.** Pixel-level segmentation of Sentinel-2 imagery into a coarse fuel-class taxonomy aligned to ICNF's Carta de Combustíveis Florestais and crosswalked to Scott & Burgan FBFM40 for international readability. Target: ~6–8 classes (e.g., conifer-closed, conifer-open, broadleaf-closed, broadleaf-open, shrub-tall, shrub-low, grass, non-fuel).
+**Task.** Pixel-level segmentation of Sentinel-2 imagery into the project's 9-class internal fuel taxonomy (`non-fuel`, `grass`, `shrub-low`, `shrub-tall`, `broadleaf-open`, `broadleaf-closed`, `conifer-open`, `conifer-closed`, `mixed-forest`), crosswalked to NFFL-13 via EFFIS for international readability and to Scott & Burgan FBFM40 for fire-behaviour modelling. ICNF's Carta de Combustíveis Florestais is the alignment target once obtainable, but is *not* the training input — see `data/crosswalks/icnf_to_scott_burgan.yaml` for the full chain.
 
-**Baseline (must ship).** SegFormer-B0 trained from a small labeled subset derived from ICNF's existing fuel raster as a weak label, with a pre-fire / post-fire NDVI/NBR delta as auxiliary input. Pure PyTorch + `transformers`, no TerraTorch. This is the reproducibility floor.
+**Baseline (must ship).** SegFormer-B0 trained on weak labels combining (a) DGT COSc 2024 4-class fuel-cover for the fuel / non-fuel and shrub / forest splits, (b) DGT COS 2023 species codes for the broadleaf / conifer / mixed and Pinus / Eucalyptus / Quercus splits, with Sentinel-2 NDVI/NBR seasonal delta + Sentinel-1 cross-pol ratio as auxiliary input features for canopy openness. Pure PyTorch + `transformers`, no TerraTorch. This is the reproducibility floor.
 
 **Foundation-model variant (nice-to-have).** Prithvi-EO 2.0 or Clay v1.5, fine-tuned with LoRA via TerraTorch. Documented as a comparison: same val split, same metrics, side-by-side IoU and class-confusion table. Demonstrates current-EO-ML literacy without making the pipeline depend on it.
+
+### Stage 1b — burn-scar inference (recent burns)
+
+**Task.** Detect burn scars in Sentinel-2 imagery over the past 12 months across the AOI, producing a per-pixel burn-probability raster. This fills the gap between the latest published [ICNF Áreas Ardidas](docs/data_sources.md) vintage (~1-year lag) and "right now"; it captures the current fire season the historical layer cannot.
+
+**Model.** [Prithvi-EO 2.0](https://github.com/NASA-IMPACT/Prithvi-EO-2.0) with the burn-scar downstream task — the canonical reference application of the model family and the one with the most public validation. Fine-tune is invoked via TerraTorch with a YAML config; backbone weights are frozen for inference-only operation. The exact Hugging Face model ID is verified at audit time and recorded in the provenance dict (see CLAUDE.md non-negotiable #1).
+
+**Output.** A burn-probability COG over the AOI, threshold-binarised for the per-asset `recent_burn_share_12mo` feature in Stage 2.
+
+**What this is not.** Not ignition prediction. We detect burn *scars* — visible post-event spectral signatures — not forecasts of where fires will start. See CLAUDE.md anti-patterns.
 
 ### Stage 2 — per-asset feature extraction + exposure score
 
@@ -143,19 +159,23 @@ For each OSM asset, buffer by a class-specific radius (e.g., 30 m for power line
 | `aspect_southness` | DEM | sin/cos transform, mean |
 | `historical_burn_count_25y` | ICNF Áreas Ardidas | count of polygons intersecting the buffer in last 25 years |
 | `historical_burn_share` | ICNF Áreas Ardidas | fraction of buffer area burned in last 25 years |
+| `recent_burn_share_12mo` | **Stage 1b — Prithvi-Burn-Scar → S2** | fraction of buffer area flagged as burned in past 12 months |
 | `nbr_delta_recent` | Sentinel-2 spring vs late-summer | mean |
 | `fwi_p95_recent_season` | IPMA | 95th percentile (optional) |
 
 The composite exposure score is a transparent linear combination of normalized features with documented weights. No black-box ensemble. The point is auditability: any utility analyst should be able to read the score formula in five lines of YAML.
 
+Materialised in [`config/exposure_score.yaml`](config/exposure_score.yaml):
+
 ```yaml
-# config/exposure_score.yaml — illustrative
+# config/exposure_score.yaml
 weights:
   fuel_class_severity_weight: 0.30
   canopy_height_p90_m: 0.20
   slope_max_deg: 0.10
-  historical_burn_share: 0.20
-  nbr_delta_recent: 0.10
+  historical_burn_share: 0.15        # decadal pattern (ICNF, ~1-yr lag)
+  recent_burn_share_12mo: 0.10       # current season (Prithvi-Burn-Scar, monthly)
+  nbr_delta_recent: 0.05
   fwi_p95_recent_season: 0.10
 normalization: percentile_rank_within_aoi
 ```
@@ -202,7 +222,7 @@ pytest, hypothesis, ruff, pyright, pre-commit
 
 ### Why these and not others
 
-- **STAC + stackstac/odc-stac** is the modern best practice for satellite ingestion. Eliminates manual scene download, makes provenance auto-citable. DevSeed-aligned.
+- **STAC + stackstac/odc-stac** is the modern best practice for satellite ingestion. Eliminates manual scene download, makes provenance auto-citable.
 - **TorchGeo** for samplers/transforms is canonical. We're not reinventing tile-grid logic.
 - **TerraTorch** is included as the modern path for foundation-model fine-tuning, but the project does not depend on it. The SegFormer baseline ships first.
 - **GeoParquet** for vector outputs (not Shapefile, not GeoPackage as primary). Modern, columnar, plays with DuckDB and the broader Lake stack.
@@ -347,7 +367,7 @@ uv run wildfire-exposure-eo demo             # end-to-end on pilot AOI, pretrain
 ## Definition of done
 
 - Public repo, MIT license, green CI on `main`.
-- `uv run wildfire-exposure-eo demo` runs end-to-end on a fresh clone in under 30 minutes on CPU using pretrained checkpoints.
+- Target: `uv run wildfire-exposure-eo demo` runs end-to-end on a fresh clone in under 30 minutes on CPU using pretrained checkpoints distributed as GitHub release attachments. The foundation-model variant and full Prithvi-Burn-Scar inference are gated behind explicit flags and `atlas` GPU access — see [`docs/methodology.md`](docs/methodology.md) → "Demo command, 30-minute CPU budget".
 - A STAC 1.1 catalog under `stac/` validates with `stac-validator --recursive`.
 - A GeoParquet asset table under `outputs/parquet/` validates against the documented schema.
 - `docs/validation_report.md` reports lift, Spearman, and Brier against ICNF burns 2017–24, with a calibration plot.
@@ -355,15 +375,15 @@ uv run wildfire-exposure-eo demo             # end-to-end on pilot AOI, pretrain
 - Training is reproducible on `atlas` (RTX 3090); training run log + metrics committed under `docs/training_runs/`.
 - `CLAUDE.md` enforced by CI and pre-commit (see [`CLAUDE.md`](CLAUDE.md)).
 
-## What this signals
+## Acknowledgments
 
-For a hiring manager at Overstory or DevSeed-style EO consultancies, this repo is meant to demonstrate, in order:
+This repo is heavily AI-augmented. Most of the prose, the YAML, the documentation scaffolding, and a lot of the structural code came out of Claude Code sessions. The decisions — pilot AOI, taxonomy boundaries, score formula, *"drop the upper-bound pins"*, *"the README sounds like job-application bait, fix it"*, *"Prithvi burn-scar is not ignition prediction"* — came out of me pushing back on it.
 
-1. **Operational understanding** — span/asset-level scoring with full provenance, not pixel art.
-2. **Modern EO best practice** — STAC-native, COG-only outputs, GeoParquet vector outputs, foundation-model literacy with classical baselines.
-3. **Engineering discipline** — `uv`, `ruff`, `pyright`, alembic-style migrations (where relevant), pinned deps, schema validation, deterministic runs, golden-file regression tests.
-4. **Domain literacy** — ICNF fuel taxonomy, Scott & Burgan crosswalk, Portuguese fire context, OSM critical-infrastructure taxonomy as a citable artifact.
-5. **Honest scope** — clearly bounded pilot, transparent score formula, validation against held-out historical outcomes, explicit limitations.
+Think of it as pair programming where one partner never sleeps and the other one has the taste. The [`CLAUDE.md`](CLAUDE.md) in this repo is longer than most production READMEs because that's where the actual contract lives: the AI does the verbose work, the human keeps judgment.
+
+If *"AI slop"* is hovering in the back of your mind while reading this — fair. The CI gates (`ruff`, `pyright`, schema validation, weights-sum-to-1.0 assertion), the verify-then-act protocol, and the anti-pattern list in [`CLAUDE.md`](CLAUDE.md) are there for exactly that reason. They don't care who typed which character; they care whether the thing is right.
+
+*(Yes, Claude wrote this acknowledgments section too. The recursion is intentional.)*
 
 ## License
 
@@ -371,10 +391,10 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Citation
 
-If you reference this in a talk, paper, or hiring conversation:
+If you reference this in a talk, paper, or write-up:
 
 ```
-Silvestre, N. (2026). wildfire-exposure-eo: a STAC-native pipeline for
+Silvestre, N. et Claude (Anthropic) (2026). wildfire-exposure-eo: a STAC-native pipeline for
 scoring critical infrastructure by wildfire exposure.
 https://github.com/lunasilvestre/wildfire-exposure-eo
 ```

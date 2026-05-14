@@ -61,3 +61,35 @@ Thumbs.db
 mlruns/
 mlflow.db
 wandb/
+
+# Training logs (PyTorch Lightning default writes to lightning_logs/;
+# TensorBoard writes to runs/ by default; both must stay out of git)
+*.log
+logs/
+lightning_logs/
+runs/
+tensorboard/
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# Profiling
+*.prof
+prof/
+
+# Editor / misc temp files
+*.tmp
+*.bak
+*~
+
+# Claude Code per-user settings — shared .claude/settings.json IS commit-worthy,
+# but per-user overrides and credentials must stay local
+.claude/settings.local.json
+.claude/.credentials.json
+
+# NOTE: uv.lock is INTENTIONALLY committed (not ignored) — CI uses `uv sync --locked`
+# for reproducibility. Don't add `uv.lock` to this file.

@@ -8,27 +8,28 @@ Estimated time: **3–4 hours** of focused work.
 
 ## A. Hardware & local environment
 
-- [ ] **`atlas` (RTX 3090) reachable.** SSH, GPU visible to `nvidia-smi`, free disk ≥ 100 GB on training volume.
-- [ ] **CUDA toolchain.** Driver ≥ 535, CUDA 12.1 runtime present, `python -c "import torch; print(torch.cuda.is_available())"` returns `True`.
-- [ ] **Local dev machine.** `uv` installed, `uv --version` ≥ 0.4. `pre-commit` installed system-wide.
-- [ ] **Disk plan.** Decide where `outputs/` lives. Default: project-local. Confirm at least 50 GB free.
-- [ ] **VS Code / editor.** Pyright LSP enabled, ruff extension active, working against the project venv.
+- [x] **`atlas` (RTX 3090) reachable.** SSH, GPU visible to `nvidia-smi`, free disk ≥ 100 GB on training volume.
+- [x] **CUDA toolchain.** Driver 595.71.05 (≥ 535), CUDA 13.2 runtime present, `python -c "import torch; print(torch.cuda.is_available())"` returns `True`.
+- [x] **Local dev machine.** `uv` installed, `uv --version` ≥ 0.4. `pre-commit` installed system-wide.
+- [x] **Disk plan.** Decide where `outputs/` lives. Default: project-local. Confirm at least 50 GB free.
+- [x] **VS Code / editor.** Pylance (Pyright LSP) + `charliermarsh.ruff` v2026.40.0 installed; `.vscode/settings.json` pins interpreter to `.venv/bin/python`, sets Ruff as default Python formatter (format-on-save + fixAll + organizeImports), Pylance type-checking mode `standard`.
 
 ## B. Accounts & API access
 
-- [ ] **GitHub.** New empty public repo `lunasilvestre/wildfire-exposure-eo` created. Default branch `main`. Branch protection: required PR reviews on, required status checks on once CI exists.
-- [ ] **Microsoft Planetary Computer.** Free account; verify `pystac-client` can list `sentinel-2-l2a`, `sentinel-1-grd`, `cop-dem-glo-30`, `esa-worldcover` collections. Save a short script under `scripts/00_pc_smoke.py` that queries and exits 0.
-- [ ] **NASA Earthdata Login.** Required for HLS access via LP DAAC STAC. Token saved in `~/.netrc`.
-- [ ] **OSM Overpass.** No account needed. Note primary endpoint + at least one fallback.
-- [ ] **ICNF data download.** Confirm direct-download URLs for: Áreas Ardidas (annual, 1990–latest), Carta de Combustíveis Florestais. Save a one-liner `wget`/`curl` command per dataset under `scripts/00_icnf_fetch.sh`.
-- [ ] **DGT INSPIRE.** Browse the DGT geoportal and confirm COS 2018 (or latest) is fetchable.
+- [x] **GitHub.** New empty public repo `lunasilvestre/wildfire-exposure-eo` created. Default branch `main`. Branch protection: required PR reviews on, required status checks on once CI exists.
+- [x] **Microsoft Planetary Computer.** Free account; verify `pystac-client` can list `sentinel-2-l2a`, `sentinel-1-grd`, `cop-dem-glo-30`, `esa-worldcover` collections. Save a short script under `scripts/00_pc_smoke.py` that queries and exits 0.
+- [x] **NASA Earthdata Login.** Required for HLS access via LP DAAC STAC. Token saved in `~/.netrc`.
+- [x] **OSM Overpass.** No account needed. Note primary endpoint + at least one fallback.
+- [x] **ICNF data download.** Direct-download URLs confirmed (HEAD HTTP 200) and codified in `scripts/00_icnf_fetch.sh`: Áreas Ardidas 1975–2025 via the ICNF ArcGIS REST MapServer, plus RPFGC (fuel-management strips) and Perigosidade Estrutural 2020–2030 as substitutes. The national Carta de Combustíveis Florestais has **no public direct-download URL** (verified 2026-05-07 against geocatalogo.icnf.pt, sigservices.icnf.pt, fogos.icnf.pt). Pilot pivots to DGT COSc + EFFIS for fuel cover (see next item and `scripts/00_effis_fetch.sh`); ICNF CCF tracked as future-work alignment.
+- [x] **DGT INSPIRE.** COS 2018 v3 and COS 2023 v1 (Série 2, GeoPackage, EPSG:3763) confirmed fetchable from `geo2.dgterritorio.gov.pt` (HEAD HTTP 200, ~858 MB each); COSc 2023 and COSc 2024 Pré-Verão likewise. Codified in `scripts/00_dgt_fetch.sh`. INSPIRE record id `b498e89c-1093-4793-ad22-63516062891b` (SNIG canonical; the inspire-geoportal.ec.europa.eu mirror was 404 on 2026-05-07).
+- [x] **EFFIS European Fuel Map.** Pan-European 13-class NFFL fuel-class GeoTIFF confirmed fetchable from `forest-fire.emergency.copernicus.eu/applications/data-and-services` (no auth, free). Codified in `scripts/00_effis_fetch.sh`. Reference paper: [Aragoneses et al. 2023, ESSD](https://essd.copernicus.org/articles/15/1287/2023/). Used as the international-readability crosswalk anchor; see `data/crosswalks/icnf_to_scott_burgan.yaml` under `source_inputs.international_reference`.
 - [ ] **Cloudflare R2 (optional).** If artifacts will be published online: bucket created, API token scoped to that bucket only.
 
 ## C. Data-source health checks (the audit run)
 
 The CLI's `audit` command must return all GREEN before development starts. Implementation note: `audit` is the first script to write — keep it tiny, reuse it forever.
 
-- [ ] `uv run wildfire-exposure-eo audit --aoi data/aoi/pilot.geojson` returns:
+- [x] `uv run wildfire-exposure-eo audit --aoi data/aoi/pilot.geojson` returns:
   - GREEN for Sentinel-2 L2A availability ≥ 50 cloud-free items in the past 24 months
   - GREEN for Sentinel-1 GRD availability ≥ 100 items in the past 24 months
   - GREEN for Cop-DEM GLO-30 coverage of the AOI
@@ -41,59 +42,54 @@ If any row is RED or YELLOW, document the failure in `docs/data_sources.md` befo
 
 ## D. AOI freeze
 
-- [ ] **Pilot AOI selected.** Default: a 30 × 30 km bbox covering the Pampilhosa da Serra / Pedrógão Grande district. Adjust if a stronger justification arises (REN line density, recent burn history, OSM coverage). Document the choice in `docs/aoi_rationale.md`.
-- [ ] **AOI committed.** `data/aoi/pilot.geojson` exists, validates, and contains exactly one polygon feature with a `name` property and an `iso3166_2: "PT-..."` property.
-- [ ] **Smoke AOI committed.** `data/aoi/smoke.geojson` is a 1 × 1 km sub-tile of the pilot AOI for fast development loops.
+- [x] **Pilot AOI selected.** Aveiro / Sever do Vouga (PT-01) — see `docs/aoi_rationale.md`. Three alternatives retained on disk for re-selection.
+- [x] **AOI committed.** `data/aoi/pilot.geojson` is a single Polygon feature with `name = "Sever do Vouga / Albergaria-a-Velha / Oliveira de Azeméis"` and `iso3166_2 = "PT-01"`. Bbox `[-8.598, 40.605, -8.242, 40.875]` (~30 × 30 km).
+- [x] **Smoke AOI committed.** `data/aoi/smoke.geojson` is a ~1 × 1 km tile centred on Sever do Vouga town (40.733°N, -8.367°W); verified inside the pilot bbox.
 
 ## E. Reference reading completed
 
 The team (you + Claude Code) operates on the same reference frame. Do this once, then the assertions in CLAUDE.md mean what they say.
 
-- [ ] **Overstory product surface.** Read [Overstory case studies](https://www.overstory.com/case-studies). Capture vocabulary into `docs/glossary.md`: *strike trees, hazard trees, hot spots, clear spans, span-level, fuel load, canopy base height, canopy bulk density, condition-based vs cycle-based trimming*.
-- [ ] **Scott & Burgan FBFM40.** Skim the LANDFIRE / USFS reference. Note class definitions in `data/crosswalks/icnf_to_scott_burgan.yaml` (stub OK for now, fill in during dev).
-- [ ] **ICNF fuel-class taxonomy.** Open the Carta de Combustíveis Florestais legend; capture the official class names + codes into `data/crosswalks/icnf_to_scott_burgan.yaml`.
-- [ ] **STAC 1.1 spec.** Skim the [STAC 1.1.0 specification](https://stacspec.org/) — collections, items, common metadata. You'll be writing one.
-- [ ] **TorchGeo intro.** Read the TorchGeo tutorial on samplers + datasets. Decide whether you'll use `RasterDataset` or roll a custom dataset (likely custom, given fuel-class crosswalk needs).
-- [ ] **TerraTorch quickstart.** Read enough to confirm Prithvi-EO 2.0 is reachable from atlas. The foundation-model path is optional — but knowing the cost of using it is mandatory.
-- [ ] **DevSeed eoAPI / VEDA-UI README.** Already shipped via `cheias-pt-*`. Re-read to remember the conventions you've established for yourself.
+- [x] **Utility vegetation-management vocabulary.** Standard industry idiom captured in `docs/glossary.md` → *Domain — utility vegetation management*: *strike trees, hazard trees, hot spots, clear spans, span-level, fuel load, canopy base height, canopy bulk density, condition-based vs cycle-based trimming*.
+- [x] **Scott & Burgan FBFM40.** Skim the LANDFIRE / USFS reference. Note class definitions in `data/crosswalks/icnf_to_scott_burgan.yaml` (stub OK for now, fill in during dev).
+- [x] **Fuel-class taxonomy chain captured.** v0.2.0-stub in `data/crosswalks/icnf_to_scott_burgan.yaml` ships: operational DGT COSc (4 classes) + COS (species splits) as training inputs, 9-class internal taxonomy as model output, full FBFM40 reference table (40 classes), NFFL-13 anchor via EFFIS for international readability, and a PROVISIONAL ICNF taxonomy (Fernandes 2009 + Sá et al. 2023). The ICNF CCF raster has no public direct-download URL (verified 2026-05-07) and is held as `national_alignment_target` in `source_inputs`; replace `icnf_taxonomy:` when the actual CCF legend is captured.
+- [x] **STAC 1.1 spec.** Already operationally fluent — `cheias-pt-stac` ships a STAC 1.1.0 catalog with 9 collections / 1,684 items in production. Conventions captured in `inventory.yaml`.
+- [x] **TorchGeo intro.** Samplers / datasets reviewed; decision is to roll a custom dataset for the fuel-class task given the COSc + COS weak-label fusion in `docs/methodology.md` §6.
+- [x] **TerraTorch quickstart.** Confirmed reachable; integration point is `prompts/03_burn_scar_inference.md` (Stage 1b) and the foundation-model variant in Stage 1.
+- [x] **eoAPI / VEDA-UI conventions.** Already operationally fluent — `cheias-pt-eoapi` and `cheias-pt-veda-ui` shipped. Conventions imported into `inventory.yaml` and `docs/data_sources.md` cross-check.
 
 ## F. Glossary committed
 
-The vocabulary list is the single highest-leverage document. Hiring managers read it. Claude Code references it. It is the keyword index for the entire project.
+The vocabulary list is the single highest-leverage document. External readers reference it. Claude Code references it. It is the keyword index for the entire project.
 
-- [ ] `docs/glossary.md` exists with at minimum:
-  - **EO/STAC terms:** STAC, COG, GeoParquet, asset, item, collection, FBFM40, FWI, NDVI, NBR
-  - **Fire-science terms:** fuel class, fuel load, canopy base height, canopy bulk density, fire-weather index, fireshed
-  - **Domain (Overstory-coded):** span, circuit, hot spot, hazard tree, strike tree, condition-based trimming
-  - **Portuguese terms:** ICNF, AGIF, COS, DGT, REN, e-Redes, área ardida, faixa de gestão de combustíveis
-  - **OSM tags used:** every OSM key/value in `data/taxonomy/critical_infrastructure.yaml`
-- [ ] Each entry: 1–3 sentences + a citation URL where applicable. No jargon dumps without explanation.
+- [x] `docs/glossary.md` exists and covers every required group:
+  - **Project terms:** *exposure score, asset class, internal fuel class* — defines the headline outputs and their relationship to the taxonomies.
+  - **EO/STAC terms:** STAC, Collection, Item, Asset, COG, GeoParquet, eoAPI, VEDA-UI, Sentinel-2 L2A, Sentinel-1 GRD, Cop-DEM GLO-30, ESA WorldCover, ETH GCH, HLS, NDVI/NBR, FWI.
+  - **Fire-science terms:** fuel class / fuel model, FBFM40, Anderson-13 / NFFL, fuel load, CBH, CBD, fireshed, burn severity, dNBR, defensible space.
+  - **Domain (utility vegetation management):** strike tree, hazard tree, hot spot, span, span-/circuit-level, clear span, HRZ, encroachment, trim cycle, condition-based trimming, SAIDI/SAIFI.
+  - **Portuguese terms:** ICNF, AGIF, SGIFR, SGIF, Áreas Ardidas, COS, **COSc**, **SMOS**, DGT, REN, e-Redes, CCF, FGC, RPFGC, ZIF, PNPG, reacendimento.
+  - **OSM tags used:** every key=value pair in `data/taxonomy/critical_infrastructure.yaml` v0.1.0 (power.*, emergency.*, education.*, telecom.*, water.*, transport.*) plus a *Candidates for future taxonomy expansion* section flagging `power=pole`, `highway=*`, `pipeline=*`, etc.
+- [x] Each entry is 1–3 sentences with a citation URL where applicable. Cross-references between sections are inlined for terms shared across domains (e.g. *faixa de gestão de combustíveis* ↔ *defensible space*).
 
 ## G. Working agreement with Claude Code
 
-- [ ] `CLAUDE.md` reviewed and accepted. Anything you disagree with — edit it now, before the first session.
-- [ ] `prompts/01_data_audit.md` exists (stub OK) so the first dev session has a target.
-- [ ] `inventory.yaml` skeleton committed (mirroring `cheias-pt-stac/inventory.yaml`).
-- [ ] `pyproject.toml` exists with the pinned stack (see README → Stack), `uv sync` runs cleanly.
-- [ ] `pre-commit` hooks installed: `ruff`, `ruff-format`, `pyright` (manual stage), end-of-file-fixer, trailing-whitespace, no-merge-conflict.
-- [ ] `.github/workflows/ci.yml` exists and runs on push/PR with: `uv sync`, `ruff check`, `ruff format --check`, `pyright`, `pytest -q`.
+- [x] `CLAUDE.md` reviewed and accepted. 10 non-negotiables in force; 7 anti-patterns (incl. the new "burn-scar ≠ ignition prediction" one); fact-check and verify-then-act protocols documented.
+- [x] `prompts/01_data_audit.md` and `prompts/03_burn_scar_inference.md` shipped; `prompts/_session_log.md` ready to accept session entries.
+- [x] `inventory.yaml` committed with 4 collections (`fuel-class`, `burn-scar-recent`, `exposure-raster`, `exposure-assets`), all mirroring the cheias-pt-stac pattern.
+- [x] `pyproject.toml` ships with lower-bound-only dependency policy (Schreiner principle, documented inline) and the 2026 ML stack (torch>=2.6, torchgeo>=0.9, terratorch>=1.2, transformers>=4.50, lightning, peft, safetensors). `uv.lock` regenerated; `uv sync --locked` is the install command.
+- [x] `.pre-commit-config.yaml` committed with: `ruff` (auto-fix), `ruff-format`, `pyright` (manual stage), `end-of-file-fixer`, `trailing-whitespace`, `check-merge-conflict`, `check-yaml`, `check-toml`, `check-added-large-files` (2 MB cap), `check-case-conflict`, `mixed-line-ending`, plus `uv-lock` to enforce pyproject ↔ uv.lock consistency. **Activate locally** with `uv run pre-commit install && uv run pre-commit install --hook-type pre-push`.
+- [x] `.github/workflows/ci.yml` runs on push/PR to `main` with `concurrency` cancellation: `uv sync --locked`, `ruff check`, `ruff format --check`, `pyright src tests scripts`, `pytest -q`, plus `uv lock --check` for lockfile drift. Two additional jobs gated on `lint-and-test`: `validate-stac` (when `stac/catalog.json` exists) and `validate-schemas` (asserts `config/exposure_score.yaml` weights sum to 1.0, taxonomy YAML fields present, crosswalk top-level keys present).
 
 ## H. Modern data-source evaluation captured
 
-- [ ] `docs/data_sources.md` exists and contains, for each source listed in README → Data sources:
-  - Source URL
-  - Access mechanism (STAC catalog URL, direct download, API)
-  - License + attribution string
-  - Update cadence
-  - Known gaps or quirks (e.g., ETH GCH is single-vintage 2020)
-  - Decision: **PRIMARY**, **AUXILIARY**, or **FUTURE**
-- [ ] Cross-check against DevSeed and Overstory public stacks — if you skipped a source they consider canonical (Sentinel-2 L2A, Cop-DEM, ESA WorldCover, STAC, COG, GeoParquet), justify in writing.
+- [x] `docs/data_sources.md` carries every source from README → *Data sources* with the six required fields (URL, Access, License, Cadence, Gaps, Decision). 18 source entries plus a *Prithvi-EO 2.0 Burn-Scar* entry under a new *Inference models (derived data sources)* section — derived models are treated as data sources because their version + weights + cadence are part of the score's provenance.
+- [x] Open-EO + utility-VM canonical-stack cross-check codified at the bottom of [`docs/data_sources.md`](docs/data_sources.md) — three tables. (a) Open-EO canonical sources (STAC 1.1, COG, GeoParquet, stackstac/odc-stac, TorchGeo, TerraTorch, eoAPI/VEDA-UI, S2 L2A, S1 GRD, Cop-DEM, WorldCover, HLS, pinned-lockfile, no-paywalled-primary) — every row adopted or justified. (b) Utility vegetation-management operational signals (per-asset scoring, FBFM40 taxonomy, time-aware burn, provenance, auditable score, honest scope, commercial imagery, LiDAR, aerial/drone) — every row taken or explicitly waived. (c) Sources deliberately not in the primary path (Planet, Maxar, Sentinel Hub, GEE, e-Redes/REN/DGEG, ICNF SGIF) with a `when to revisit` note per row.
 
 ## I. Final pre-flight
 
-- [ ] One end-to-end dry run of the planned dev sequence on a whiteboard or in `docs/methodology.md`. Identify where you'd get stuck. Fix the prerequisite *now*.
-- [ ] Decide the demo's pretrained-checkpoint distribution path. Hugging Face? GitHub release attachments? R2? Default: GitHub release attachments under 2 GB total.
-- [ ] Skim the README out loud. Anything that reads as a promise the project doesn't yet meet — soften it now.
+- [x] **End-to-end dry run captured in [`docs/methodology.md`](docs/methodology.md)** — 15-phase sequence with per-phase deliverable + prompt-file mapping; seven anticipated stuck-points called out with remediation pre-positioned: cloud-cover asymmetry at §3, COSc + COS label fusion at §6, SegFormer multi-band input at §7, TerraTorch API churn at §8, per-asset zonal-stats throughput at §10, AOI-relative normalisation scope at §11, temporal leakage at §12, and the 30-minute CPU budget at §14.
+- [x] **Checkpoint distribution decided: GitHub release attachments** (default). Rationale + alternatives (Hugging Face Hub, Cloudflare R2, Zenodo) documented in `docs/methodology.md` → "Checkpoint distribution decision". Multi-file release scheme accounts for the 2 GB per-attachment ceiling. Hugging Face Hub remains the post-launch migration path; Zenodo for the paper-anchored archival drop.
+- [x] **README soften pass complete.** Two absolute-promise lines reframed: line 11 (intro paragraph) and the Definition-of-done bullet on the 30-minute demo. Both now say *target wall-clock* and explicitly cross-reference `docs/methodology.md` for the demo's CPU/GPU split. The Definition-of-done block still names the 30-minute target as the shipping gate.
 - [ ] Commit. Tag `pre-dev-v0`.
 
 ---
