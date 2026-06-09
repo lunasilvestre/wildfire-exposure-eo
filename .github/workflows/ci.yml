@@ -15,10 +15,10 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv (with cache)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
           version: "0.4.x"
           enable-cache: true
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       # hashFiles() is step-context-only; a job-level `if` with it fails the
       # whole workflow at compile time ("No jobs were run"). Guard per step.
       - name: Check for STAC catalog
@@ -64,7 +64,7 @@ jobs:
             echo "stac/catalog.json not present yet — skipping validation"
           fi
       - if: steps.stac.outputs.present == 'true'
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
           version: "0.4.x"
           enable-cache: true
@@ -80,8 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           version: "0.4.x"
           enable-cache: true
