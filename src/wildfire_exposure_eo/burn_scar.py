@@ -135,8 +135,12 @@ def resolve_prithvi_burn_scar_model(
     from terratorch.cli_tools import LightningInferenceModel
 
     # from_config's signature says Path but it feeds LightningCLI, which
-    # rejects non-string argv entries — hence the str() casts.
-    lim = LightningInferenceModel.from_config(str(model_config_path), str(checkpoint_path))
+    # rejects non-string argv entries at runtime — hence the str() casts and
+    # the targeted ignores for the (wrong) upstream annotation.
+    lim = LightningInferenceModel.from_config(
+        str(model_config_path),  # pyright: ignore[reportArgumentType]
+        str(checkpoint_path),  # pyright: ignore[reportArgumentType]
+    )
     model = lim.model
     model.eval()  # frozen backbone, inference only — asserted in unit tests
     resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -314,7 +318,9 @@ def _scene_probability(
         epsg=epsg,
         resolution=10,
         dtype=np.dtype("float32"),
-        fill_value=np.float32(0),
+        # stackstac's stub says int|float, but numpy 2 can_cast rejects python
+        # scalars for a float32 output — it must be an np.float32 instance.
+        fill_value=np.float32(0),  # pyright: ignore[reportArgumentType]
         rescale=False,
         resampling=Resampling.nearest,
     )
@@ -507,7 +513,7 @@ def write_stac_item(
 
     item = pystac.Item(
         id=item_id,
-        geometry=mapping(box(*bbox)),
+        geometry=mapping(box(bbox[0], bbox[1], bbox[2], bbox[3])),
         bbox=bbox,
         datetime=run.created_at_utc,
         properties={
