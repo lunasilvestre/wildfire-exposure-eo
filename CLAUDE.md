@@ -133,7 +133,7 @@ requires explicit human approval in-session before it ships. Surface it as a que
 
 ```
 - [ ] Read README.md, CLAUDE.md, PRE_DEV_CHECKLIST.md.
-- [ ] Confirm `uv sync --locked` succeeds.
+- [ ] Confirm `uv sync --locked --extra dev` succeeds (bare `--locked` removes the dev extras — ruff/pyright/pytest live in `[project.optional-dependencies].dev`).
 - [ ] Confirm `uv run pytest -q` is green on a clean checkout.
 - [ ] Confirm `data/aoi/pilot.geojson` exists and loads.
 - [ ] Run `uv run wildfire-exposure-eo audit` — fix any RED rows before proceeding.
