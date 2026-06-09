@@ -44,7 +44,7 @@ DEFAULT_BBOX = (39.80, -8.30, 40.30, -7.70)  # (south, west, north, east)
 def query_for_bbox(bbox: tuple[float, float, float, float]) -> str:
     """Return an Overpass `out count` query for power=tower in (south,west,north,east)."""
     s, w, n, e = bbox
-    return f"[out:json][timeout:25];" f'(node["power"="tower"]({s},{w},{n},{e}););' f"out count;"
+    return f'[out:json][timeout:25];(node["power"="tower"]({s},{w},{n},{e}););out count;'
 
 
 def bbox_from_aoi(path: Path) -> tuple[float, float, float, float]:
