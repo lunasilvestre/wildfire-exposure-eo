@@ -64,6 +64,8 @@ Generalizable to any AOI by editing `data/aoi/pilot.geojson` and re-running the 
 
 All sources are public, STAC-native where possible, COG-friendly, and citable.
 
+> **Sample audit run.** A reference run of `uv run wildfire-exposure-eo audit` against the Sever do Vouga pilot AOI is committed at [`docs/samples/audit_pilot_aveiro.json`](docs/samples/audit_pilot_aveiro.json) — **9/9 GREEN** as of 2026-05-12, covering Sentinel-2 L2A, Sentinel-1 GRD, Cop-DEM GLO-30, ESA WorldCover, ETH GCH, HLS S30/L30, ICNF Áreas Ardidas, OSM Overpass, and IPMA. Anyone with the repo can re-run the audit on a fresh clone and compare.
+
 ### Earth observation
 
 | Layer | Source | Resolution | Access | Role |

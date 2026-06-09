@@ -18,7 +18,7 @@ The sequence below assumes [`PRE_DEV_CHECKLIST.md`](../PRE_DEV_CHECKLIST.md) §A
 | 6 | Weak-label preparation | `outputs/cogs/weak_labels_<run_id>.tif` | — | COSc + COS join — see stuck-point §6 |
 | 7 | Stage 1 — SegFormer baseline training | `checkpoints/fuel_segformer_b0_<run_id>.safetensors` | `prompts/02_train_fuel_baseline.md` | atlas, RTX 3090, ~4–6 hours |
 | 8 | Stage 1 — foundation-model variant | side-by-side comparison report | `prompts/03_train_fuel_foundation.md` | optional, atlas, ~8–12 hours |
-| 9 | Stage 1b — burn-scar inference | `outputs/cogs/burn_scar_<run_id>.tif` | `prompts/03_burn_scar_inference.md` | already drafted |
+| 9 | Stage 1b — burn-scar inference | `outputs/cogs/burn_scar_<run_id>.tif` | `prompts/09_burn_scar_inference.md` | already drafted |
 | 10 | Stage 2 — per-asset feature extraction | `outputs/parquet/features_<run_id>.parquet` | `prompts/04_score_assets.md` | DuckDB-Spatial + rasterio |
 | 11 | Stage 2 — exposure score composition | `outputs/parquet/exposure_<run_id>.parquet` | included in `04_score_assets.md` | reads `config/exposure_score.yaml` |
 | 12 | Validation | `docs/validation_report.md` + plots | `prompts/05_validate.md` | lift / Spearman / Brier vs ICNF |

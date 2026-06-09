@@ -1,0 +1,125 @@
+{
+  "run_id": "20260512T114009Z",
+  "aoi_path": "data/aoi/pilot.geojson",
+  "aoi_bbox_wgs84": [
+    -8.598,
+    40.605,
+    -8.242,
+    40.875
+  ],
+  "checked_at_utc": "2026-05-12T11:40:09.673122+00:00",
+  "results": [
+    {
+      "name": "Sentinel-2 L2A",
+      "status": "GREEN",
+      "message": "270 cloud-free items in past 24 mo",
+      "details": {
+        "items_found": 270,
+        "min_required": 50,
+        "window_months": 24,
+        "max_cloud_pct": 20.0
+      }
+    },
+    {
+      "name": "Sentinel-1 GRD",
+      "status": "GREEN",
+      "message": "605 items in past 24 mo",
+      "details": {
+        "items_found": 605,
+        "min_required": 100,
+        "window_months": 24
+      }
+    },
+    {
+      "name": "Cop-DEM GLO-30",
+      "status": "GREEN",
+      "message": "1 tile(s) cover AOI",
+      "details": {
+        "items_found": 1
+      }
+    },
+    {
+      "name": "ETH GCH",
+      "status": "GREEN",
+      "message": "libdrive tile N39W009 returned a valid GeoTIFF",
+      "details": {
+        "url": "https://libdrive.ethz.ch/index.php/s/cO8or7iOe5dT2Rt/download?path=%2F3deg_cogs&files=ETH_GlobalCanopyHeight_10m_2020_N39W009_Map.tif",
+        "tile": "N39W009",
+        "content_type": "image/tiff"
+      }
+    },
+    {
+      "name": "OSM Overpass",
+      "status": "GREEN",
+      "message": "3/3 classes ≥ 100",
+      "details": {
+        "counts": {
+          "power_tower": 1547,
+          "highway_road": 13980,
+          "building": 33790
+        },
+        "min_features_per_class": 100,
+        "errors": []
+      }
+    },
+    {
+      "name": "ICNF Áreas Ardidas",
+      "status": "GREEN",
+      "message": "114 burn polygon(s) intersect AOI across sampled years",
+      "details": {
+        "counts_per_layer": {
+          "2025": 19,
+          "2024": 22,
+          "2023": 22,
+          "2022": 10,
+          "2021": 5,
+          "2020": 28,
+          "2017": 8
+        },
+        "errors": [],
+        "sampled_layers": [
+          "2025",
+          "2024",
+          "2023",
+          "2022",
+          "2021",
+          "2020",
+          "2017"
+        ]
+      }
+    },
+    {
+      "name": "ESA WorldCover 2021",
+      "status": "GREEN",
+      "message": "1 2021 tile(s) over AOI",
+      "details": {
+        "items_found": 1
+      }
+    },
+    {
+      "name": "HLS S30/L30",
+      "status": "GREEN",
+      "message": "413 items across HLS L30+S30 in past 12 mo",
+      "details": {
+        "endpoint": "https://cmr.earthdata.nasa.gov/stac/LPCLOUD",
+        "items_per_collection": {
+          "HLSL30_2.0": 66,
+          "HLSS30_2.0": 347
+        },
+        "window_months": 12,
+        "min_required": 10,
+        "errors": []
+      }
+    },
+    {
+      "name": "IPMA FWI",
+      "status": "GREEN",
+      "message": "reachable (HTTP 200)",
+      "details": {
+        "endpoint": "https://www.ipma.pt/pt/riscoincendio/",
+        "status_code": 200,
+        "content_type": "text/html;charset=UTF-8"
+      }
+    }
+  ]
+}

@@ -200,7 +200,7 @@ Models that *produce* per-asset feature inputs to the exposure score. Treated as
 - **License.** Apache 2.0 (Prithvi-EO 2.0 model weights and code).
 - **Cadence.** Inference run on-demand against the trailing 12 months of Sentinel-2 L2A imagery. Re-runnable monthly without retraining; fine-tuning is out of scope for the pilot.
 - **Known gaps.** Trained primarily on HLS imagery; performance on native Sentinel-2 L2A in Atlantic-Iberian landscapes is the open empirical question — documented in `docs/burn_scar_audit.md` after Stage 1b ships. Pilot uses frozen-backbone inference only.
-- **Used for.** Per-asset `recent_burn_share_12mo` feature in Stage 2; fills the gap between the latest ICNF Áreas Ardidas vintage (annual, ~1-year lag) and "right now". See [`prompts/03_burn_scar_inference.md`](../prompts/03_burn_scar_inference.md).
+- **Used for.** Per-asset `recent_burn_share_12mo` feature in Stage 2; fills the gap between the latest ICNF Áreas Ardidas vintage (annual, ~1-year lag) and "right now". See [`prompts/09_burn_scar_inference.md`](../prompts/09_burn_scar_inference.md).
 
 ## Cross-check — open-EO and utility-VM canonical practice
 

@@ -1,4 +1,16 @@
-# Prompt 03 — Burn-scar inference (Stage 1b)
+# Prompt 09 — Burn-scar inference (Stage 1b)
+
+> **Close-out amendment (2026-06-09, rev. GPU-first).** Executed as
+> **WU-1** of [`00_CLOSEOUT_PLAN.md`](00_CLOSEOUT_PLAN.md) — **GPU-first on
+> atlas (RTX 3090), ON the critical path**, run early right after WU-0
+> since it depends only on the committed STAC resolver + AOI. Pretrained
+> `Prithvi-EO-2.0-300M-BurnScars` inference only, exactly as written below;
+> no fine-tuning exists anywhere in the close-out scope. Smoke-AOI inference
+> before pilot; the pilot COG becomes the pre-baked artifact the CPU demo
+> ships with. If atlas/CUDA is unavailable, halt and surface — shipping
+> without `recent_burn_share_12mo` requires explicit human approval.
+> (Header renumbered 03 → 09 to match the filename rename already in the
+> tree.)
 
 ## Purpose
 

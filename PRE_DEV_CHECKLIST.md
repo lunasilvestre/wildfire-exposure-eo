@@ -55,7 +55,7 @@ The team (you + Claude Code) operates on the same reference frame. Do this once,
 - [x] **Fuel-class taxonomy chain captured.** v0.2.0-stub in `data/crosswalks/icnf_to_scott_burgan.yaml` ships: operational DGT COSc (4 classes) + COS (species splits) as training inputs, 9-class internal taxonomy as model output, full FBFM40 reference table (40 classes), NFFL-13 anchor via EFFIS for international readability, and a PROVISIONAL ICNF taxonomy (Fernandes 2009 + Sá et al. 2023). The ICNF CCF raster has no public direct-download URL (verified 2026-05-07) and is held as `national_alignment_target` in `source_inputs`; replace `icnf_taxonomy:` when the actual CCF legend is captured.
 - [x] **STAC 1.1 spec.** Already operationally fluent — `cheias-pt-stac` ships a STAC 1.1.0 catalog with 9 collections / 1,684 items in production. Conventions captured in `inventory.yaml`.
 - [x] **TorchGeo intro.** Samplers / datasets reviewed; decision is to roll a custom dataset for the fuel-class task given the COSc + COS weak-label fusion in `docs/methodology.md` §6.
-- [x] **TerraTorch quickstart.** Confirmed reachable; integration point is `prompts/03_burn_scar_inference.md` (Stage 1b) and the foundation-model variant in Stage 1.
+- [x] **TerraTorch quickstart.** Confirmed reachable; integration point is `prompts/09_burn_scar_inference.md` (Stage 1b) and the foundation-model variant in Stage 1.
 - [x] **eoAPI / VEDA-UI conventions.** Already operationally fluent — `cheias-pt-eoapi` and `cheias-pt-veda-ui` shipped. Conventions imported into `inventory.yaml` and `docs/data_sources.md` cross-check.
 
 ## F. Glossary committed
@@ -74,7 +74,7 @@ The vocabulary list is the single highest-leverage document. External readers re
 ## G. Working agreement with Claude Code
 
 - [x] `CLAUDE.md` reviewed and accepted. 10 non-negotiables in force; 7 anti-patterns (incl. the new "burn-scar ≠ ignition prediction" one); fact-check and verify-then-act protocols documented.
-- [x] `prompts/01_data_audit.md` and `prompts/03_burn_scar_inference.md` shipped; `prompts/_session_log.md` ready to accept session entries.
+- [x] `prompts/01_data_audit.md`, `prompts/02_extract_osm.md`, `prompts/03_extract_stac.md`, `prompts/04_static_raster_fetch.md`, `prompts/05_icnf_burns_ingestion.md`, and `prompts/09_burn_scar_inference.md` drafted; `prompts/_session_log.md` ready to accept session entries.
 - [x] `inventory.yaml` committed with 4 collections (`fuel-class`, `burn-scar-recent`, `exposure-raster`, `exposure-assets`), all mirroring the cheias-pt-stac pattern.
 - [x] `pyproject.toml` ships with lower-bound-only dependency policy (Schreiner principle, documented inline) and the 2026 ML stack (torch>=2.6, torchgeo>=0.9, terratorch>=1.2, transformers>=4.50, lightning, peft, safetensors). `uv.lock` regenerated; `uv sync --locked` is the install command.
 - [x] `.pre-commit-config.yaml` committed with: `ruff` (auto-fix), `ruff-format`, `pyright` (manual stage), `end-of-file-fixer`, `trailing-whitespace`, `check-merge-conflict`, `check-yaml`, `check-toml`, `check-added-large-files` (2 MB cap), `check-case-conflict`, `mixed-line-ending`, plus `uv-lock` to enforce pyproject ↔ uv.lock consistency. **Activate locally** with `uv run pre-commit install && uv run pre-commit install --hook-type pre-push`.
