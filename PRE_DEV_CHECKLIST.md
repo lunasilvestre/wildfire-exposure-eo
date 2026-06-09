@@ -90,7 +90,7 @@ The vocabulary list is the single highest-leverage document. External readers re
 - [x] **End-to-end dry run captured in [`docs/methodology.md`](docs/methodology.md)** — 15-phase sequence with per-phase deliverable + prompt-file mapping; seven anticipated stuck-points called out with remediation pre-positioned: cloud-cover asymmetry at §3, COSc + COS label fusion at §6, SegFormer multi-band input at §7, TerraTorch API churn at §8, per-asset zonal-stats throughput at §10, AOI-relative normalisation scope at §11, temporal leakage at §12, and the 30-minute CPU budget at §14.
 - [x] **Checkpoint distribution decided: GitHub release attachments** (default). Rationale + alternatives (Hugging Face Hub, Cloudflare R2, Zenodo) documented in `docs/methodology.md` → "Checkpoint distribution decision". Multi-file release scheme accounts for the 2 GB per-attachment ceiling. Hugging Face Hub remains the post-launch migration path; Zenodo for the paper-anchored archival drop.
 - [x] **README soften pass complete.** Two absolute-promise lines reframed: line 11 (intro paragraph) and the Definition-of-done bullet on the 30-minute demo. Both now say *target wall-clock* and explicitly cross-reference `docs/methodology.md` for the demo's CPU/GPU split. The Definition-of-done block still names the 30-minute target as the shipping gate.
-- [ ] Commit. Tag `pre-dev-v0`.
+- [x] Commit. Tag `pre-dev-v0`. Annotated tag on `dab6bb2` (*pre-dev: scaffold, taxonomy, glossary, methodology, CI*), pushed to `origin`.
 
 ---
 
