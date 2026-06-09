@@ -131,6 +131,32 @@ STOP — do not start the next WU in the same session
   surface to the human; fall back to shipping without
   `recent_burn_share_12mo` only with explicit approval.
 
+## Methodological caveats (encode in the WU-6 / WU-7 prompts)
+
+1. **Feature/label circularity.** `historical_burn_count_25y` is a feature
+   and ICNF polygons are the validation labels. The leakage split (validate
+   only on years strictly after the score-input window) is necessary but not
+   sufficient — fire is spatially autocorrelated, so lift will flatter the
+   score. WU-7 must report an ablation: lift/Spearman **with and without**
+   the burn-history features, and say plainly which features carry the
+   signal. A validation section that hides this would be marketing, not
+   validation.
+2. **Prithvi domain shift.** The BurnScars checkpoint was trained on US HLS
+   fire scenes; Portuguese eucalyptus/pinus mosaics are out-of-domain. WU-1
+   must include a cheap sanity check before the COG is trusted: run
+   inference over 2–3 known ICNF burn perimeters from the most recent
+   published vintage and report IoU/agreement in the session log. If
+   agreement is poor, the feature ships with a documented reliability
+   caveat (or is dropped — human call).
+3. **Fuel-map scale mismatch.** EFFIS fuel classes are coarse relative to
+   10 m asset buffers; COSc refinement only partially compensates. State
+   the effective resolution honestly in `validation_report.md`; never imply
+   parcel-level fuel precision.
+4. **The score is a screening rank.** Weights in `exposure_score.yaml` are
+   expert-set, not learned. The defensible claim is "a transparent,
+   reproducible prioritization screen validated against subsequent burns" —
+   not prediction. README and report language must keep this line.
+
 ## Definition of DONE for the project
 
 - `uv run wildfire-exposure-eo` demo path: fresh clone → audit → fetch-osm →
