@@ -25,6 +25,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -61,6 +62,11 @@ S2_COLLECTION = "sentinel-2-l2a"
 #: SAS tokens per collection, with their expiry. Refreshed per scene read so
 #: long pilot runs never hold a stale token.
 _SAS_CACHE: dict[str, tuple[str, datetime]] = {}
+
+#: Per-scene retry policy for transient blob/network failures. The delays
+#: must outlast PC's server-side SAS rotation so a retry gets a fresh token.
+_SCENE_ATTEMPTS = 3
+_SCENE_RETRY_DELAYS_S = (30, 180)
 
 
 def load_burn_scar_config(path: Path = DEFAULT_CONFIG_PATH) -> BurnScarConfig:
@@ -223,17 +229,32 @@ def _pc_sas_token(collection: str) -> str:
     Kept in-repo instead of adding the `planetary-computer` package: one GET
     against the public token endpoint (non-negotiable #8 — prefer the
     existing stack).
+
+    PC serves a server-side-cached token, so near rotation the endpoint can
+    return one with only minutes of validity left — enough to die mid-scene
+    (observed on the 2026-06-09 pilot run). Near-expiry tokens are therefore
+    used but never cached, and the per-scene retry in
+    `infer_burn_probability` re-signs after the rotation window.
     """
+    margin = timedelta(minutes=5)
     cached = _SAS_CACHE.get(collection)
     now = datetime.now(UTC)
-    if cached and cached[1] > now + timedelta(minutes=5):
+    if cached and cached[1] > now + margin:
         return cached[0]
     resp = requests.get(PC_SAS_TOKEN_URL.format(collection=collection), timeout=30)
     resp.raise_for_status()
     payload = resp.json()
     token = str(payload["token"])
     expiry = datetime.fromisoformat(str(payload["msft:expiry"]).replace("Z", "+00:00"))
-    _SAS_CACHE[collection] = (token, expiry)
+    if expiry > datetime.now(UTC) + margin:
+        _SAS_CACHE[collection] = (token, expiry)
+    else:
+        _SAS_CACHE.pop(collection, None)
+        logger.warning(
+            "[burn-scar] PC returned a near-expiry SAS token for %s (expires %s); not caching",
+            collection,
+            expiry.isoformat(),
+        )
     return token
 
 
@@ -410,16 +431,39 @@ def infer_burn_probability(
     ys: np.ndarray | None = None
     for i, item in enumerate(items, start=1):
         logger.info("[burn-scar] scene %d/%d %s", i, len(items), item.id)
-        result = _scene_probability(
-            item,
-            model_handle,
-            s2_assets=s2_assets,
-            bounds=bounds,
-            epsg=epsg,
-            scl_mask_classes=scl_mask_classes,
-            tile_size=tile_size,
-            tile_stride=tile_stride,
-        )
+        result = None
+        for attempt in range(1, _SCENE_ATTEMPTS + 1):
+            try:
+                result = _scene_probability(
+                    item,
+                    model_handle,
+                    s2_assets=s2_assets,
+                    bounds=bounds,
+                    epsg=epsg,
+                    scl_mask_classes=scl_mask_classes,
+                    tile_size=tile_size,
+                    tile_stride=tile_stride,
+                )
+                break
+            except Exception as exc:
+                # Transient blob/network failures, including a SAS token that
+                # expired mid-scene. Drop the cached token and retry with
+                # delays that outlast PC's server-side token rotation.
+                _SAS_CACHE.clear()
+                if attempt == _SCENE_ATTEMPTS:
+                    raise RuntimeError(
+                        f"scene {item.id} failed after {attempt} attempt(s)"
+                    ) from exc
+                delay = _SCENE_RETRY_DELAYS_S[attempt - 1]
+                logger.warning(
+                    "[burn-scar]   %s attempt %d/%d failed (%s); re-signing, retrying in %ds",
+                    item.id,
+                    attempt,
+                    _SCENE_ATTEMPTS,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
         if result is None:
             continue
         prob, xs, ys = result

@@ -408,3 +408,85 @@ def test_write_stac_item_appends_to_existing_catalog(tmp_path: Path) -> None:
     assert collection is not None
     ids = {it.id for it in collection.get_items()}
     assert ids == {"burn-scar-20260609T000000Z", "burn-scar-20260610T000000Z"}
+
+
+# ---------------------------------------------------------------------------
+# scene retry (transient blob failures / mid-scene SAS expiry)
+# ---------------------------------------------------------------------------
+
+
+def _retry_setup(
+    monkeypatch: pytest.MonkeyPatch, outcomes: list[Exception | None]
+) -> tuple[Any, list[int]]:
+    """Patch _scene_probability to fail per `outcomes` (None = succeed).
+
+    The fake 20x20 grid sits in EPSG:32629 over the test AOI box
+    (-8.41, 40.69, -8.39, 40.71) so the reproject + clip path stays real.
+    """
+    import numpy as np
+
+    calls: list[int] = []
+    prob = np.full((20, 20), 0.5, dtype=np.float32)
+    xs = np.linspace(548_500.0, 551_500.0, 20)
+    ys = np.linspace(4_506_500.0, 4_503_500.0, 20)
+
+    def fake_scene(item: Any, handle: Any, **_kwargs: Any) -> Any:
+        outcome = outcomes[len(calls)]
+        calls.append(1)
+        if outcome is not None:
+            raise outcome
+        return prob, xs, ys
+
+    monkeypatch.setattr(burn_scar, "_scene_probability", fake_scene)
+    monkeypatch.setattr(burn_scar, "_item_epsg", lambda _it: 32629)
+    monkeypatch.setattr(burn_scar.time, "sleep", lambda _s: None)
+    return prob, calls
+
+
+def _retry_handle() -> burn_scar.ModelHandle:
+    return burn_scar.ModelHandle(
+        model=object(),
+        hf_model_id="x/y",
+        hf_revision_sha="z",
+        model_version="v",
+        checkpoint_path=Path("ckpt"),
+        model_config_path=Path("cfg"),
+        means=(0.0,) * 6,
+        stds=(1.0,) * 6,
+        device="cpu",
+    )
+
+
+def test_scene_failure_retries_with_fresh_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shapely.geometry import box
+
+    _, calls = _retry_setup(monkeypatch, [RuntimeError("read failed"), None])
+    burn_scar._SAS_CACHE["sentinel-2-l2a"] = ("stale", datetime(2099, 1, 1, tzinfo=UTC))
+
+    item = _FakeItem("S2_X", datetime(2026, 5, 1, tzinfo=UTC), {"proj:epsg": 32629})
+    da = burn_scar.infer_burn_probability(
+        [item],  # pyright: ignore[reportArgumentType]
+        _retry_handle(),
+        box(-8.41, 40.69, -8.39, 40.71),
+        s2_assets=("B02", "B03", "B04", "B8A", "B11", "B12"),
+        scl_mask_classes=(0,),
+    )
+    assert len(calls) == 2, "first failure must be retried"
+    assert "sentinel-2-l2a" not in burn_scar._SAS_CACHE, "retry must drop the cached token"
+    assert float(da.max()) == pytest.approx(0.5)
+
+
+def test_scene_failure_raises_after_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shapely.geometry import box
+
+    _, calls = _retry_setup(monkeypatch, [RuntimeError("boom")] * burn_scar._SCENE_ATTEMPTS)
+    item = _FakeItem("S2_X", datetime(2026, 5, 1, tzinfo=UTC), {"proj:epsg": 32629})
+    with pytest.raises(RuntimeError, match="failed after 3 attempt"):
+        burn_scar.infer_burn_probability(
+            [item],  # pyright: ignore[reportArgumentType]
+            _retry_handle(),
+            box(-8.41, 40.69, -8.39, 40.71),
+            s2_assets=("B02", "B03", "B04", "B8A", "B11", "B12"),
+            scl_mask_classes=(0,),
+        )
+    assert len(calls) == burn_scar._SCENE_ATTEMPTS
