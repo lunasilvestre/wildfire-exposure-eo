@@ -1,0 +1,24 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "FIXTURE_S1A_IW_GRDH_1SDV_20250502T063015",
+  "collection": "sentinel-1-grd",
+  "properties": {
+    "datetime": "2025-05-02T06:30:15Z",
+    "platform": "sentinel-1a",
+    "sar:instrument_mode": "IW",
+    "sar:polarizations": ["VV", "VH"]
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-8.7, 40.5], [-8.1, 40.5], [-8.1, 41.0], [-8.7, 41.0], [-8.7, 40.5]
+    ]]
+  },
+  "bbox": [-8.7, 40.5, -8.1, 41.0],
+  "assets": {
+    "vh": {"href": "https://sentinel1euwestrtc.blob.core.windows.net/s1-grd/FIXTURE_S1A/vh.tif", "type": "image/tiff"},
+    "vv": {"href": "https://sentinel1euwestrtc.blob.core.windows.net/s1-grd/FIXTURE_S1A/vv.tif", "type": "image/tiff"}
+  },
+  "links": []
+}

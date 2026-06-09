@@ -1,0 +1,29 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "FIXTURE_S2A_MSIL2A_20250820T103021_R108_T29TNE_SUMMER",
+  "collection": "sentinel-2-l2a",
+  "properties": {
+    "datetime": "2025-08-20T10:30:21Z",
+    "eo:cloud_cover": 48.7,
+    "platform": "sentinel-2a",
+    "instrument": "msi"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-8.6, 40.6], [-8.2, 40.6], [-8.2, 40.9], [-8.6, 40.9], [-8.6, 40.6]
+    ]]
+  },
+  "bbox": [-8.6, 40.6, -8.2, 40.9],
+  "assets": {
+    "B02": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B02.tif", "type": "image/tiff"},
+    "B03": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B03.tif", "type": "image/tiff"},
+    "B04": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B04.tif", "type": "image/tiff"},
+    "B08": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B08.tif", "type": "image/tiff"},
+    "B11": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B11.tif", "type": "image/tiff"},
+    "B12": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/B12.tif", "type": "image/tiff"},
+    "SCL": {"href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/29/T/NE/2025/08/20/FIXTURE_SUMMER/SCL.tif", "type": "image/tiff"}
+  },
+  "links": []
+}

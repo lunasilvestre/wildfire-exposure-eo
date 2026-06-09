@@ -1,0 +1,21 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "FIXTURE_Copernicus_DSM_COG_10_N40_00_W009_00_DEM",
+  "collection": "cop-dem-glo-30",
+  "properties": {
+    "datetime": "2021-04-21T00:00:00Z",
+    "platform": "tandem-x"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-9.0, 40.0], [-8.0, 40.0], [-8.0, 41.0], [-9.0, 41.0], [-9.0, 40.0]
+    ]]
+  },
+  "bbox": [-9.0, 40.0, -8.0, 41.0],
+  "assets": {
+    "data": {"href": "https://copernicusdem.blob.core.windows.net/cop-dem-glo-30/FIXTURE_DSM/data.tif", "type": "image/tiff"}
+  },
+  "links": []
+}

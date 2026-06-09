@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import typer
@@ -11,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from wildfire_exposure_eo import audit as audit_mod
+from wildfire_exposure_eo import stac as stac_mod
 
 app = typer.Typer(
     name="wildfire-exposure-eo",
@@ -190,6 +192,134 @@ def audit_all(
         raise typer.Exit(code=1)
     if has_yellow:
         raise typer.Exit(code=2)
+
+
+def _parse_iso_date(value: str, *, flag: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(f"{flag}: expected ISO date YYYY-MM-DD, got {value!r}") from exc
+
+
+def _configure_stac_logging() -> None:
+    """Route `wildfire_exposure_eo.stac` INFO logs to stderr.
+
+    Honors the CLAUDE.md verify-then-act protocol: every candidate item ID is
+    logged before being written to the manifest.
+    """
+    log = logging.getLogger("wildfire_exposure_eo.stac")
+    if not any(isinstance(h, logging.StreamHandler) for h in log.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
+
+@app.command("resolve-stac")
+def resolve_stac(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"),
+        "--aoi",
+        readable=True,
+        dir_okay=False,
+        help="Path to the AOI GeoJSON. Ignored when --smoke is set.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Output manifest path. Supports {run_id} templating. Defaults to "
+            "outputs/manifests/stac_{run_id}.json (or stac_smoke_{run_id}.json with --smoke)."
+        ),
+    ),
+    spring_start: str = typer.Option(
+        "2025-03-01", "--spring-start", help="Spring window start (ISO date)."
+    ),
+    spring_end: str = typer.Option(
+        "2025-06-15", "--spring-end", help="Spring window end (ISO date)."
+    ),
+    spring_cloud: int = typer.Option(
+        30, "--spring-cloud", min=0, max=100, help="Max eo:cloud_cover for spring S2."
+    ),
+    summer_start: str = typer.Option(
+        "2025-07-01", "--summer-start", help="Summer window start (ISO date)."
+    ),
+    summer_end: str = typer.Option(
+        "2025-10-31", "--summer-end", help="Summer window end (ISO date)."
+    ),
+    summer_cloud: int = typer.Option(
+        60, "--summer-cloud", min=0, max=100, help="Max eo:cloud_cover for summer S2 (relaxed)."
+    ),
+    worldcover_vintage: int = typer.Option(
+        2021, "--worldcover-vintage", help="ESA WorldCover vintage year."
+    ),
+    catalog: str = typer.Option(stac_mod.PC_STAC_URL, "--catalog", help="STAC catalog root URL."),
+    smoke: bool = typer.Option(
+        False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
+    ),
+) -> None:
+    """Resolve a deterministic STAC manifest for the AOI; no rasters are read.
+
+    On success, prints the manifest path and per-collection totals. The
+    manifest validates as `wildfire_exposure_eo.schemas.StacManifest`.
+    """
+    console = Console()
+    _configure_stac_logging()
+
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+        default_out_template = "outputs/manifests/stac_smoke_{run_id}.json"
+    else:
+        default_out_template = "outputs/manifests/stac_{run_id}.json"
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+
+    spring_s = _parse_iso_date(spring_start, flag="--spring-start")
+    spring_e = _parse_iso_date(spring_end, flag="--spring-end")
+    summer_s = _parse_iso_date(summer_start, flag="--summer-start")
+    summer_e = _parse_iso_date(summer_end, flag="--summer-end")
+    if spring_s > spring_e:
+        raise typer.BadParameter("--spring-start must be on or before --spring-end")
+    if summer_s > summer_e:
+        raise typer.BadParameter("--summer-start must be on or before --summer-end")
+
+    resolved_at = datetime.now(UTC)
+    run_id = resolved_at.strftime("%Y%m%dT%H%M%SZ")
+
+    console.print(f"[dim]AOI:[/dim] {aoi}")
+    console.print(f"[dim]catalog:[/dim] {catalog}")
+    console.print(f"[dim]spring:[/dim] {spring_s}..{spring_e}  cloud<={spring_cloud}%")
+    console.print(f"[dim]summer:[/dim] {summer_s}..{summer_e}  cloud<={summer_cloud}%")
+    console.print(f"[dim]worldcover vintage:[/dim] {worldcover_vintage}")
+    console.print(f"[dim]run_id:[/dim] {run_id}\n")
+
+    manifest = stac_mod.build_manifest(
+        aoi,
+        spring_start=spring_s,
+        spring_end=spring_e,
+        spring_cloud=spring_cloud,
+        summer_start=summer_s,
+        summer_end=summer_e,
+        summer_cloud=summer_cloud,
+        worldcover_vintage=worldcover_vintage,
+        catalog_url=catalog,
+        run_id=run_id,
+        resolved_at_utc=resolved_at,
+    )
+
+    out_path = out if out is not None else Path(default_out_template)
+    out_str = str(out_path).replace("{run_id}", run_id)
+    final_path = stac_mod.write_manifest(manifest, Path(out_str))
+
+    table = Table(title="STAC manifest — totals by collection", show_lines=False)
+    table.add_column("Collection", style="bold")
+    table.add_column("Items", justify="right")
+    for coll, n in manifest.totals.items():
+        style = "green" if n > 0 else "yellow"
+        table.add_row(coll, f"[{style}]{n}[/]")
+    console.print(table)
+    console.print(f"\n[dim]manifest:[/dim] {final_path}")
 
 
 if __name__ == "__main__":
