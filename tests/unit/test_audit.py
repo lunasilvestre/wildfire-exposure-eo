@@ -448,3 +448,80 @@ def test_source_health_rejects_negative_elapsed() -> None:
             elapsed_ms=-1,
             checked_at_utc=datetime.now(UTC),
         )
+
+
+# ---------------------------------------------------------------------------
+# Prithvi Burn-Scar (HF hub probe)
+# ---------------------------------------------------------------------------
+
+
+def _burn_scar_config_file(
+    tmp_path: Path,
+    model_id: str = "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars",
+    revision: str = "a3f2c410e45b8ac7417976614528a872f024d831",
+) -> Path:
+    cfg = tmp_path / "burn_scar.yaml"
+    cfg.write_text(f'model:\n  hf_model_id: "{model_id}"\n  hf_revision_sha: "{revision}"\n')
+    return cfg
+
+
+def test_prithvi_green_when_pin_is_hub_main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sha = "a3f2c410e45b8ac7417976614528a872f024d831"
+    monkeypatch.setattr(
+        audit.requests,
+        "get",
+        lambda *_a, **_k: _FakeResponse(status_code=200, json_payload={"sha": sha}),
+    )
+    result = audit.check_prithvi_burn_scar(_burn_scar_config_file(tmp_path, revision=sha))
+    assert result.status == "GREEN"
+    assert result.details["hub_main_revision"] == sha
+
+
+def test_prithvi_green_when_hub_main_moved_past_pin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        audit.requests,
+        "get",
+        lambda *_a, **_k: _FakeResponse(status_code=200, json_payload={"sha": "newer-sha"}),
+    )
+    result = audit.check_prithvi_burn_scar(_burn_scar_config_file(tmp_path))
+    assert result.status == "GREEN"
+    assert "pinned revision stays fetchable" in result.message
+
+
+def test_prithvi_red_on_unknown_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(audit.requests, "get", lambda *_a, **_k: _FakeResponse(status_code=404))
+    result = audit.check_prithvi_burn_scar(
+        _burn_scar_config_file(tmp_path, model_id="nobody/no-such-model")
+    )
+    assert result.status == "RED"
+    assert "404" in result.message
+
+
+def test_prithvi_yellow_on_connection_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise ConnectionError("no route to host")
+
+    monkeypatch.setattr(audit.requests, "get", boom)
+    result = audit.check_prithvi_burn_scar(_burn_scar_config_file(tmp_path))
+    assert result.status == "YELLOW"
+    assert "unreachable" in result.message
+
+
+def test_prithvi_red_on_placeholder_id(tmp_path: Path) -> None:
+    result = audit.check_prithvi_burn_scar(
+        _burn_scar_config_file(tmp_path, model_id="TBD-verified-at-audit")
+    )
+    assert result.status == "RED"
+    assert "placeholder" in result.message
+
+
+def test_prithvi_red_on_missing_config(tmp_path: Path) -> None:
+    result = audit.check_prithvi_burn_scar(tmp_path / "absent.yaml")
+    assert result.status == "RED"
+    assert "cannot read" in result.message

@@ -66,7 +66,8 @@ collections:
       requires:
         - sentinel-2-l2a
       model_id: "prithvi-eo-2.0-burn-scar"
-      model_version: "TBD-at-audit"       # CLAUDE.md non-negotiable #1
+      hf_model_id: "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars"
+      model_version: "a3f2c410e45b8ac7417976614528a872f024d831"   # HF revision sha, verified live 2026-06-09
       framework: "terratorch>=1.2"
       notes: "Detects burn SCARS (post-event), not ignitions. Threshold-binarised downstream for the per-asset recent_burn_share_12mo feature."
 

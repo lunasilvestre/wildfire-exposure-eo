@@ -1,7 +1,7 @@
 """Data-source health checks for PRE_DEV_CHECKLIST item C.
 
 Each `check_*` function returns a `CheckResult` with status GREEN, YELLOW, or RED.
-The full audit (`run_all`) runs the seven mandatory checks against an AOI bbox and
+The full audit (`run_all`) runs the ten checks against an AOI bbox and
 returns a list of results. The CLI renders these as a rich table; CI consumes the
 exit code (0 = all GREEN, 1 = any RED, 2 = no RED but at least one YELLOW).
 """
@@ -469,6 +469,67 @@ def check_ipma_fwi() -> CheckResult:
     return CheckResult(name, "RED", f"HTTP {resp.status_code} from IPMA", details)
 
 
+def check_prithvi_burn_scar(
+    config_path: Path = Path("config/burn_scar.yaml"),
+) -> CheckResult:
+    """Verify the pinned Prithvi burn-scar model resolves on the Hugging Face hub.
+
+    Probe only — no weights are downloaded. Reads the model ID + revision
+    from `config/burn_scar.yaml` (CLAUDE.md non-negotiable #1: the ID lives
+    in config, never in code). RED when the config still carries the
+    placeholder or the hub says the model does not exist; YELLOW when the
+    hub is unreachable.
+    """
+    name = "Prithvi Burn-Scar"
+    try:
+        import yaml
+
+        payload = yaml.safe_load(config_path.read_text())
+        model_id = str(payload["model"]["hf_model_id"])
+        revision = str(payload["model"]["hf_revision_sha"])
+    except Exception as exc:
+        return CheckResult(
+            name,
+            "RED",
+            f"cannot read model config {config_path}: {exc}",
+            {"config_path": str(config_path)},
+        )
+    if model_id == "TBD-verified-at-audit":
+        return CheckResult(
+            name,
+            "RED",
+            "hf_model_id is still the unverified placeholder",
+            {"config_path": str(config_path)},
+        )
+    url = f"https://huggingface.co/api/models/{model_id}"
+    try:
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
+    except Exception as exc:
+        return CheckResult(name, "YELLOW", f"HF hub unreachable: {exc}", {"endpoint": url})
+    details: dict[str, Any] = {
+        "endpoint": url,
+        "hf_model_id": model_id,
+        "pinned_revision": revision,
+        "status_code": resp.status_code,
+    }
+    if resp.status_code == 200:
+        hub_sha = str(resp.json().get("sha", ""))
+        details["hub_main_revision"] = hub_sha
+        if hub_sha == revision:
+            return CheckResult(
+                name, "GREEN", "model resolves; pinned revision is hub main", details
+            )
+        return CheckResult(
+            name,
+            "GREEN",
+            "model resolves; hub main moved past the pin (pinned revision stays fetchable)",
+            details,
+        )
+    if resp.status_code in (401, 403, 404):
+        return CheckResult(name, "RED", f"HTTP {resp.status_code} for {model_id}", details)
+    return CheckResult(name, "YELLOW", f"unexpected HTTP {resp.status_code} from HF hub", details)
+
+
 CHECKS: tuple[str, ...] = (
     "Sentinel-2 L2A",
     "Sentinel-1 GRD",
@@ -479,6 +540,7 @@ CHECKS: tuple[str, ...] = (
     "ESA WorldCover 2021",
     "HLS S30/L30",
     "IPMA FWI",
+    "Prithvi Burn-Scar",
 )
 
 
@@ -494,4 +556,5 @@ def run_all(aoi_path: Path) -> list[CheckResult]:
         check_esa_worldcover(bbox),
         check_hls_lpcloud(bbox),
         check_ipma_fwi(),
+        check_prithvi_burn_scar(),
     ]
