@@ -42,8 +42,10 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
+      # `--locked` (not `--check`): the assert flag in uv 0.4.x; `--check`
+      # only exists from 0.5.x and fails here as an unknown argument.
       - name: uv.lock is up-to-date with pyproject.toml
-        run: uv lock --check
+        run: uv lock --locked
 
   validate-stac:
     runs-on: ubuntu-latest
