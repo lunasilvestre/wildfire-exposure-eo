@@ -114,6 +114,16 @@ jobs:
                   sys.exit(1)
           print(f"OK: {len(tax['classes'])} infrastructure classes validated")
           PY
+      # committed sample STAC manifest must parse as StacManifest
+      - name: Validate sample STAC manifest
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          from wildfire_exposure_eo.schemas import StacManifest
+          raw = json.loads(pathlib.Path("docs/samples/stac_smoke_aveiro.json").read_text())
+          m = StacManifest.model_validate(raw)
+          print(f"OK: {sum(m.totals.values())} items across {len(m.totals)} collections")
+          PY
       # crosswalk YAML: source_inputs and internal_classes present
       - name: Validate fuel crosswalk
         run: |
