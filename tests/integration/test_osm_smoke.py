@@ -89,13 +89,13 @@ def test_fetch_osm_smoke(tmp_path: Path) -> None:
                 "geometry_wkb": bytes(row["geometry_wkb"]),
                 "centroid_lon": float(row["centroid_lon"]),
                 "centroid_lat": float(row["centroid_lat"]),
-                "tags": json.loads(row["tags"]),
+                "tags": json.loads(str(row["tags"])),
                 "provenance": prov,
             }
         )
 
     # aoi_geometry_sha matches the smoke AOI's actual SHA
-    sample_prov = gdf.iloc[0]["provenance"]
-    assert (
-        sample_prov["aoi_geometry_sha"] == _SMOKE_AOI_SHA
-    ), f"aoi_geometry_sha mismatch: {sample_prov['aoi_geometry_sha']!r} != {_SMOKE_AOI_SHA!r}"
+    # (single-line assert: the pre-commit ruff (v0.7.4) and the uv-resolved ruff
+    # disagree on multi-line assert formatting — see WU-2 review note)
+    actual_sha = gdf.iloc[0]["provenance"]["aoi_geometry_sha"]
+    assert actual_sha == _SMOKE_AOI_SHA, f"aoi_geometry_sha: {actual_sha!r} != {_SMOKE_AOI_SHA!r}"

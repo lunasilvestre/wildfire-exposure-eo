@@ -251,6 +251,38 @@ def test_provenance_end_to_end(tmp_path: Path) -> None:
     assert s2_first.cloud_cover == 10.0
 
 
+def test_code_commit_sha_marks_dirty_tree(tmp_path: Path) -> None:
+    """A dirty working tree gets a -dirty suffix; a clean one a bare SHA."""
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            env={
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t",
+                "HOME": str(tmp_path),
+            },
+        )
+
+    git("init")
+    (tmp_path / "a.txt").write_text("a")
+    git("add", "a.txt")
+    git("commit", "-m", "init")
+
+    clean = stac_mod.code_commit_sha(cwd=tmp_path)
+    assert len(clean) == 40 and not clean.endswith("-dirty")
+
+    (tmp_path / "a.txt").write_text("b")
+    dirty = stac_mod.code_commit_sha(cwd=tmp_path)
+    assert dirty == f"{clean}-dirty"
+
+
 def test_sas_tokens_stripped_from_href_root() -> None:
     item = _s2_item("S2A_SAS", datetime(2025, 4, 1, tzinfo=UTC))
     assert "sig=" in item.assets["B04"].href  # baseline: stub really has a SAS token

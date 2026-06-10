@@ -264,7 +264,13 @@ def _default_client_factory(url: str) -> Any:
 
 
 def code_commit_sha(*, cwd: Path | None = None) -> str:
-    """Return `git rev-parse HEAD`, or `'unknown'` if not in a git repo."""
+    """Return `git rev-parse HEAD` (with a `-dirty` suffix if the tree has
+    uncommitted changes), or `'unknown'` if not in a git repo.
+
+    The suffix matters for provenance: a bare SHA claims the artifact is
+    reproducible from that commit, which is false when the producing code
+    was uncommitted at run time.
+    """
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -274,7 +280,18 @@ def code_commit_sha(*, cwd: Path | None = None) -> str:
             check=True,
             timeout=5,
         )
-        return out.stdout.strip() or "unknown"
+        sha = out.stdout.strip()
+        if not sha:
+            return "unknown"
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        return f"{sha}-dirty" if status.stdout.strip() else sha
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         return "unknown"
 

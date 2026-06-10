@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
+import pytest
 from shapely.geometry import LineString, Point, Polygon
 
 from wildfire_exposure_eo import osm as osm_mod
@@ -260,6 +261,20 @@ def test_provenance_snapshot_timestamp() -> None:
         result = osm_mod.query_overpass("[out:json]; node; out;")
     assert result.osm_snapshot_iso == datetime(2026, 6, 1, tzinfo=UTC)
     assert result.endpoint_used == osm_mod._DEFAULT_ENDPOINT
+
+
+def test_missing_snapshot_timestamp_raises() -> None:
+    """A response without osm3s.timestamp_osm_base fails loud — never the local clock."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"version": 0.6, "elements": []}
+    mock_resp.raise_for_status.return_value = None
+
+    with (
+        patch("wildfire_exposure_eo.osm.requests.post", return_value=mock_resp),
+        pytest.raises(RuntimeError, match="timestamp_osm_base"),
+    ):
+        osm_mod.query_overpass("[out:json]; node; out;")
 
 
 # ── empty-result handling ──────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -150,9 +150,14 @@ def query_overpass(
                 snapshot_str = osm3s.get("timestamp_osm_base", "")
                 try:
                     snapshot_dt = datetime.fromisoformat(snapshot_str.rstrip("Z") + "+00:00")
-                except (ValueError, AttributeError):
-                    snapshot_dt = datetime.now(UTC)
-                    log.warning("No osm3s.timestamp_osm_base in response — using current UTC")
+                except (ValueError, AttributeError) as exc:
+                    # The snapshot timestamp is the provenance ground truth — substituting
+                    # the local clock would silently corrupt every row's provenance.
+                    raise RuntimeError(
+                        f"Overpass response from {ep} has no parseable "
+                        f"osm3s.timestamp_osm_base ({snapshot_str!r}) — refusing to "
+                        "substitute the local clock"
+                    ) from exc
                 elements: list[dict[str, Any]] = payload.get("elements", [])
                 log.info("Overpass %s → %d elements (snapshot %s)", ep, len(elements), snapshot_dt)
                 return OverpassResult(

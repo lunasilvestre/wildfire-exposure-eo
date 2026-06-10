@@ -564,16 +564,20 @@ def fetch_osm(
     import geopandas as gpd
 
     gdf = gpd.read_parquet(result_path)
-    counts = gdf.groupby("asset_class").size().sort_index()
+    counts: dict[str, int] = gdf.groupby("asset_class").size().to_dict()
+    # Iterate the taxonomy, not the groupby result, so zero-count classes
+    # still get their YELLOW row in the table.
+    taxonomy_classes = sorted(k.class_id for k in osm_mod.load_taxonomy(taxonomy).classes)
 
     from rich.table import Table as RichTable
 
     table = RichTable(title="OSM asset counts by class", show_lines=False)
     table.add_column("Asset class", style="bold")
     table.add_column("Count", justify="right")
-    for cls, cnt in counts.items():
+    for cls in taxonomy_classes:
+        cnt = int(counts.get(cls, 0))
         style = "green" if cnt > 0 else "yellow"
-        table.add_row(str(cls), f"[{style}]{cnt}[/]")
+        table.add_row(cls, f"[{style}]{cnt}[/]")
     console.print(table)
     console.print(f"\n[dim]rows:[/dim] {len(gdf)}  [dim]parquet:[/dim] {result_path}")
 
