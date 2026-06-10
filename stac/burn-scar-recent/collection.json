@@ -1,0 +1,47 @@
+{
+  "type": "Collection",
+  "id": "burn-scar-recent",
+  "stac_version": "1.1.0",
+  "description": "Per-run burn-scar inference probability raster over the AOI for a trailing Sentinel-2 L2A window, derived by running the pretrained Prithvi-EO 2.0 burn-scar downstream task (inference only). Detects burn scars \u2014 post-event spectral signatures of fires that already happened. Values are relative model scores, not calibrated probabilities and not fire forecasts. Fills the gap between the latest ICNF \u00c1reas Ardidas vintage and the current date. See inventory.yaml: burn-scar-recent.",
+  "links": [
+    {
+      "rel": "root",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    },
+    {
+      "rel": "item",
+      "href": "./burn-scar-20260610T072820Z/burn-scar-20260610T072820Z.json",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    }
+  ],
+  "title": "Recent burn-scar inference probability (Prithvi-Burn-Scar)",
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -8.59803154818859,
+          40.60493408508384,
+          -8.241945850982022,
+          40.87507168541376
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2025-06-09T00:00:00Z",
+          "2026-06-10T07:28:20.582670Z"
+        ]
+      ]
+    }
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,21 @@
+{
+  "type": "Catalog",
+  "id": "wildfire-exposure-eo",
+  "stac_version": "1.1.0",
+  "description": "STAC-native artifacts of the wildfire-exposure-eo demonstrator: per-collection rasters and vectors produced by the pipeline, with full per-run provenance.",
+  "links": [
+    {
+      "rel": "root",
+      "href": "./catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    },
+    {
+      "rel": "child",
+      "href": "./burn-scar-recent/collection.json",
+      "type": "application/json",
+      "title": "Recent burn-scar inference probability (Prithvi-Burn-Scar)"
+    }
+  ],
+  "title": "wildfire-exposure-eo STAC catalog"
+}
