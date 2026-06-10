@@ -40,8 +40,10 @@ for wu in "$@"; do
   MODEL_FLAGS=()
   [ -n "$MODEL" ] && MODEL_FLAGS=(--model "$MODEL")
 
+  WU_BASE=$(git rev-parse HEAD)
+
   echo "=== $wu : session (model=${MODEL:-default}, effort=high) ==="
-  claude -p "Read prompts/00_CLOSEOUT_PLAN.md and CLAUDE.md end-to-end, then execute ${wu} ONLY, following the session loop (smoke before pilot, gates, session-log entry, scoped commits). UNATTENDED RUN RULES: redirect long-running command output to a file under outputs/logs/ and poll it instead of streaming; if a stop condition fires or anything needs human approval, write the question to ${HIL}, commit it, and end the session immediately." \
+  claude -p "Read prompts/00_CLOSEOUT_PLAN.md and CLAUDE.md end-to-end, then execute ${wu} ONLY, following the session loop (smoke before pilot, gates, session-log entry, scoped commits). UNATTENDED RUN RULES: NEVER invent identifiers, endpoints, or spec details — if a value cannot be verified by querying, leave a '# TODO(provenance):' marker and surface it in the session log; if a deliverable cannot be completed without guessing, write the question to ${HIL}, commit it, and end the session. Redirect long-running command output to a file under outputs/logs/ and poll it instead of streaming; if a stop condition fires or anything needs human approval, write the question to ${HIL}, commit it, and end the session immediately." \
     "${MODEL_FLAGS[@]}" --settings '{"effortLevel":"high"}' \
     "${PERM_FLAGS[@]}" || { echo "$wu session exited non-zero"; exit 1; }
 
@@ -50,6 +52,32 @@ for wu in "$@"; do
     && uv run pyright src tests scripts && uv run pytest -q
 
   [ -f "$HIL" ] && { echo "HIL required after $wu — see $HIL"; exit 2; }
+
+  # A build session that committed nothing is an anomaly, not a success —
+  # refuse to push/continue unattended.
+  [ "$(git rev-parse HEAD)" = "$WU_BASE" ] \
+    && { echo "$wu produced no commits — halting for a human look"; exit 1; }
+
+  # Independent review pass on the strong model (default = session model,
+  # i.e. Fable/Opus). Catches what deterministic gates can't: plausible-but-
+  # wrong logic, self-confirming tests, unverified identifiers. Disable with
+  # CLOSEOUT_REVIEW=off; override model with CLOSEOUT_MODEL_REVIEW.
+  if [ "${CLOSEOUT_REVIEW:-on}" != "off" ]; then
+    REVIEW_MODEL="${CLOSEOUT_MODEL_REVIEW:-}"
+    REVIEW_FLAGS=()
+    [ -n "$REVIEW_MODEL" ] && REVIEW_FLAGS=(--model "$REVIEW_MODEL")
+
+    echo "=== $wu : review (model=${REVIEW_MODEL:-default}) ==="
+    claude -p "You are the INDEPENDENT REVIEWER for ${wu}; a separate session built it in commits ${WU_BASE}..HEAD. Read CLAUDE.md, prompts/00_CLOSEOUT_PLAN.md, and the WU's prompt file end-to-end, then adversarially review 'git diff ${WU_BASE}..HEAD' against the prompt's deliverables and every CLAUDE.md non-negotiable. Hunt specifically for: invented or unverified identifiers (verify STAC/OSM/HF IDs against live sources when cheap); implicit CRS or silent reprojection; missing provenance fields; self-confirming tests that encode the implementation's own misunderstanding; hardcoded AOI coordinates; wrong output formats; probability language for the exposure rank. Re-run any verification you need (gates, --smoke runs, ad-hoc probes). Minor defects: fix them directly with scoped commits and append a one-line review note to the WU entry in prompts/_session_log.md. Structural failures (missing deliverable, wrong approach, needs a rewrite): write your assessment to ${HIL}, commit it, and end the session. UNATTENDED RUN RULES: never guess values you cannot verify; redirect long output to outputs/logs/ and poll. End your final message with one line starting exactly with 'REVIEW: ' — 'REVIEW: PASS', 'REVIEW: FIXED <n>', or 'REVIEW: HIL'." \
+      "${REVIEW_FLAGS[@]}" --settings '{"effortLevel":"high"}' \
+      "${PERM_FLAGS[@]}" || { echo "$wu review exited non-zero"; exit 1; }
+
+    echo "=== $wu : gates (post-review) ==="
+    uv run ruff check . && uv run ruff format --check . \
+      && uv run pyright src tests scripts && uv run pytest -q
+
+    [ -f "$HIL" ] && { echo "HIL required after $wu review — see $HIL"; exit 2; }
+  fi
 
   git push
   if command -v gh >/dev/null; then
