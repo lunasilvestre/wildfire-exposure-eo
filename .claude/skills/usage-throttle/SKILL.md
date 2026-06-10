@@ -48,5 +48,38 @@ The gate reads, in order of preference:
    alignment occasionally and adjust the default in
    `scripts/dev/check_usage.sh` if it drifts.
 
-Throttle thresholds: session ≥ 80% (`CLOSEOUT_SESSION_PCT_MAX`) or weekly
-all-models ≥ 90% (`CLOSEOUT_WEEKLY_PCT_MAX`).
+## Gate rule (time-sensitive, Nelson 2026-06-10)
+
+A WU (build + independent review) costs **~35% of a 5h block** with Sonnet
+builds and Fable reviews. The gate therefore requires real headroom — unless
+the block reset is imminent, in which case the WU mostly runs in the next
+block and high usage is irrelevant:
+
+```
+allowed_used% = max(FLOOR, CEIL − minutes_to_reset)    # FLOOR 50, CEIL 92
+90% used &  2 min to reset → pass     70% used & 20 min → pass
+80% used & 10 min to reset → pass     70% used &  3 h   → throttle
+```
+
+Weekly all-models ≥ 90% always throttles. Knobs: `CLOSEOUT_SESSION_PCT_MAX`
+(floor), `CLOSEOUT_PCT_CEIL`, `CLOSEOUT_WEEKLY_PCT_MAX`.
+
+## Marathon operations doctrine (lessons, 2026-06-10)
+
+1. **The watchdog burns the block too.** An interactive monitoring session
+   re-reads its whole context per wake-up (~1–2%/turn at long context on the
+   top model). Keep monitor filters lean (verdicts, completions, failures —
+   not phase markers) and stay silent between events.
+2. **Resume-waiter conditions.** A "relaunch when the gate passes" waiter
+   only waits if usage is currently *above* threshold — if you stopped below
+   it, it fires immediately. When the intent is "after the reset", gate on
+   the reset *time* first, then re-check the usage gate.
+3. **Never edit a script a running bash is executing** — bash re-reads at
+   saved byte offsets; the running instance keeps the old loop body and may
+   mis-parse the file tail. Queue the patch; apply after the driver exits.
+4. **Never leave the tree dirty while WU sessions run** — they are
+   instructed to stop-and-ask on unexpected git status. Stash interrupted
+   partials with a descriptive message instead.
+5. **Headless `-p` sessions are one-shot.** They must never arm monitors or
+   background jobs expecting re-invocation; long waits are synchronous
+   polls, and the machine-readable verdict goes in the final line.
