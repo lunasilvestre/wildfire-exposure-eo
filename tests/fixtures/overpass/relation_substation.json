@@ -1,0 +1,54 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.1 084b4234",
+  "osm3s": {
+    "timestamp_osm_base": "2026-06-01T00:00:00Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 600000001,
+      "lat": 40.6200,
+      "lon": -8.6400
+    },
+    {
+      "type": "node",
+      "id": 600000002,
+      "lat": 40.6210,
+      "lon": -8.6400
+    },
+    {
+      "type": "node",
+      "id": 600000003,
+      "lat": 40.6210,
+      "lon": -8.6385
+    },
+    {
+      "type": "node",
+      "id": 600000004,
+      "lat": 40.6200,
+      "lon": -8.6385
+    },
+    {
+      "type": "way",
+      "id": 700000001,
+      "nodes": [600000001, 600000002, 600000003, 600000004, 600000001]
+    },
+    {
+      "type": "relation",
+      "id": 800000001,
+      "members": [
+        {
+          "type": "way",
+          "ref": 700000001,
+          "role": "outer"
+        }
+      ],
+      "tags": {
+        "power": "substation",
+        "voltage": "150000"
+      }
+    }
+  ]
+}

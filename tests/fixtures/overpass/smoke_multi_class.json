@@ -1,0 +1,117 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.1 084b4234",
+  "osm3s": {
+    "timestamp_osm_base": "2026-06-01T00:00:00Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 111000001,
+      "lat": 40.6301,
+      "lon": -8.6578,
+      "tags": {
+        "power": "tower"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000002,
+      "lat": 40.6302,
+      "lon": -8.6579,
+      "tags": {
+        "amenity": "fire_station",
+        "name": "Bombeiros Voluntários"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000003,
+      "lat": 40.6303,
+      "lon": -8.6580,
+      "tags": {
+        "amenity": "hospital",
+        "name": "Centro de Saúde"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000004,
+      "lat": 40.6304,
+      "lon": -8.6581,
+      "tags": {
+        "amenity": "school",
+        "name": "Escola Básica"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000005,
+      "lat": 40.6310,
+      "lon": -8.6560
+    },
+    {
+      "type": "node",
+      "id": 111000006,
+      "lat": 40.6315,
+      "lon": -8.6550
+    },
+    {
+      "type": "node",
+      "id": 111000007,
+      "lat": 40.6320,
+      "lon": -8.6540
+    },
+    {
+      "type": "way",
+      "id": 112000001,
+      "nodes": [111000005, 111000006, 111000007],
+      "tags": {
+        "railway": "rail"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000008,
+      "lat": 40.6330,
+      "lon": -8.6530
+    },
+    {
+      "type": "node",
+      "id": 111000009,
+      "lat": 40.6340,
+      "lon": -8.6530
+    },
+    {
+      "type": "node",
+      "id": 111000010,
+      "lat": 40.6340,
+      "lon": -8.6520
+    },
+    {
+      "type": "node",
+      "id": 111000011,
+      "lat": 40.6330,
+      "lon": -8.6520
+    },
+    {
+      "type": "way",
+      "id": 112000002,
+      "nodes": [111000008, 111000009, 111000010, 111000011, 111000008],
+      "tags": {
+        "amenity": "hospital",
+        "name": "Hospital Regional"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111000012,
+      "lat": 40.6350,
+      "lon": -8.6510,
+      "tags": {
+        "power": "substation"
+      }
+    }
+  ]
+}

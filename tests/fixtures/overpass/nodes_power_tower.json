@@ -1,0 +1,30 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.1 084b4234",
+  "osm3s": {
+    "timestamp_osm_base": "2026-06-01T00:00:00Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 123456789,
+      "lat": 40.6301,
+      "lon": -8.6578,
+      "tags": {
+        "power": "tower",
+        "ref": "1"
+      }
+    },
+    {
+      "type": "node",
+      "id": 123456790,
+      "lat": 40.6320,
+      "lon": -8.6550,
+      "tags": {
+        "power": "tower",
+        "ref": "2"
+      }
+    }
+  ]
+}
