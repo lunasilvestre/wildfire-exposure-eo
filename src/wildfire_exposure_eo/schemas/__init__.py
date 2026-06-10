@@ -12,6 +12,10 @@ from wildfire_exposure_eo.schemas.burn_scar import (
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
 from wildfire_exposure_eo.schemas.source_health import SourceHealth, source_health_from_check
 from wildfire_exposure_eo.schemas.stac_manifest import StacItemRef, StacManifest, StacWindow
+from wildfire_exposure_eo.schemas.static_raster_manifest import (
+    FetchRecord,
+    StaticRasterManifest,
+)
 
 __all__ = [
     "HF_MODEL_ID_PLACEHOLDER",
@@ -19,11 +23,13 @@ __all__ = [
     "BurnScarInferenceConfig",
     "BurnScarModelConfig",
     "BurnScarRun",
+    "FetchRecord",
     "OsmAsset",
     "OsmAssetProvenance",
     "SourceHealth",
     "StacItemRef",
     "StacManifest",
     "StacWindow",
+    "StaticRasterManifest",
     "source_health_from_check",
 ]

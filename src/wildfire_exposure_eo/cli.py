@@ -15,6 +15,7 @@ from wildfire_exposure_eo import audit as audit_mod
 from wildfire_exposure_eo import burn_scar as burn_scar_mod
 from wildfire_exposure_eo import osm as osm_mod
 from wildfire_exposure_eo import stac as stac_mod
+from wildfire_exposure_eo import static_rasters as sr_mod
 
 app = typer.Typer(
     name="wildfire-exposure-eo",
@@ -580,6 +581,159 @@ def fetch_osm(
         table.add_row(cls, f"[{style}]{cnt}[/]")
     console.print(table)
     console.print(f"\n[dim]rows:[/dim] {len(gdf)}  [dim]parquet:[/dim] {result_path}")
+
+
+_ALL_SOURCES = {"eth-gch", "effis", "cosc", "cos"}
+
+
+def _parse_only(value: str | None) -> set[str] | None:
+    if value is None:
+        return None
+    parts = {s.strip() for s in value.split(",") if s.strip()}
+    unknown = parts - _ALL_SOURCES
+    if unknown:
+        raise typer.BadParameter(
+            f"--only: unknown source(s) {sorted(unknown)}; valid: {sorted(_ALL_SOURCES)}"
+        )
+    return parts
+
+
+def _configure_sr_logging() -> None:
+    _configure_module_logging("wildfire_exposure_eo.static_rasters")
+
+
+@app.command("fetch-rasters")
+def fetch_rasters(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"),
+        "--aoi",
+        readable=True,
+        dir_okay=False,
+        help="Path to the AOI GeoJSON. Ignored when --smoke is set.",
+    ),
+    cache_dir: Path = typer.Option(
+        Path("data/cache"),
+        "--cache-dir",
+        help="Directory for cached raster files.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Output manifest path. Supports {run_id} templating. Defaults to "
+            "outputs/manifests/static_rasters_{run_id}.json "
+            "(static_rasters_smoke_{run_id}.json with --smoke)."
+        ),
+    ),
+    cosc_vintage: str = typer.Option(
+        "2024_pre_verao",
+        "--cosc-vintage",
+        help="DGT COSc vintage to fetch ('2023' or '2024_pre_verao').",
+    ),
+    cos_vintage: str = typer.Option(
+        "2023_v1",
+        "--cos-vintage",
+        help="DGT COS vintage to fetch ('2018_v3' or '2023_v1').",
+    ),
+    only: str | None = typer.Option(
+        None,
+        "--only",
+        help="Comma-separated subset of sources to fetch: eth-gch,effis,cosc,cos.",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-download even if a valid cache entry exists."
+    ),
+    smoke: bool = typer.Option(
+        False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
+    ),
+) -> None:
+    """Fetch static rasters (ETH GCH, EFFIS, DGT COSc, DGT COS); write a provenance manifest.
+
+    Downloads are idempotent: re-running without --force skips files whose
+    SHA-256 matches the sidecar written on first download.
+    """
+    console = Console()
+    _configure_sr_logging()
+
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+        default_out_template = "outputs/manifests/static_rasters_smoke_{run_id}.json"
+    else:
+        default_out_template = "outputs/manifests/static_rasters_{run_id}.json"
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+
+    try:
+        source_filter = _parse_only(only)
+    except typer.BadParameter as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    resolved_at = datetime.now(UTC)
+    run_id = resolved_at.strftime("%Y%m%dT%H%M%SZ")
+    out_path = out if out is not None else Path(default_out_template)
+    final_out = Path(str(out_path).replace("{run_id}", run_id))
+
+    from shapely.geometry import shape as _shape
+    from shapely.ops import unary_union as _union
+
+    aoi_geojson = json.loads(aoi.read_text())
+    features = aoi_geojson.get("features", [aoi_geojson])
+    aoi_geom = _union([_shape(f["geometry"]) for f in features])
+    aoi_sha = stac_mod.load_aoi_geometry(aoi)[1]
+    commit_sha = stac_mod.code_commit_sha(cwd=Path.cwd())
+
+    console.print(f"[dim]AOI:[/dim] {aoi}")
+    console.print(f"[dim]cache-dir:[/dim] {cache_dir}")
+    console.print(f"[dim]sources:[/dim] {sorted(source_filter) if source_filter else 'all'}")
+    console.print(f"[dim]run_id:[/dim] {run_id}\n")
+
+    records: list[sr_mod.FetchRecord] = []
+
+    if source_filter is None or "eth-gch" in source_filter:
+        tile_ids = sr_mod.compute_eth_gch_tile_ids(aoi_geom)
+        console.print(f"[dim]ETH GCH tiles:[/dim] {tile_ids}")
+        for tile_id in tile_ids:
+            rec = sr_mod.fetch_eth_gch_tile(tile_id, cache_dir=cache_dir, force=force)
+            records.append(rec)
+            status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"
+            console.print(f"  eth-gch {tile_id}: {rec.bytes_downloaded:,} bytes  {status}")
+
+    if source_filter is None or "effis" in source_filter:
+        rec = sr_mod.fetch_effis_fuel_map(cache_dir=cache_dir, force=force)
+        records.append(rec)
+        status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"
+        console.print(f"  effis: {rec.bytes_downloaded:,} bytes  {status}")
+
+    if source_filter is None or "cosc" in source_filter:
+        rec = sr_mod.fetch_dgt_cosc(cosc_vintage, cache_dir=cache_dir, force=force)
+        records.append(rec)
+        status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"
+        console.print(f"  dgt-cosc ({cosc_vintage}): {rec.bytes_downloaded:,} bytes  {status}")
+
+    if source_filter is None or "cos" in source_filter:
+        rec = sr_mod.fetch_dgt_cos(cos_vintage, cache_dir=cache_dir, force=force)
+        records.append(rec)
+        status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"
+        console.print(f"  dgt-cos ({cos_vintage}): {rec.bytes_downloaded:,} bytes  {status}")
+
+    if not records:
+        console.print("[yellow]no sources selected — nothing fetched[/yellow]")
+        raise typer.Exit(code=0)
+
+    manifest = sr_mod.build_fetch_manifest(
+        records,
+        aoi_path=str(aoi),
+        run_id=run_id,
+        code_commit_sha=commit_sha,
+        aoi_geometry_sha=aoi_sha,
+        resolved_at_utc=resolved_at,
+    )
+    manifest_path = sr_mod.write_manifest(manifest, final_out)
+
+    n_records = len(records)
+    total_b = manifest.totals_bytes
+    console.print(f"\n[dim]total:[/dim] {total_b:,} bytes across {n_records} record(s)")
+    console.print(f"[dim]manifest:[/dim] {manifest_path}")
 
 
 if __name__ == "__main__":
