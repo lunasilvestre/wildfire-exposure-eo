@@ -242,9 +242,8 @@ def test_fetch_icnf_layer_crs_reprojection_area() -> None:
     # Reproject back to EPSG:3763 to compute area; must be within 1% of 100 ha
     area_m2 = float(gdf.to_crs("EPSG:3763").geometry.iloc[0].area)
     area_ha = area_m2 / 10_000
-    assert (
-        abs(area_ha - 100.0) / 100.0 < 0.01
-    ), f"Area {area_ha:.4f} ha deviates >1% from expected 100 ha after CRS round-trip"
+    err = f"Area {area_ha:.4f} ha deviates >1% from 100 ha after CRS round-trip"
+    assert abs(area_ha - 100.0) / 100.0 < 0.01, err
 
 
 # ── empty AOI ──────────────────────────────────────────────────────────────────

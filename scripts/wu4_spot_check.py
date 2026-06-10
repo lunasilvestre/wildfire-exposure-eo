@@ -35,9 +35,8 @@ BurnPerimeter.model_validate(
         "provenance": prov,
     }
 )
-assert prov.vintage_year == int(
-    row["vintage_year"]
-), f"provenance vintage {prov.vintage_year} != row vintage {int(row['vintage_year'])}"
+row_vintage = int(row["vintage_year"])
+assert prov.vintage_year == row_vintage, f"prov vintage {prov.vintage_year} != {row_vintage}"
 assert prov.icnf_layer_id >= 0, f"provenance icnf_layer_id is a sentinel: {prov.icnf_layer_id}"
 print(f"\nRow 0 row_id: {row['row_id']}")
 print(f"Row 0 vintage_year (column): {int(row['vintage_year'])}")
