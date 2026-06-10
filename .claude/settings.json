@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(uv sync*)",
+      "Bash(uv lock*)",
+      "Bash(git *)",
+      "Bash(gh run list*)",
+      "Bash(gh run view*)",
+      "Bash(gh run watch*)",
+      "Bash(scripts/dev/check_usage.sh)",
+      "Bash(npx --yes ccusage*)",
+      "Bash(ls*)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(jq *)",
+      "Bash(date*)",
+      "Bash(mkdir *)",
+      "Bash(curl *)"
+    ]
+  }
+}

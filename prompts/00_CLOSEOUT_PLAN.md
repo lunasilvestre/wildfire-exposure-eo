@@ -117,6 +117,24 @@ commit (small, scoped); push only if CI was green at session start
 STOP — do not start the next WU in the same session
 ```
 
+## Marathon mode (amended 2026-06-09, `ob1:10ef1401`)
+
+Unattended continuous execution is allowed in **two stretches**, driven by
+`scripts/dev/run_closeout.sh` (one fresh headless session per WU, gates +
+CI check + HIL sentinel between WUs, usage gate via the `usage-throttle`
+project skill):
+
+- **Stretch 1 — WU-2 → WU-4** (specs already exist; no approval points).
+  May start as soon as WU-1's code lands.
+- **Human checkpoint** — the four "write it first" prompts (WU-5..WU-8) are
+  batch-drafted in one attended session and approved together. This is the
+  one place a human must read before code gets written.
+- **Stretch 2 — WU-5 → WU-8**, except the final README status change
+  (public surface) which still requires explicit approval.
+
+Sessions needing a human mid-stretch write `prompts/_HIL.md`, commit it,
+and exit; the driver halts. Unattended effort is `high`, never ultracode.
+
 ## Stop conditions (halt and surface to the human)
 
 - Any CLAUDE.md non-negotiable would be violated to make progress.
