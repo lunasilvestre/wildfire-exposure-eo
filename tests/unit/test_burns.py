@@ -142,11 +142,15 @@ def test_discover_icnf_layers_feature_count() -> None:
 
 
 def _make_feature(object_id: int, year: int, *, area_ha: float = 10.0) -> dict:
-    """Build a minimal ArcGIS REST feature with a 100m×100m square in EPSG:3763."""
+    """Build a minimal ArcGIS REST feature with a 100m×100m square in EPSG:3763.
+
+    Attribute names match the live ICNF server: ``Ano`` and ``AreaHaPoly``.
+    The ring winds clockwise — the Esri convention for exterior rings.
+    """
     x, y = -45000 + object_id * 200, 190000
     return {
-        "attributes": {"OBJECTID": object_id, "ANO": year, "AREA_HA": area_ha},
-        "geometry": {"rings": [[[x, y], [x + 100, y], [x + 100, y + 100], [x, y + 100], [x, y]]]},
+        "attributes": {"OBJECTID": object_id, "Ano": year, "AreaHaPoly": area_ha},
+        "geometry": {"rings": [[[x, y], [x, y + 100], [x + 100, y + 100], [x + 100, y], [x, y]]]},
     }
 
 
@@ -212,14 +216,14 @@ def test_fetch_icnf_layer_crs_reprojection_area() -> None:
 
     # 1000 m x 1000 m square at (-45000, 192000) in EPSG:3763 -> exactly 100 ha
     feature = {
-        "attributes": {"OBJECTID": 999, "ANO": 2017, "AREA_HA": 100.0},
+        "attributes": {"OBJECTID": 999, "Ano": 2017, "AreaHaPoly": 100.0},
         "geometry": {
             "rings": [
                 [
                     [-45000, 192000],
-                    [-44000, 192000],
-                    [-44000, 193000],
                     [-45000, 193000],
+                    [-44000, 193000],
+                    [-44000, 192000],
                     [-45000, 192000],
                 ]
             ]
@@ -339,3 +343,132 @@ def test_combine_burns_empty_inputs() -> None:
     result = burns_mod.combine_burns({})
     assert result.empty
     assert result.crs is not None and result.crs.to_epsg() == 4326
+
+
+# ── area extraction ────────────────────────────────────────────────────────────
+
+
+def test_extract_area_attr_live_field_name() -> None:
+    """The live ICNF field AreaHaPoly is read (regression: was silently ignored)."""
+    assert burns_mod._extract_area_attr({"OBJECTID": 1, "AreaHaPoly": 65.91566807}) == 65.91566807
+
+
+def test_extract_area_attr_priority_order() -> None:
+    """area_ha is preferred over generic area regardless of attribute order."""
+    assert burns_mod._extract_area_attr({"area": 1.0, "AREA_HA": 2.0}) == 2.0
+
+
+def test_area_attribute_preferred_over_geometry() -> None:
+    """When the server provides AreaHaPoly, it is stored verbatim, not recomputed."""
+    layer = _make_descriptor(2017, layer_id=3)
+    aoi = Polygon([(-8.5, 39.5), (-7.5, 39.5), (-7.5, 40.5), (-8.5, 40.5)])
+    # 100 m x 100 m square (1 ha geometry) but attribute says 2.25873695 ha
+    feature = _make_feature(1, 2017, area_ha=2.25873695)
+    payload = {"features": [feature], "exceededTransferLimit": False}
+
+    with patch(
+        "wildfire_exposure_eo.burns._get_with_retry",
+        return_value=_mock_response(payload),
+    ):
+        gdf = burns_mod.fetch_icnf_layer(layer, aoi)
+    gdf = burns_mod.fill_missing_areas(gdf)
+
+    assert float(gdf["area_ha"].iloc[0]) == 2.25873695
+
+
+def test_fill_missing_areas_computes_in_3763() -> None:
+    """Rows without an area attribute get geometry area computed in EPSG:3763."""
+    layer = _make_descriptor(2017, layer_id=3)
+    aoi = Polygon([(-8.5, 39.5), (-7.5, 39.5), (-7.5, 40.5), (-8.5, 40.5)])
+    feature = _make_feature(1, 2017)
+    del feature["attributes"]["AreaHaPoly"]  # no area attribute at all
+    payload = {"features": [feature], "exceededTransferLimit": False}
+
+    with patch(
+        "wildfire_exposure_eo.burns._get_with_retry",
+        return_value=_mock_response(payload),
+    ):
+        gdf = burns_mod.fetch_icnf_layer(layer, aoi)
+    assert float(gdf["area_ha"].iloc[0]) == 0.0  # fallback marker
+
+    filled = burns_mod.fill_missing_areas(gdf)
+    # 100 m x 100 m square -> 1 ha, within round-trip tolerance
+    assert abs(float(filled["area_ha"].iloc[0]) - 1.0) / 1.0 < 0.01
+
+
+# ── ring orientation (Esri convention: exterior CW, holes CCW) ────────────────
+
+
+def test_parse_arcgis_geometry_hole_subtracted() -> None:
+    """A CCW ring is a hole and is subtracted, not unioned (unburned enclave)."""
+    outer = [[0, 0], [0, 1000], [1000, 1000], [1000, 0], [0, 0]]  # CW exterior
+    hole = [[200, 200], [800, 200], [800, 800], [200, 800], [200, 200]]  # CCW hole
+    geom = burns_mod._parse_arcgis_geometry({"rings": [outer, hole]})
+    assert geom is not None
+    # 1,000,000 m² outer minus 360,000 m² hole
+    assert abs(geom.area - 640_000) < 1e-6
+
+
+def test_parse_arcgis_geometry_unoriented_fallback() -> None:
+    """All-CCW rings (unoriented server output) still parse as outers."""
+    ccw = [[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]
+    geom = burns_mod._parse_arcgis_geometry({"rings": [ccw]})
+    assert geom is not None
+    assert abs(geom.area - 10_000) < 1e-6
+
+
+# ── response SR guard ──────────────────────────────────────────────────────────
+
+
+def test_fetch_icnf_layer_rejects_unexpected_sr() -> None:
+    """A response in a different spatialReference raises instead of mis-tagging CRS."""
+    layer = _make_descriptor(2017, layer_id=3)
+    aoi = Polygon([(-8.5, 39.5), (-7.5, 39.5), (-7.5, 40.5), (-8.5, 40.5)])
+    payload = {
+        "spatialReference": {"wkid": 102100, "latestWkid": 3857},
+        "features": [_make_feature(1, 2017)],
+        "exceededTransferLimit": False,
+    }
+
+    with (
+        patch(
+            "wildfire_exposure_eo.burns._get_with_retry",
+            return_value=_mock_response(payload),
+        ),
+        pytest.raises(RuntimeError, match="spatialReference"),
+    ):
+        burns_mod.fetch_icnf_layer(layer, aoi)
+
+
+# ── per-row provenance ─────────────────────────────────────────────────────────
+
+
+def test_write_burns_geoparquet_per_row_provenance(tmp_path: Path) -> None:
+    """Each written row carries its own vintage_year and source layer in provenance."""
+    layer_2017 = _make_descriptor(2017, layer_id=3)
+    layer_2020 = _make_descriptor(2020, layer_id=0)
+    aoi = Polygon([(-8.5, 39.5), (-7.5, 39.5), (-7.5, 40.5), (-8.5, 40.5)])
+
+    def _fetch(layer: IcnfLayerDescriptor) -> gpd.GeoDataFrame:
+        payload = {
+            "features": [_make_feature(layer.layer_id * 100 + 1, layer.year)],
+            "exceededTransferLimit": False,
+        }
+        with patch(
+            "wildfire_exposure_eo.burns._get_with_retry",
+            return_value=_mock_response(payload),
+        ):
+            return burns_mod.fetch_icnf_layer(layer, aoi)
+
+    combined = burns_mod.combine_burns({2017: _fetch(layer_2017), 2020: _fetch(layer_2020)})
+    out = tmp_path / "burns.parquet"
+    burns_mod.write_burns_geoparquet(combined, out, run_provenance=_make_provenance())
+
+    gdf = gpd.read_parquet(out)
+    assert len(gdf) == 2
+    for _, row in gdf.iterrows():
+        prov = BurnPerimeterProvenance.model_validate(row["provenance"])
+        assert prov.vintage_year == int(row["vintage_year"])
+        expected_layer = 3 if prov.vintage_year == 2017 else 0
+        assert prov.icnf_layer_id == expected_layer
+        assert prov.icnf_layer_name == f"Áreas Ardidas {prov.vintage_year}"

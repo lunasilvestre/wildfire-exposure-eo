@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 import geopandas as gpd
 import pandas as pd
 import requests
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import LinearRing, Point, Polygon
+from shapely.ops import unary_union
 
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
@@ -34,9 +35,11 @@ _EPSG_OUTPUT = "EPSG:4326"
 _REQUEST_TIMEOUT = 60
 _RETRIES = 2
 
-# ArcGIS REST field names for year and area (case-insensitive search)
-_YEAR_FIELDS = ("ano", "year", "ano_")
-_AREA_FIELDS = ("area_ha", "area_ha_", "areaha", "area")
+# ArcGIS REST field names for year and area (case-insensitive search).
+# The live ICNF server (verified 2026-06-10) publishes the year as "Ano" and the
+# polygon area as "AreaHaPoly"; the other spellings cover historical variants.
+_YEAR_FIELDS = ("ano", "year")
+_AREA_FIELDS = ("area_ha", "areahapoly", "areaha", "area")
 
 
 def discover_icnf_layers(
@@ -95,10 +98,12 @@ def fetch_icnf_layer(
 ) -> gpd.GeoDataFrame:
     """Fetch all features for one layer intersecting the AOI bbox.
 
-    Issues paginated ArcGIS REST queries (``f=json``) in the server's native
-    ``EPSG:3763`` and reprojects to ``EPSG:4326`` before returning.  The AOI
-    geometry is supplied in EPSG:4326; ``inSR=4326`` is passed so the server
-    filters in the correct coordinate space.
+    Issues paginated ArcGIS REST queries (``f=json``) requesting output
+    explicitly in the server's native ``EPSG:3763`` (``outSR=3763``; the
+    response SR is verified, never assumed) and reprojects to ``EPSG:4326``
+    before returning.  The AOI geometry is supplied in EPSG:4326;
+    ``inSR=4326`` is passed so the server filters in the correct
+    coordinate space.
 
     Returns an empty GeoDataFrame (EPSG:4326) when no features intersect the AOI.
     """
@@ -124,6 +129,7 @@ def fetch_icnf_layer(
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
             "outFields": "*",
+            "outSR": "3763",
             "returnGeometry": "true",
             "resultOffset": offset,
             "resultRecordCount": batch_size,
@@ -142,6 +148,15 @@ def fetch_icnf_layer(
 
         if "error" in payload:
             raise RuntimeError(f"ArcGIS REST error for layer {layer.layer_id}: {payload['error']}")
+
+        # Never trust the requested outSR implicitly — verify when the server reports it
+        sr = payload.get("spatialReference") or {}
+        wkid = sr.get("latestWkid") or sr.get("wkid")
+        if wkid is not None and int(wkid) != 3763:
+            raise RuntimeError(
+                f"Layer {layer.layer_id}: server returned spatialReference wkid={wkid}, "
+                f"expected 3763 ({_EPSG_NATIVE}) — refusing to set CRS implicitly"
+            )
 
         features: list[dict[str, Any]] = payload.get("features", [])
         all_features.extend(features)
@@ -215,14 +230,29 @@ def write_burns_geoparquet(
     """Write the combined burn-perimeter GeoDataFrame as a GeoParquet.
 
     CRS is pinned to EPSG:4326; compression is snappy.  Per-row provenance is
-    stored as a nested struct column — the provenance object is the same for
-    every row in a single run (vintage-specific fields live in the row itself).
+    stored as a nested struct column: run-level fields (run_id, commit, AOI,
+    fetch timestamp) come from ``run_provenance``, while ``icnf_layer_id``,
+    ``icnf_layer_name`` and ``vintage_year`` are filled from the row itself so
+    every row carries its own vintage (the downstream leakage anchor) and
+    source layer.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     out = gdf.copy()
     out["geometry_wkb"] = out["geometry"].apply(lambda g: g.wkb)
-    prov_dict = run_provenance.model_dump(mode="json")
-    out["provenance"] = [prov_dict] * len(out)
+    template = run_provenance.model_dump(mode="json")
+    if out.empty:
+        out["provenance"] = []
+    else:
+        out["provenance"] = [
+            {
+                **template,
+                "icnf_layer_id": int(r["icnf_layer_id"]),
+                "icnf_layer_name": str(r["icnf_layer_name"]),
+                "vintage_year": int(r["vintage_year"]),
+            }
+            for _, r in out[["icnf_layer_id", "icnf_layer_name", "vintage_year"]].iterrows()
+        ]
+        out = out.drop(columns=["icnf_layer_id", "icnf_layer_name"])
     out.to_parquet(path, compression="snappy", index=False)
     log.info("Wrote %d rows → %s", len(out), path)
     return path
@@ -357,6 +387,8 @@ def _parse_features(
             {
                 "feature_id": feature_id,
                 "vintage_year": vintage_year,
+                "icnf_layer_id": layer.layer_id,
+                "icnf_layer_name": layer.name,
                 "area_ha": area_ha,
                 "geometry": geom,
             }
@@ -381,17 +413,22 @@ def _extract_year_attr(attrs: dict[str, Any]) -> int | None:
 
 
 def _extract_area_attr(attrs: dict[str, Any]) -> float:
-    """Return area_ha from feature attributes; 0.0 signals fallback-needed."""
-    for key in attrs:
-        if key.lower().rstrip("_") in _AREA_FIELDS:
-            val = attrs[key]
-            if val is not None:
-                try:
-                    area = float(val)
-                    if area > 0:
-                        return area
-                except (ValueError, TypeError):
-                    pass
+    """Return area_ha from feature attributes; 0.0 signals fallback-needed.
+
+    Matches case-insensitively in ``_AREA_FIELDS`` priority order, not in the
+    server's attribute order, so ``area_ha`` always wins over generic ``area``.
+    """
+    by_key = {key.lower().rstrip("_"): attrs[key] for key in attrs}
+    for field in _AREA_FIELDS:
+        val = by_key.get(field)
+        if val is None:
+            continue
+        try:
+            area = float(val)
+        except (ValueError, TypeError):
+            continue
+        if area > 0:
+            return area
     return 0.0
 
 
@@ -399,19 +436,34 @@ def _parse_arcgis_geometry(geom_dict: dict[str, Any]) -> BaseGeometry | None:
     """Convert an ArcGIS REST geometry dict to a shapely geometry.
 
     Supports esriGeometryPolygon (rings) and esriGeometryPoint (x/y).
-    For polygons with multiple rings each ring is treated as an outer polygon
-    (burn perimeters are rarely multi-part with holes; a simple union suffices).
+    Esri ring orientation is significant: exterior rings wind clockwise, holes
+    counter-clockwise.  Holes are subtracted, never unioned — ICNF burn
+    perimeters routinely contain dozens of unburned enclaves, and treating
+    holes as outer rings inflates area by ~10% and fills the enclaves.
     """
     if not geom_dict:
         return None
 
     rings = geom_dict.get("rings")
     if rings is not None:
-        polys = [Polygon(ring) for ring in rings if len(ring) >= 4]
-        polys = [p for p in polys if not p.is_empty]
-        if not polys:
+        outers: list[Polygon] = []
+        holes: list[Polygon] = []
+        for ring in rings:
+            if len(ring) < 4:
+                continue
+            poly = Polygon(ring)
+            if poly.is_empty:
+                continue
+            (holes if LinearRing(ring).is_ccw else outers).append(poly)
+        if not outers:
+            # Defensive: some servers emit unoriented rings — treat all as outers
+            outers, holes = holes, []
+        if not outers:
             return None
-        return MultiPolygon(polys) if len(polys) > 1 else polys[0]
+        geom = unary_union(outers)
+        if holes:
+            geom = geom.difference(unary_union(holes))
+        return None if geom.is_empty else geom
 
     x = geom_dict.get("x")
     y = geom_dict.get("y")
@@ -505,10 +557,12 @@ def fetch_burns(
     combined = combine_burns(per_year)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Template only: layer/vintage fields are overridden per row in
+    # write_burns_geoparquet, so these placeholders never reach the output.
     prov = BurnPerimeterProvenance(
-        icnf_layer_id=-1,  # -1 = combined (multiple layers)
-        icnf_layer_name="combined",
-        vintage_year=-1,  # -1 = multiple vintages in the output
+        icnf_layer_id=-1,
+        icnf_layer_name="",
+        vintage_year=-1,
         mapserver_url=mapserver_url,
         fetched_at_utc=fetched_at,
         run_id=run_id,

@@ -106,10 +106,14 @@ def test_fetch_burns_smoke(tmp_path: Path) -> None:
     # CRS is EPSG:4326
     assert gdf.crs is not None and gdf.crs.to_epsg() == 4326
 
-    # Every row Pydantic-validates as BurnPerimeter
+    # Every row Pydantic-validates as BurnPerimeter, and provenance is per-row:
+    # vintage_year matches the row and icnf_layer_id points at the source layer
+    expected_layer_by_year = {2017: 3, 2020: 0, 2024: 19}
     for _, row in gdf.iterrows():
         prov_dict = row["provenance"]
         prov = BurnPerimeterProvenance.model_validate(prov_dict)
+        assert prov.vintage_year == int(row["vintage_year"])
+        assert prov.icnf_layer_id == expected_layer_by_year[prov.vintage_year]
         BurnPerimeter.model_validate(
             {
                 "row_id": str(row["row_id"]),

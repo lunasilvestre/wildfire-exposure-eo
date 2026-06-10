@@ -5,19 +5,19 @@
   "spatialReference": {"wkid": 3763, "latestWkid": 3763},
   "fields": [
     {"name": "OBJECTID", "alias": "OBJECTID", "type": "esriFieldTypeOID", "length": 4},
-    {"name": "ANO", "alias": "Ano", "type": "esriFieldTypeSmallInteger", "length": 2},
-    {"name": "AREA_HA", "alias": "Área (ha)", "type": "esriFieldTypeDouble", "length": 8}
+    {"name": "Ano", "alias": "Ano", "type": "esriFieldTypeSmallInteger", "length": 2},
+    {"name": "AreaHaPoly", "alias": "Área (ha)", "type": "esriFieldTypeDouble", "length": 8}
   ],
   "features": [
     {
-      "attributes": {"OBJECTID": 401, "ANO": 2024, "AREA_HA": 4519.0},
+      "attributes": {"OBJECTID": 401, "Ano": 2024, "AreaHaPoly": 4519.0},
       "geometry": {
         "rings": [
           [
             [-41000, 196000],
-            [-40000, 196000],
-            [-40000, 197000],
             [-41000, 197000],
+            [-40000, 197000],
+            [-40000, 196000],
             [-41000, 196000]
           ]
         ]

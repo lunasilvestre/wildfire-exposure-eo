@@ -205,10 +205,10 @@ jobs:
               )
               BurnPerimeter.model_validate({
                   "row_id": f"icnf:2017:{attrs['OBJECTID']}",
-                  "vintage_year": attrs["ANO"],
+                  "vintage_year": attrs["Ano"],
                   "icnf_feature_id": attrs["OBJECTID"],
                   "geometry_wkb": poly.wkb,
-                  "area_ha": attrs["AREA_HA"],
+                  "area_ha": attrs["AreaHaPoly"],
                   "provenance": prov,
               })
           print(f"OK: {len(fixture['features'])} BurnPerimeter records validated")
