@@ -83,3 +83,27 @@ Weekly all-models ≥ 90% always throttles. Knobs: `CLOSEOUT_SESSION_PCT_MAX`
 5. **Headless `-p` sessions are one-shot.** They must never arm monitors or
    background jobs expecting re-invocation; long waits are synchronous
    polls, and the machine-readable verdict goes in the final line.
+
+## Orchestrator playbook (the watchdog session)
+
+- Run the watchdog as a **fresh session per stretch** on a cheaper strong
+  model (Opus-tier suffices once this playbook exists) — state lives in
+  `prompts/_session_log.md`, the driver log, and OB1, not in chat history.
+  Context length × wake-up count dominates watchdog cost, not model price.
+- Monitor filter: `REVIEW:` verdicts, `WU-n : done`, THROTTLED / HIL /
+  exit / "produced no commits" lines only. Stay silent between events.
+- A quiet driver log is normal — WU sessions write to their own files
+  under `outputs/logs/`. Stall triage order: process tree (a child means a
+  tool is running), session transcript mtime under
+  `~/.claude/projects/<project-slug>/`, CPU delta over 10 s.
+- Give an apparently stalled API call **≥ 10 min** (SDK retry envelope)
+  before killing. And remember silence is ambiguous: a *finished* session
+  is exactly as quiet as a wedged one — pair any mtime watcher with a
+  process-liveness check and the driver log's phase markers.
+- Intervention = process-group kill via the recorded pid, stash partials
+  with a descriptive message, verify the tree is clean, then re-arm:
+  **time-based waiter** when the intent is "after the block reset",
+  gate-based waiter only when currently above threshold.
+- Escalate to the human instead of improvising when: a WU needs a rebuild,
+  a gate failure touches the data contract / CLI surface / pinned deps,
+  or anything off-playbook appears.
