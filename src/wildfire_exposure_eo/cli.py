@@ -13,6 +13,7 @@ from rich.table import Table
 
 from wildfire_exposure_eo import audit as audit_mod
 from wildfire_exposure_eo import burn_scar as burn_scar_mod
+from wildfire_exposure_eo import osm as osm_mod
 from wildfire_exposure_eo import stac as stac_mod
 
 app = typer.Typer(
@@ -474,6 +475,107 @@ def infer_burn_scar(
         item_path = burn_scar_mod.write_stac_item(provenance, cog_path)
         table.add_row("STAC item", str(item_path))
     console.print(table)
+
+
+def _configure_osm_logging() -> None:
+    _configure_module_logging("wildfire_exposure_eo.osm")
+
+
+@app.command("fetch-osm")
+def fetch_osm(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"),
+        "--aoi",
+        readable=True,
+        dir_okay=False,
+        help="Path to the AOI GeoJSON. Ignored when --smoke is set.",
+    ),
+    taxonomy: Path = typer.Option(
+        Path("data/taxonomy/critical_infrastructure.yaml"),
+        "--taxonomy",
+        exists=True,
+        readable=True,
+        dir_okay=False,
+        help="Path to the critical_infrastructure.yaml taxonomy.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Output GeoParquet path. Supports {run_id} templating. Defaults to "
+            "outputs/parquet/osm_assets_{run_id}.parquet "
+            "(osm_assets_smoke_{run_id}.parquet with --smoke)."
+        ),
+    ),
+    endpoint: str = typer.Option(
+        osm_mod._DEFAULT_ENDPOINT,
+        "--endpoint",
+        help="Primary Overpass API endpoint URL.",
+    ),
+    fallback_endpoint: str | None = typer.Option(
+        osm_mod._FALLBACK_ENDPOINT,
+        "--fallback-endpoint",
+        help="Fallback Overpass endpoint used after primary exhaustion.",
+    ),
+    smoke: bool = typer.Option(
+        False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
+    ),
+) -> None:
+    """Query Overpass for every infrastructure class; write a provenance-tagged GeoParquet.
+
+    All OSM IDs are real values from Overpass — none are invented. The output
+    validates as wildfire_exposure_eo.schemas.OsmAsset per row.
+    """
+    console = Console()
+    _configure_osm_logging()
+
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+        default_out_template = "outputs/parquet/osm_assets_smoke_{run_id}.parquet"
+    else:
+        default_out_template = "outputs/parquet/osm_assets_{run_id}.parquet"
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+
+    created_at = datetime.now(UTC)
+    run_id = created_at.strftime("%Y%m%dT%H%M%SZ")
+    out_path = out if out is not None else Path(default_out_template)
+    final_out = Path(str(out_path).replace("{run_id}", run_id))
+
+    _, aoi_sha = stac_mod.load_aoi_geometry(aoi)
+    commit_sha = stac_mod.code_commit_sha(cwd=Path.cwd())
+
+    console.print(f"[dim]AOI:[/dim] {aoi}")
+    console.print(f"[dim]taxonomy:[/dim] {taxonomy}")
+    console.print(f"[dim]endpoint:[/dim] {endpoint}")
+    console.print(f"[dim]run_id:[/dim] {run_id}\n")
+
+    result_path = osm_mod.fetch_osm(
+        aoi,
+        taxonomy,
+        final_out,
+        endpoint=endpoint,
+        fallback_endpoint=fallback_endpoint,
+        run_id=run_id,
+        code_commit_sha=commit_sha,
+        aoi_geometry_sha=aoi_sha,
+    )
+
+    import geopandas as gpd
+
+    gdf = gpd.read_parquet(result_path)
+    counts = gdf.groupby("asset_class").size().sort_index()
+
+    from rich.table import Table as RichTable
+
+    table = RichTable(title="OSM asset counts by class", show_lines=False)
+    table.add_column("Asset class", style="bold")
+    table.add_column("Count", justify="right")
+    for cls, cnt in counts.items():
+        style = "green" if cnt > 0 else "yellow"
+        table.add_row(str(cls), f"[{style}]{cnt}[/]")
+    console.print(table)
+    console.print(f"\n[dim]rows:[/dim] {len(gdf)}  [dim]parquet:[/dim] {result_path}")
 
 
 if __name__ == "__main__":
