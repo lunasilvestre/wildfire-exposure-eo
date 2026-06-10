@@ -490,3 +490,18 @@ def test_scene_failure_raises_after_max_attempts(monkeypatch: pytest.MonkeyPatch
             scl_mask_classes=(0,),
         )
     assert len(calls) == burn_scar._SCENE_ATTEMPTS
+
+
+def test_gdal_http_defaults_set_but_never_clobber(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    for key in burn_scar._GDAL_HTTP_DEFAULTS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GDAL_HTTP_TIMEOUT", "7")
+
+    burn_scar._apply_gdal_http_defaults()
+
+    assert os.environ["GDAL_HTTP_TIMEOUT"] == "7", "pre-set values must win"
+    for key, value in burn_scar._GDAL_HTTP_DEFAULTS.items():
+        if key != "GDAL_HTTP_TIMEOUT":
+            assert os.environ[key] == value

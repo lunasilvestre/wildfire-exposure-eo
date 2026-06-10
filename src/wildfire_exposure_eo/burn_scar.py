@@ -68,6 +68,25 @@ _SAS_CACHE: dict[str, tuple[str, datetime]] = {}
 _SCENE_ATTEMPTS = 3
 _SCENE_RETRY_DELAYS_S = (30, 180)
 
+#: GDAL/curl HTTP discipline for blob reads. Without a timeout, a connection
+#: the server has half-closed (CLOSE-WAIT) blocks a read forever and the
+#: scene-level retry never fires — observed on the 2026-06-10 pilot run.
+#: Applied with setdefault so externally-set values win.
+_GDAL_HTTP_DEFAULTS = {
+    "GDAL_HTTP_TIMEOUT": "120",
+    "GDAL_HTTP_CONNECTTIMEOUT": "30",
+    "GDAL_HTTP_MAX_RETRY": "3",
+    "GDAL_HTTP_RETRY_DELAY": "5",
+}
+
+
+def _apply_gdal_http_defaults() -> None:
+    """Make hung blob reads fail fast instead of blocking forever."""
+    import os
+
+    for key, value in _GDAL_HTTP_DEFAULTS.items():
+        os.environ.setdefault(key, value)
+
 
 def load_burn_scar_config(path: Path = DEFAULT_CONFIG_PATH) -> BurnScarConfig:
     """Parse and validate `config/burn_scar.yaml`."""
@@ -414,6 +433,7 @@ def infer_burn_probability(
 
     if not items:
         raise ValueError("no S2 items to infer over — query_recent_s2 returned an empty list")
+    _apply_gdal_http_defaults()
 
     epsg_counts = Counter(_item_epsg(it) for it in items)
     epsg = epsg_counts.most_common(1)[0][0]
