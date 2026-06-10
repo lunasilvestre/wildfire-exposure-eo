@@ -74,7 +74,7 @@ jobs:
       - if: steps.stac.outputs.present == 'true'
         run: uv sync --locked --extra dev
       - if: steps.stac.outputs.present == 'true'
-        run: uv run stac-validator stac/catalog.json --recursive
+        run: uv run stac-validator validate stac/catalog.json --recursive
 
   validate-schemas:
     runs-on: ubuntu-latest
