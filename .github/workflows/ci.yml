@@ -124,6 +124,42 @@ jobs:
           m = StacManifest.model_validate(raw)
           print(f"OK: {sum(m.totals.values())} items across {len(m.totals)} collections")
           PY
+      # OSM asset schema: build synthetic records from fixture and Pydantic-validate
+      - name: Validate OSM asset schema
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          from datetime import datetime, UTC
+          from shapely.geometry import Point
+          from wildfire_exposure_eo.schemas import OsmAsset, OsmAssetProvenance
+          fixture = json.loads(pathlib.Path("tests/fixtures/overpass/nodes_power_tower.json").read_text())
+          prov = OsmAssetProvenance(
+              osm_snapshot_iso=datetime.fromisoformat(fixture["osm3s"]["timestamp_osm_base"].rstrip("Z") + "+00:00"),
+              overpass_endpoint="https://overpass-api.de/api/interpreter",
+              overpass_query_sha="a" * 64,
+              taxonomy_sha="b" * 64,
+              taxonomy_version="0.1.0-draft",
+              run_id="ci-test",
+              code_commit_sha="abc123",
+              aoi_path="data/aoi/smoke.geojson",
+              aoi_geometry_sha="c" * 64,
+          )
+          nodes = [el for el in fixture["elements"] if el.get("type") == "node" and "tags" in el]
+          for el in nodes:
+              pt = Point(el["lon"], el["lat"])
+              OsmAsset.model_validate({
+                  "asset_id": f"osm:node/{el['id']}",
+                  "osm_type": "node",
+                  "osm_id": el["id"],
+                  "asset_class": "power.tower",
+                  "geometry_wkb": pt.wkb,
+                  "centroid_lon": el["lon"],
+                  "centroid_lat": el["lat"],
+                  "tags": json.dumps(el.get("tags", {})),
+                  "provenance": prov,
+              })
+          print(f"OK: {len(nodes)} OsmAsset records validated")
+          PY
       # crosswalk YAML: source_inputs and internal_classes present
       - name: Validate fuel crosswalk
         run: |
