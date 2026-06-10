@@ -172,3 +172,44 @@ jobs:
                   sys.exit(1)
           print(f"OK: crosswalk has all required top-level keys")
           PY
+      # ICNF burn-perimeter schema: build synthetic records from fixture and Pydantic-validate
+      - name: Validate burn-perimeter schema
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          from datetime import datetime, UTC
+          from shapely.geometry import Polygon
+          from wildfire_exposure_eo.schemas import (
+              BurnPerimeter, BurnPerimeterProvenance, IcnfLayerDescriptor,
+          )
+          fixture = json.loads(
+              pathlib.Path("tests/fixtures/icnf/layer_query_2017.json").read_text()
+          )
+          prov = BurnPerimeterProvenance(
+              icnf_layer_id=3,
+              icnf_layer_name="Áreas Ardidas 2017",
+              vintage_year=2017,
+              mapserver_url="https://sigservices.icnf.pt/server/rest/services/BDG/areas_ardidas/MapServer",
+              fetched_at_utc=datetime(2026, 6, 1, tzinfo=UTC),
+              run_id="ci-test",
+              code_commit_sha="abc123",
+              aoi_path="data/aoi/smoke.geojson",
+              aoi_geometry_sha="c" * 64,
+          )
+          for feat in fixture["features"]:
+              attrs = feat["attributes"]
+              rings = feat["geometry"]["rings"]
+              poly = Polygon(rings[0])
+              IcnfLayerDescriptor(
+                  layer_id=3, year=2017, name="Áreas Ardidas 2017", feature_count_total=3
+              )
+              BurnPerimeter.model_validate({
+                  "row_id": f"icnf:2017:{attrs['OBJECTID']}",
+                  "vintage_year": attrs["ANO"],
+                  "icnf_feature_id": attrs["OBJECTID"],
+                  "geometry_wkb": poly.wkb,
+                  "area_ha": attrs["AREA_HA"],
+                  "provenance": prov,
+              })
+          print(f"OK: {len(fixture['features'])} BurnPerimeter records validated")
+          PY

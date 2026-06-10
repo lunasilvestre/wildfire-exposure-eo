@@ -1,0 +1,56 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPolygon",
+  "spatialReference": {"wkid": 3763, "latestWkid": 3763},
+  "fields": [
+    {"name": "OBJECTID", "alias": "OBJECTID", "type": "esriFieldTypeOID", "length": 4},
+    {"name": "ANO", "alias": "Ano", "type": "esriFieldTypeSmallInteger", "length": 2},
+    {"name": "AREA_HA", "alias": "Área (ha)", "type": "esriFieldTypeDouble", "length": 8}
+  ],
+  "features": [
+    {
+      "attributes": {"OBJECTID": 101, "ANO": 2017, "AREA_HA": 65853.4},
+      "geometry": {
+        "rings": [
+          [
+            [-45000, 192000],
+            [-43000, 192000],
+            [-43000, 194000],
+            [-45000, 194000],
+            [-45000, 192000]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {"OBJECTID": 102, "ANO": 2017, "AREA_HA": 1204.7},
+      "geometry": {
+        "rings": [
+          [
+            [-42000, 188000],
+            [-41500, 188000],
+            [-41500, 188500],
+            [-42000, 188500],
+            [-42000, 188000]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {"OBJECTID": 103, "ANO": 2017, "AREA_HA": 312.1},
+      "geometry": {
+        "rings": [
+          [
+            [-39000, 195000],
+            [-38500, 195000],
+            [-38500, 195300],
+            [-39000, 195300],
+            [-39000, 195000]
+          ]
+        ]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

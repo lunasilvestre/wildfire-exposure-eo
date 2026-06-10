@@ -1,0 +1,21 @@
+{
+  "currentVersion": 10.81,
+  "serviceDescription": "ICNF Áreas Ardidas em Portugal Continental",
+  "mapName": "areas_ardidas",
+  "layers": [
+    {"id": 0, "name": "Áreas Ardidas 2020", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 1, "name": "Áreas Ardidas 2019", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 2, "name": "Áreas Ardidas 2018", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 3, "name": "Áreas Ardidas 2017", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 4, "name": "Áreas Ardidas 2016", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 5, "name": "Áreas Ardidas 2015", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 11, "name": "Áreas Ardidas 2009", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 12, "name": "Áreas Ardidas 2000-2008", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 13, "name": "Áreas Ardidas 1990-1999", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 14, "name": "Áreas Ardidas 1975-1989", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 17, "name": "Áreas Ardidas 2022", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 18, "name": "Áreas Ardidas 2023", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 19, "name": "Áreas Ardidas 2024", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0},
+    {"id": 20, "name": "Áreas Ardidas 2025", "parentLayerId": -1, "defaultVisibility": true, "subLayerIds": null, "minScale": 0, "maxScale": 0}
+  ]
+}

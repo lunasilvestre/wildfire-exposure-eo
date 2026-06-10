@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from wildfire_exposure_eo.schemas.burn_perimeter import (
+    BurnPerimeter,
+    BurnPerimeterProvenance,
+    IcnfLayerDescriptor,
+)
 from wildfire_exposure_eo.schemas.burn_scar import (
     HF_MODEL_ID_PLACEHOLDER,
     BurnScarConfig,
@@ -19,11 +24,14 @@ from wildfire_exposure_eo.schemas.static_raster_manifest import (
 
 __all__ = [
     "HF_MODEL_ID_PLACEHOLDER",
+    "BurnPerimeter",
+    "BurnPerimeterProvenance",
     "BurnScarConfig",
     "BurnScarInferenceConfig",
     "BurnScarModelConfig",
     "BurnScarRun",
     "FetchRecord",
+    "IcnfLayerDescriptor",
     "OsmAsset",
     "OsmAssetProvenance",
     "SourceHealth",

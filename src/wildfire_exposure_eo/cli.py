@@ -13,6 +13,7 @@ from rich.table import Table
 
 from wildfire_exposure_eo import audit as audit_mod
 from wildfire_exposure_eo import burn_scar as burn_scar_mod
+from wildfire_exposure_eo import burns as burns_mod
 from wildfire_exposure_eo import osm as osm_mod
 from wildfire_exposure_eo import stac as stac_mod
 from wildfire_exposure_eo import static_rasters as sr_mod
@@ -734,6 +735,111 @@ def fetch_rasters(
     total_b = manifest.totals_bytes
     console.print(f"\n[dim]total:[/dim] {total_b:,} bytes across {n_records} record(s)")
     console.print(f"[dim]manifest:[/dim] {manifest_path}")
+
+
+def _configure_burns_logging() -> None:
+    _configure_module_logging("wildfire_exposure_eo.burns")
+
+
+@app.command("fetch-burns")
+def fetch_burns(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"),
+        "--aoi",
+        readable=True,
+        dir_okay=False,
+        help="Path to the AOI GeoJSON. Ignored when --smoke is set.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Output GeoParquet path. Supports {run_id} templating. Defaults to "
+            "outputs/parquet/icnf_burns_{run_id}.parquet "
+            "(icnf_burns_smoke_{run_id}.parquet with --smoke)."
+        ),
+    ),
+    start_year: int = typer.Option(
+        1975, "--start-year", min=1975, max=2100, help="First vintage year to include."
+    ),
+    end_year: int = typer.Option(
+        2025, "--end-year", min=1975, max=2100, help="Last vintage year to include."
+    ),
+    mapserver_url: str = typer.Option(
+        burns_mod.ICNF_MAPSERVER_URL,
+        "--mapserver-url",
+        help="ICNF ArcGIS REST MapServer root URL.",
+    ),
+    smoke: bool = typer.Option(
+        False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
+    ),
+) -> None:
+    """Query ICNF Áreas Ardidas (1975–latest) and write a provenance-tagged GeoParquet.
+
+    All feature IDs and vintage years come from the live MapServer — none are
+    invented.  The output validates as wildfire_exposure_eo.schemas.BurnPerimeter
+    per row.
+    """
+    console = Console()
+    _configure_burns_logging()
+
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+        default_out_template = "outputs/parquet/icnf_burns_smoke_{run_id}.parquet"
+    else:
+        default_out_template = "outputs/parquet/icnf_burns_{run_id}.parquet"
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+    if start_year > end_year:
+        raise typer.BadParameter("--start-year must be ≤ --end-year")
+
+    created_at = datetime.now(UTC)
+    run_id = created_at.strftime("%Y%m%dT%H%M%SZ")
+    out_path = out if out is not None else Path(default_out_template)
+    final_out = Path(str(out_path).replace("{run_id}", run_id))
+
+    _, aoi_sha = stac_mod.load_aoi_geometry(aoi)
+    commit_sha = stac_mod.code_commit_sha(cwd=Path.cwd())
+
+    console.print(f"[dim]AOI:[/dim] {aoi}")
+    console.print(f"[dim]mapserver:[/dim] {mapserver_url}")
+    console.print(f"[dim]years:[/dim] {start_year}–{end_year}")
+    console.print(f"[dim]run_id:[/dim] {run_id}\n")
+
+    result_path = burns_mod.fetch_burns(
+        aoi,
+        final_out,
+        start_year=start_year,
+        end_year=end_year,
+        mapserver_url=mapserver_url,
+        run_id=run_id,
+        code_commit_sha=commit_sha,
+        aoi_geometry_sha=aoi_sha,
+    )
+
+    import geopandas as gpd
+
+    gdf = gpd.read_parquet(result_path)
+    counts: dict[int, int] = {}
+    if not gdf.empty:
+        counts = gdf.groupby("vintage_year").size().to_dict()
+
+    from rich.table import Table as RichTable
+
+    table = RichTable(title="ICNF burn perimeters by vintage year", show_lines=False)
+    table.add_column("Vintage year", style="bold")
+    table.add_column("Features", justify="right")
+    table.add_column("Area (ha)", justify="right")
+    for year in sorted(counts):
+        year_gdf = gdf[gdf["vintage_year"] == year]
+        total_ha = float(year_gdf["area_ha"].sum())
+        table.add_row(str(year), str(int(counts[year])), f"{total_ha:,.1f}")
+    console.print(table)
+    console.print(
+        f"\n[dim]total rows:[/dim] {len(gdf)}  "
+        f"[dim]vintages:[/dim] {gdf['vintage_year'].nunique() if not gdf.empty else 0}  "
+        f"[dim]parquet:[/dim] {result_path}"
+    )
 
 
 if __name__ == "__main__":
