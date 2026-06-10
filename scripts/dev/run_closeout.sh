@@ -28,8 +28,21 @@ for wu in "$@"; do
   echo "=== $wu : usage gate ==="
   scripts/dev/check_usage.sh || { echo "THROTTLED before $wu — rerun after block reset"; exit 3; }
 
-  echo "=== $wu : session ==="
-  claude -p "Read prompts/00_CLOSEOUT_PLAN.md and CLAUDE.md end-to-end, then execute ${wu} ONLY, following the session loop (smoke before pilot, gates, session-log entry, scoped commits). UNATTENDED RUN RULES: /effort high; redirect long-running command output to a file under outputs/logs/ and poll it instead of streaming; if a stop condition fires or anything needs human approval, write the question to ${HIL}, commit it, and end the session immediately." \
+  # Model per WU: implementation WUs run on Sonnet (~3x cheaper per token,
+  # and Max meters Sonnet against its own separate weekly pool); the
+  # judgment-heavy WUs (WU-6 scoring semantics, WU-7 validation honesty)
+  # inherit the session default model. Effort goes via --settings — a
+  # "/effort high" inside a -p prompt is plain text, not a command.
+  case "$wu" in
+    WU-2|WU-3|WU-4|WU-5|WU-8) MODEL="${CLOSEOUT_MODEL_IMPL:-sonnet}" ;;
+    *)                        MODEL="${CLOSEOUT_MODEL_DEFAULT:-}" ;;
+  esac
+  MODEL_FLAGS=()
+  [ -n "$MODEL" ] && MODEL_FLAGS=(--model "$MODEL")
+
+  echo "=== $wu : session (model=${MODEL:-default}, effort=high) ==="
+  claude -p "Read prompts/00_CLOSEOUT_PLAN.md and CLAUDE.md end-to-end, then execute ${wu} ONLY, following the session loop (smoke before pilot, gates, session-log entry, scoped commits). UNATTENDED RUN RULES: redirect long-running command output to a file under outputs/logs/ and poll it instead of streaming; if a stop condition fires or anything needs human approval, write the question to ${HIL}, commit it, and end the session immediately." \
+    "${MODEL_FLAGS[@]}" --settings '{"effortLevel":"high"}' \
     "${PERM_FLAGS[@]}" || { echo "$wu session exited non-zero"; exit 1; }
 
   echo "=== $wu : gates ==="
