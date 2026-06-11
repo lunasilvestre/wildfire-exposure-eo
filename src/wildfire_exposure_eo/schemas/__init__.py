@@ -21,6 +21,12 @@ from wildfire_exposure_eo.schemas.fuel_layer import (
     GridSpec,
 )
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
+from wildfire_exposure_eo.schemas.scored_asset import (
+    FEATURE_NAMES,
+    AssetFeatures,
+    ScoredAsset,
+    ScoredAssetProvenance,
+)
 from wildfire_exposure_eo.schemas.source_health import SourceHealth, source_health_from_check
 from wildfire_exposure_eo.schemas.stac_manifest import StacItemRef, StacManifest, StacWindow
 from wildfire_exposure_eo.schemas.static_raster_manifest import (
@@ -29,7 +35,9 @@ from wildfire_exposure_eo.schemas.static_raster_manifest import (
 )
 
 __all__ = [
+    "FEATURE_NAMES",
     "HF_MODEL_ID_PLACEHOLDER",
+    "AssetFeatures",
     "BurnPerimeter",
     "BurnPerimeterProvenance",
     "BurnScarConfig",
@@ -44,6 +52,8 @@ __all__ = [
     "IcnfLayerDescriptor",
     "OsmAsset",
     "OsmAssetProvenance",
+    "ScoredAsset",
+    "ScoredAssetProvenance",
     "SourceHealth",
     "StacItemRef",
     "StacManifest",

@@ -14,31 +14,39 @@
 # Weights MUST sum to 1.0. CI asserts this.
 # ───────────────────────────────────────────────────────────────────
 
-version: "0.1.0"
+# Changelog
+#   0.2.0 (2026-06-11, WU-6): dropped `fwi_p95_recent_season`. There is no
+#     GREEN, documented, *public programmatic* source for daily FWI verifiable
+#     in-session — the audit's "IPMA FWI" row is only a reachability probe of
+#     the IPMA web page (no public REST API; Copernicus CDS needs an account;
+#     see docs/data_sources.md §IPMA and src/.../audit.py:check_ipma_fwi). Per
+#     the pre-approved close-out fallback (prompts/10_asset_features_score.md,
+#     Nelson 2026-06-11), the six remaining weights are renormalised
+#     proportionally (each old weight ÷ 0.90) so they still sum to exactly 1.0.
+#     FWI returns as future work behind a verified IPMA/Copernicus fetcher.
+#   0.1.0: initial seven-feature linear screen.
+version: "0.2.0"
 formula: "linear_combination"
 normalization: "percentile_rank_within_aoi"
 
 weights:
   # Fuel character (Stage 1 model output)
-  fuel_class_severity_weight: 0.30   # crosswalk-derived per-class severity
+  fuel_class_severity_weight: 0.3333333333   # crosswalk-derived per-class severity (0.30 ÷ 0.90)
 
   # Vegetation structure (canopy height)
-  canopy_height_p90_m: 0.20          # ETH GCH 10m, p90 inside buffer
+  canopy_height_p90_m: 0.2222222222          # ETH GCH 10m, p90 inside buffer (0.20 ÷ 0.90)
 
   # Topographic forcing
-  slope_max_deg: 0.10                # Cop-DEM GLO-30, max slope inside buffer
+  slope_max_deg: 0.1111111111                # Cop-DEM GLO-30, max slope inside buffer (0.10 ÷ 0.90)
 
   # Burn history (decadal pattern; ICNF Áreas Ardidas, ~1-year publication lag)
-  historical_burn_share: 0.15
+  historical_burn_share: 0.1666666667        # (0.15 ÷ 0.90)
 
   # Current-season burn signal (Prithvi-Burn-Scar inference on S2, last 12 months)
-  recent_burn_share_12mo: 0.10
+  recent_burn_share_12mo: 0.1111111111       # (0.10 ÷ 0.90)
 
   # Recent spectral change (Sentinel-2 spring-vs-late-summer NBR delta)
-  nbr_delta_recent: 0.05
-
-  # Fire-weather multiplier (optional; IPMA daily FWI)
-  fwi_p95_recent_season: 0.10
+  nbr_delta_recent: 0.0555555556             # (0.05 ÷ 0.90)
 
 # ───────────────────────────────────────────────────────────────────
 # Feature normalisation

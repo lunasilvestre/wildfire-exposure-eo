@@ -228,3 +228,17 @@ jobs:
               assert ic and 0.0 <= sev <= 1.0, f"bad entry for code {code}"
           print(f"OK: fuel_crosswalk.yaml — {len(cw.entries)} entries all validate")
           PY
+      # committed sample exposure row must parse as ScoredAsset (WU-6)
+      - name: Validate sample exposure row
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          from wildfire_exposure_eo.schemas import ScoredAsset
+          raw = json.loads(pathlib.Path("docs/samples/exposure_row_smoke.json").read_text())
+          raw["geometry_wkb"] = bytes.fromhex(raw["geometry_wkb"])  # JSON-safe hex → bytes
+          row = ScoredAsset.model_validate(raw)
+          assert 0.0 <= row.exposure_score <= 1.0, "exposure_score out of [0,1]"
+          assert row.exposure_rank >= 1, "exposure_rank must be ≥ 1"
+          assert row.provenance.model_version, "missing model_version"
+          print(f"OK: ScoredAsset row {row.asset_id} rank={row.exposure_rank} validates")
+          PY

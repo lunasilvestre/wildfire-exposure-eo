@@ -1001,5 +1001,159 @@ def fuel_layer(
     console.print(f"[dim]STAC item:[/dim] {item_path}")
 
 
+def _configure_features_logging() -> None:
+    _configure_module_logging("wildfire_exposure_eo.features")
+    _configure_module_logging("wildfire_exposure_eo.burn_scar")
+
+
+def _latest_artifact(folder: Path, prefix: str, suffix: str, *, smoke: bool) -> Path:
+    """Newest ``{prefix}[_smoke]_*{suffix}`` in ``folder`` (timestamps sort lexically)."""
+    pattern = f"{prefix}_smoke_*{suffix}" if smoke else f"{prefix}_*{suffix}"
+    candidates = sorted(folder.glob(pattern))
+    if not smoke:
+        candidates = [c for c in candidates if "_smoke_" not in c.name]
+    if not candidates:
+        raise typer.BadParameter(f"no {prefix}*{suffix} artefact found in {folder}")
+    return candidates[-1]
+
+
+@app.command("score")
+def score(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"), "--aoi", help="AOI GeoJSON. Ignored when --smoke is set."
+    ),
+    window_end: str = typer.Option(
+        ...,
+        "--window-end",
+        help="Score-input window end (YYYY-MM-DD). Required; WU-7's leakage rule depends on it.",
+    ),
+    osm_parquet: Path | None = typer.Option(None, "--osm", help="WU-2 OSM asset GeoParquet."),
+    burns_parquet: Path | None = typer.Option(None, "--burns", help="WU-4 ICNF burns GeoParquet."),
+    fuel_cog: Path | None = typer.Option(None, "--fuel-cog", help="WU-5 fuel-class COG."),
+    burn_scar_cog: Path | None = typer.Option(None, "--burn-scar-cog", help="WU-1 burn-scar COG."),
+    cache_dir: Path = typer.Option(Path("data/cache"), "--cache-dir", help="WU-3 raster cache."),
+    taxonomy: Path = typer.Option(Path("data/taxonomy/critical_infrastructure.yaml"), "--taxonomy"),
+    exposure_config: Path = typer.Option(Path("config/exposure_score.yaml"), "--exposure-config"),
+    features_out: Path | None = typer.Option(
+        None, "--features-out", help="Default outputs/parquet/features[_smoke]_{run_id}.parquet."
+    ),
+    exposure_out: Path | None = typer.Option(
+        None, "--exposure-out", help="Default outputs/parquet/exposure[_smoke]_{run_id}.parquet."
+    ),
+    smoke: bool = typer.Option(False, "--smoke", help="Use data/aoi/smoke.geojson + smoke inputs."),
+) -> None:
+    """Compute per-asset features and the composite exposure rank (WU-6).
+
+    Writes two GeoParquet artefacts: raw per-asset features and the scored rows
+    (one ``ScoredAsset`` per row, full provenance). The exposure value is a
+    relative, AOI-normalised screening rank — never a probability of fire.
+    """
+    _configure_features_logging()
+    console = Console()
+    from wildfire_exposure_eo import features as features_mod
+
+    tag = "_smoke" if smoke else ""
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+    win_end = _parse_iso_date(window_end, flag="--window-end")
+
+    parquet_dir = Path("outputs/parquet")
+    cogs_dir = Path("outputs/cogs")
+    osm_path = osm_parquet or _latest_artifact(parquet_dir, "osm_assets", ".parquet", smoke=smoke)
+    burns_path = burns_parquet or _latest_artifact(
+        parquet_dir, "icnf_burns", ".parquet", smoke=smoke
+    )
+    fuel_path = fuel_cog or _latest_artifact(cogs_dir, "fuel_class", ".tif", smoke=smoke)
+    burn_scar_path = burn_scar_cog or _latest_artifact(cogs_dir, "burn_scar", ".tif", smoke=smoke)
+    gch_candidates = sorted((cache_dir / "eth-gch-2020").glob("*.tif"))
+    if not gch_candidates:
+        raise typer.BadParameter(f"no ETH GCH tile in {cache_dir / 'eth-gch-2020'} (run WU-3)")
+    gch_path = gch_candidates[0]
+
+    crosswalk_sha = str(json.loads(fuel_path.with_suffix(".json").read_text())["crosswalk_sha"])
+
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    feats_out = Path(
+        str(features_out or Path(f"outputs/parquet/features{tag}_{{run_id}}.parquet")).replace(
+            "{run_id}", run_id
+        )
+    )
+    exp_out = Path(
+        str(exposure_out or Path(f"outputs/parquet/exposure{tag}_{{run_id}}.parquet")).replace(
+            "{run_id}", run_id
+        )
+    )
+
+    for label, p in [
+        ("OSM", osm_path),
+        ("burns", burns_path),
+        ("fuel COG", fuel_path),
+        ("burn-scar COG", burn_scar_path),
+        ("ETH GCH", gch_path),
+    ]:
+        console.print(f"[dim]{label}:[/dim] {p}")
+    console.print(f"[dim]window-end:[/dim] {win_end}   [dim]run_id:[/dim] {run_id}")
+    console.print("Computing features (Cop-DEM slope + S2 NBR delta are resolved from STAC) …")
+
+    result = features_mod.run_scoring(
+        aoi_path=aoi,
+        taxonomy_path=taxonomy,
+        exposure_config_path=exposure_config,
+        crosswalk_sha=crosswalk_sha,
+        osm_parquet=osm_path,
+        burns_parquet=burns_path,
+        fuel_cog=fuel_path,
+        gch_cog=gch_path,
+        burn_scar_cog=burn_scar_path,
+        window_end=win_end,
+        run_id=run_id,
+        code_commit_sha=stac_mod.code_commit_sha(cwd=Path.cwd()),
+        features_out=feats_out,
+        exposure_out=exp_out,
+    )
+
+    console.print(
+        f"\n[green]Done.[/green] {result.n_assets:,} assets  "
+        f"[dim]zonal {result.ms_per_asset:.2f} ms/asset; "
+        f"raster build {result.build_seconds:.1f}s (one-time)[/dim]"
+    )
+    if result.ms_per_asset > 10.0:
+        console.print(
+            f"[yellow]NOTE:[/yellow] zonal {result.ms_per_asset:.1f} ms/asset exceeds the "
+            "10 ms target."
+        )
+    console.print(f"[dim]features present:[/dim] {', '.join(result.features_present_global)}")
+    console.print(f"[dim]features:[/dim] {result.features_path}")
+    console.print(f"[dim]exposure:[/dim] {result.exposure_path}")
+    console.print(
+        f"[dim]top-ranked:[/dim] {result.sample_row['asset_id']} "
+        f"({result.sample_row['asset_class']})  "
+        f"score={result.sample_row['exposure_score']:.4f}  rank=1"
+    )
+
+
+@app.command("validate-schema")
+def validate_schema(
+    parquet: Path = typer.Argument(..., help="Exposure GeoParquet to validate row-by-row."),
+    limit: int = typer.Option(0, "--limit", help="Validate only the first N rows (0 = all)."),
+) -> None:
+    """Validate every row of an exposure GeoParquet against the ScoredAsset schema."""
+    import geopandas as gpd
+
+    from wildfire_exposure_eo.schemas import ScoredAsset
+
+    console = Console()
+    gdf = gpd.read_parquet(parquet)
+    rows = gdf if limit <= 0 else gdf.head(limit)
+    drop = {"geometry"}
+    n = 0
+    for _, row in rows.iterrows():
+        ScoredAsset.model_validate({k: v for k, v in row.items() if k not in drop})
+        n += 1
+    console.print(f"[green]OK:[/green] {n} ScoredAsset row(s) validated in {parquet}")
+
+
 if __name__ == "__main__":
     app()

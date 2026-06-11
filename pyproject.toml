@@ -45,6 +45,7 @@ dependencies = [
     "pyproj>=3.7",
     "fiona>=1.10",
     "duckdb>=1.1",
+    "exactextract>=0.2",        # WU-6: vectorised raster×vector zonal stats (≤10 ms/asset target, methodology §10)
     "pyarrow>=18.0",
     "osmnx>=1.9",               # convenience for OSM queries; alternative to raw Overpass
 
@@ -131,6 +132,7 @@ ignore = [
     "B008",     # function call in argument defaults — idiomatic for Typer (typer.Option)
     "RUF001",   # ambiguous Unicode in strings — we use ×, ≥, ≤, ≈ intentionally
     "RUF002",   # ambiguous Unicode in docstrings — same reason
+    "RUF003",   # ambiguous Unicode in comments — same reason (×, –, ≤, → in unit/range notes)
     "TCH003",   # stdlib imports in type-checking block — Path is used at runtime via Typer defaults
                 # (old name; newer ruff remaps to TC003 and emits a harmless deprecation warning.
                 # Kept as TCH003 for compatibility with pinned ruff in .pre-commit-config.yaml.)
