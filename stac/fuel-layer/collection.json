@@ -1,0 +1,52 @@
+{
+  "type": "Collection",
+  "id": "fuel-layer",
+  "stac_version": "1.1.0",
+  "description": "Per-run fuel-class raster derived from the EFFIS pan-European fuel map refined by DGT COSc land-cover via the Scott & Burgan crosswalk. Band 1: EFFIS NFFL fuel-model class (uint8, 0=non-fuel). Band 2: severity weight \u00d7 100 (uint8). Expert-set severities; not a calibrated fire-behaviour model. See config/fuel_crosswalk.yaml.",
+  "links": [
+    {
+      "rel": "root",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    },
+    {
+      "rel": "item",
+      "href": "./fuel-layer-20260611T090045Z/fuel-layer-20260611T090045Z.json",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "item",
+      "href": "./fuel-layer-20260611T090120Z/fuel-layer-20260611T090120Z.json",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    }
+  ],
+  "title": "Fuel-layer COG (EFFIS + COSc crosswalk)",
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -8.599653854250326,
+          40.604938413372174,
+          -8.238908596519359,
+          40.875002037907215
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2026-06-11T09:00:51.341543Z",
+          "2026-06-11T09:01:27.844985Z"
+        ]
+      ]
+    }
+  },
+  "license": "proprietary"
+}

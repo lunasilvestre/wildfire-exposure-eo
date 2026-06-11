@@ -15,6 +15,12 @@
       "href": "./burn-scar-recent/collection.json",
       "type": "application/json",
       "title": "Recent burn-scar inference probability (Prithvi-Burn-Scar)"
+    },
+    {
+      "rel": "child",
+      "href": "./fuel-layer/collection.json",
+      "type": "application/json",
+      "title": "Fuel-layer COG (EFFIS + COSc crosswalk)"
     }
   ],
   "title": "wildfire-exposure-eo STAC catalog"

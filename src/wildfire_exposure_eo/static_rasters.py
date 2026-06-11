@@ -188,9 +188,18 @@ def _extract_from_zip(zip_path: Path, prefix: str, dest_dir: Path) -> Path:
             raise ValueError(
                 f"No file with prefix {prefix!r} found in {zip_path}. Contents: {zf.namelist()}"
             )
-        # Pick the first non-directory match (shortest name wins on ties)
+        # Pick the first non-directory match. Raster/GIS data files (.tif/.tiff/.gpkg)
+        # are prioritised over sidecar files (.lyr/.qml/.sld) so that zips containing
+        # both style files and the actual data file resolve correctly. Within the same
+        # priority tier, the shortest path wins.
+        _raster_exts = {".tif", ".tiff", ".gpkg"}
+
+        def _zip_sort_key(name: str) -> tuple[int, int]:
+            ext = Path(name).suffix.lower()
+            return (0 if ext in _raster_exts else 1, len(name))
+
         candidates = [c for c in candidates if not c.endswith("/")]
-        candidates.sort(key=len)
+        candidates.sort(key=_zip_sort_key)
         target_name = candidates[0]
         out_path = dest_dir / Path(target_name).name
         with zf.open(target_name) as src, out_path.open("wb") as dst:

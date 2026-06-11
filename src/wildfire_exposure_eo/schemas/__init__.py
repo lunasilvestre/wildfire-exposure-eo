@@ -14,6 +14,12 @@ from wildfire_exposure_eo.schemas.burn_scar import (
     BurnScarModelConfig,
     BurnScarRun,
 )
+from wildfire_exposure_eo.schemas.fuel_layer import (
+    Crosswalk,
+    CrosswalkEntry,
+    FuelLayerProvenance,
+    GridSpec,
+)
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
 from wildfire_exposure_eo.schemas.source_health import SourceHealth, source_health_from_check
 from wildfire_exposure_eo.schemas.stac_manifest import StacItemRef, StacManifest, StacWindow
@@ -30,7 +36,11 @@ __all__ = [
     "BurnScarInferenceConfig",
     "BurnScarModelConfig",
     "BurnScarRun",
+    "Crosswalk",
+    "CrosswalkEntry",
     "FetchRecord",
+    "FuelLayerProvenance",
+    "GridSpec",
     "IcnfLayerDescriptor",
     "OsmAsset",
     "OsmAssetProvenance",

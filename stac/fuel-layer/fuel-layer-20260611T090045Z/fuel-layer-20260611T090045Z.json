@@ -1,0 +1,106 @@
+{
+  "type": "Feature",
+  "stac_version": "1.1.0",
+  "stac_extensions": [],
+  "id": "fuel-layer-20260611T090045Z",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -8.361848089287363,
+          40.730957630540374
+        ],
+        [
+          -8.361848089287363,
+          40.74008039072652
+        ],
+        [
+          -8.373895936895131,
+          40.74008039072652
+        ],
+        [
+          -8.373895936895131,
+          40.730957630540374
+        ],
+        [
+          -8.361848089287363,
+          40.730957630540374
+        ]
+      ]
+    ]
+  },
+  "bbox": [
+    -8.373895936895131,
+    40.730957630540374,
+    -8.361848089287363,
+    40.74008039072652
+  ],
+  "properties": {
+    "wildfire_exposure_eo:provenance": {
+      "run_id": "20260611T090045Z",
+      "code_commit_sha": "b413a99c411af1748fdda2eedafbd6b7487d44cc-dirty",
+      "aoi_path": "data/aoi/smoke.geojson",
+      "aoi_geometry_sha": "3e80274ecef9d5bb6b55b6494c893e07b12b250794dbe9bb1641f49d861fc023",
+      "effis_cache_path": "data/cache/effis/effis_european_fuel_map.tif",
+      "effis_sha256": "cfb7447de166fb6fab12b685c98c1d12f55c4c62708ebff2af26a9ca59452102",
+      "effis_vintage": "2023",
+      "effis_native_res_m": 250.0,
+      "cosc_cache_path": "data/cache/dgt-cosc/cosc_2024_pre_verao.tif",
+      "cosc_sha256": "ac0c33918de58d8fe814e8462f95b302c623e528e52d1273e9adfab3cfc28b01",
+      "cosc_vintage": "2024_pre_verao",
+      "cosc_native_res_m": 10.0,
+      "crosswalk_sha": "df69c47fa35e24386121b67fa54393e23777ea0a8ef38af8f698df06e0035853",
+      "crosswalk_version": "0.1.0",
+      "grid": {
+        "crs": "EPSG:32629",
+        "transform": [
+          10.0,
+          0.0,
+          552870.0,
+          0.0,
+          -10.0,
+          4510100.0
+        ],
+        "width": 101,
+        "height": 102,
+        "resolution_m": 10,
+        "aoi_geometry_sha": "3e80274ecef9d5bb6b55b6494c893e07b12b250794dbe9bb1641f49d861fc023"
+      },
+      "description": "Fuel-class raster: band 1 = EFFIS NFFL fuel-model class (uint8), band 2 = severity \u00d7 100 (uint8). Derived from EFFIS fuel map crosswalk refined by DGT COSc land-cover. Non-fuel nodata = 255. COS (species-level) refinement is future work. EFFIS native resolution is coarser than the 10 m output grid \u2014 see effis_native_res_m."
+    },
+    "datetime": "2026-06-11T09:00:51.341543Z"
+  },
+  "links": [
+    {
+      "rel": "root",
+      "href": "../../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    },
+    {
+      "rel": "collection",
+      "href": "../collection.json",
+      "type": "application/json",
+      "title": "Fuel-layer COG (EFFIS + COSc crosswalk)"
+    },
+    {
+      "rel": "parent",
+      "href": "../collection.json",
+      "type": "application/json",
+      "title": "Fuel-layer COG (EFFIS + COSc crosswalk)"
+    }
+  ],
+  "assets": {
+    "fuel_class": {
+      "href": "../../../outputs/cogs/fuel_class_smoke_20260611T090045Z.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "Fuel-class COG (EFFIS NFFL class + severity \u00d7 100)",
+      "description": "Band 1: EFFIS NFFL fuel-model code (0=non-fuel). Band 2: severity \u00d7 100. EFFIS native res 250 m, output grid 10 m EPSG:32629. Crosswalk version 0.1.0.",
+      "roles": [
+        "data"
+      ]
+    }
+  },
+  "collection": "fuel-layer"
+}

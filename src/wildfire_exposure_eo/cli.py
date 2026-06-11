@@ -14,6 +14,7 @@ from rich.table import Table
 from wildfire_exposure_eo import audit as audit_mod
 from wildfire_exposure_eo import burn_scar as burn_scar_mod
 from wildfire_exposure_eo import burns as burns_mod
+from wildfire_exposure_eo import fuel as fuel_mod
 from wildfire_exposure_eo import osm as osm_mod
 from wildfire_exposure_eo import stac as stac_mod
 from wildfire_exposure_eo import static_rasters as sr_mod
@@ -840,6 +841,164 @@ def fetch_burns(
         f"[dim]vintages:[/dim] {gdf['vintage_year'].nunique() if not gdf.empty else 0}  "
         f"[dim]parquet:[/dim] {result_path}"
     )
+
+
+def _configure_fuel_logging() -> None:
+    _configure_module_logging("wildfire_exposure_eo.fuel")
+
+
+@app.command("fuel-layer")
+def fuel_layer(
+    aoi: Path = typer.Option(
+        Path("data/aoi/pilot.geojson"),
+        "--aoi",
+        help="Path to the AOI GeoJSON. Ignored when --smoke is set.",
+    ),
+    crosswalk: Path = typer.Option(
+        Path("config/fuel_crosswalk.yaml"),
+        "--crosswalk",
+        help="Path to the fuel crosswalk YAML.",
+    ),
+    cache_dir: Path = typer.Option(
+        Path("data/cache"),
+        "--cache-dir",
+        help="Root directory of the WU-3 raster cache.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Output COG path (default: "
+            "outputs/cogs/fuel_class_{run_id}.tif or "
+            "outputs/cogs/fuel_class_smoke_{run_id}.tif with --smoke)."
+        ),
+    ),
+    stac_root: Path = typer.Option(
+        Path("stac"),
+        "--stac-root",
+        help="Root of the STAC catalog tree.",
+    ),
+    smoke: bool = typer.Option(
+        False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
+    ),
+) -> None:
+    """Derive a fuel-class COG (EFFIS + COSc crosswalk) on the pilot or smoke grid.
+
+    Reads from the WU-3 raster cache; no network calls.
+    Outputs a 2-band COG:  band 1 = EFFIS NFFL fuel class (uint8),
+                           band 2 = severity × 100 (uint8).
+    Appends a STAC item under stac/fuel-layer/.
+    """
+    _configure_fuel_logging()
+    console = Console()
+
+    if smoke:
+        aoi = Path("data/aoi/smoke.geojson")
+        default_out_template = "outputs/cogs/fuel_class_smoke_{run_id}.tif"
+    else:
+        default_out_template = "outputs/cogs/fuel_class_{run_id}.tif"
+
+    if not aoi.exists():
+        raise typer.BadParameter(f"--aoi: {aoi} does not exist")
+    if not crosswalk.exists():
+        raise typer.BadParameter(f"--crosswalk: {crosswalk} does not exist")
+
+    effis_path = cache_dir / "effis" / "effis_european_fuel_map.tif"
+    cosc_path = cache_dir / "dgt-cosc" / "cosc_2024_pre_verao.tif"
+
+    for p, label in [(effis_path, "EFFIS"), (cosc_path, "COSc")]:
+        if not p.exists():
+            console.print(f"[red]ERROR:[/red] {label} cache not found: {p}")
+            console.print(
+                "Run [bold]uv run wildfire-exposure-eo fetch-rasters[/bold] first (WU-3)."
+            )
+            raise typer.Exit(code=1)
+
+    from datetime import UTC, datetime
+
+    run_ts = datetime.now(UTC)
+    run_id = run_ts.strftime("%Y%m%dT%H%M%SZ")
+
+    out_path = out if out is not None else Path(default_out_template)
+    final_out = Path(str(out_path).replace("{run_id}", run_id))
+    final_out.parent.mkdir(parents=True, exist_ok=True)
+
+    commit_sha = stac_mod.code_commit_sha(cwd=Path.cwd())
+    aoi_sha = fuel_mod._sha256_bytes(aoi.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+
+    import rasterio
+
+    with rasterio.open(effis_path) as ds:
+        effis_res_m = float(abs(ds.res[0]))
+        effis_sha = fuel_mod._sha256_file(effis_path)
+    with rasterio.open(cosc_path) as ds:
+        cosc_res_m = float(abs(ds.res[0]))
+        cosc_sha = fuel_mod._sha256_file(cosc_path)
+
+    console.print(f"[dim]AOI:[/dim] {aoi}")
+    console.print(f"[dim]crosswalk:[/dim] {crosswalk}")
+    console.print(f"[dim]EFFIS:[/dim] {effis_path} ({effis_res_m:.0f} m native res)")
+    console.print(f"[dim]COSc:[/dim] {cosc_path} ({cosc_res_m:.0f} m native res)")
+    console.print(f"[dim]run_id:[/dim] {run_id}")
+
+    # 1. Load crosswalk
+    cw = fuel_mod.load_crosswalk(crosswalk)
+    console.print(f"[dim]crosswalk version:[/dim] {cw.version} ({len(cw.entries)} entries)")
+
+    # 2. Compute explicit grid
+    grid = fuel_mod.pilot_grid(aoi)
+    console.print(
+        f"[dim]grid:[/dim] {grid.width} × {grid.height} px @ {grid.resolution_m} m  CRS {grid.crs}"
+    )
+
+    # 3. Reproject EFFIS + apply crosswalk
+    console.print("Reprojecting EFFIS and applying crosswalk …")
+    klass, severity_x100 = fuel_mod.reclass_effis(effis_path, grid, cw)
+
+    # 4. Refine with COSc
+    console.print("Refining with COSc …")
+    klass, severity_x100 = fuel_mod.refine_with_cosc(klass, severity_x100, cosc_path, grid, cw)
+
+    # 5. Build provenance
+    from wildfire_exposure_eo.schemas.fuel_layer import FuelLayerProvenance
+
+    provenance = FuelLayerProvenance(
+        run_id=run_id,
+        code_commit_sha=commit_sha,
+        aoi_path=str(aoi),
+        aoi_geometry_sha=aoi_sha,
+        effis_cache_path=str(effis_path),
+        effis_sha256=effis_sha,
+        effis_vintage="2023",
+        effis_native_res_m=effis_res_m,
+        cosc_cache_path=str(cosc_path),
+        cosc_sha256=cosc_sha,
+        cosc_vintage="2024_pre_verao",
+        cosc_native_res_m=cosc_res_m,
+        crosswalk_sha=cw.crosswalk_sha,
+        crosswalk_version=cw.version,
+        grid=grid,
+    )
+
+    # 6. Write COG
+    console.print(f"Writing COG → {final_out} …")
+    fuel_mod.write_fuel_cog(klass, severity_x100, grid, final_out, provenance=provenance)
+
+    # 7. Append STAC item
+    console.print("Appending STAC item …")
+    item_path = fuel_mod.write_stac_item(final_out, provenance, stac_root=stac_root)
+
+    import numpy as np
+
+    fuel_pixels = int(np.count_nonzero((klass > 0) & (klass != 255)))
+    nonfuel_pixels = int(np.count_nonzero(klass == 0))
+    nodata_pixels = int(np.count_nonzero(klass == 255))
+    console.print(
+        f"\n[green]Done.[/green] "
+        f"fuel={fuel_pixels:,} px  non-fuel={nonfuel_pixels:,} px  nodata={nodata_pixels:,} px"
+    )
+    console.print(f"[dim]COG:[/dim] {final_out}")
+    console.print(f"[dim]STAC item:[/dim] {item_path}")
 
 
 if __name__ == "__main__":

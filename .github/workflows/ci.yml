@@ -213,3 +213,18 @@ jobs:
               })
           print(f"OK: {len(fixture['features'])} BurnPerimeter records validated")
           PY
+      # Fuel-layer crosswalk + GridSpec/Crosswalk schema round-trip
+      - name: Validate fuel-layer schemas
+        run: |
+          uv run python - <<'PY'
+          import yaml, pathlib, sys
+          from wildfire_exposure_eo.schemas import Crosswalk, CrosswalkEntry, GridSpec, FuelLayerProvenance
+          from wildfire_exposure_eo import fuel as fl
+          cw = fl.load_crosswalk(pathlib.Path("config/fuel_crosswalk.yaml"))
+          assert cw.version == "0.1.0", f"unexpected version: {cw.version}"
+          assert len(cw.entries) == 13, f"expected 13 entries, got {len(cw.entries)}"
+          for code in range(1, 14):
+              ic, sev = cw.severity_for_code(code)
+              assert ic and 0.0 <= sev <= 1.0, f"bad entry for code {code}"
+          print(f"OK: fuel_crosswalk.yaml — {len(cw.entries)} entries all validate")
+          PY
