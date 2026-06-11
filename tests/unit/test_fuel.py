@@ -207,9 +207,10 @@ def test_pilot_grid_snapped_outward(tmp_path: Path) -> None:
 
 # ── Decision-table unit tests ──────────────────────────────────────────────────
 #
-# Each rule from refine_with_cosc gets its own test with a synthetic 2x2 grid
-# so no raster I/O is needed. We monkey-patch refine_with_cosc to call the
-# internal logic via a helper that injects pre-built COSc arrays.
+# Each rule gets its own test with a synthetic 2x2 grid so no raster I/O is
+# needed. The tests call fuel._apply_cosc_rules — the same code path
+# refine_with_cosc runs after reprojecting COSc — so they exercise the shipped
+# implementation, not a copy of it.
 
 
 def _refine_synthetic(
@@ -218,31 +219,10 @@ def _refine_synthetic(
     cosc_values: np.ndarray,
     cw: Crosswalk | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Call refine_with_cosc internals without rasterio I/O.
-
-    Replicates the logic block from refine_with_cosc so the decision-table
-    rules can be unit-tested without touching the real COSc raster.
-    """
+    """Apply the shipped COSc decision table to synthetic arrays."""
     if cw is None:
         cw = _make_crosswalk()
-    herbaceous_sev_x100 = round(cw.cosc_herbaceous_override_severity * 100)
-
-    out_klass = klass_in.copy()
-    out_sev = sev_in.copy()
-
-    # Rule 1: COSc non-fuel
-    non_fuel_mask = np.isin(cosc_values, list(fl._COSC_NON_FUEL_CODES))
-    out_klass[non_fuel_mask] = 0
-    out_sev[non_fuel_mask] = 0
-
-    # Rule 2: COSc herbaceous + EFFIS forest
-    cosc_herbaceous = cosc_values == fl._COSC_HERBACEOUS_CODE
-    effis_forest = np.isin(klass_in, list(fl._EFFIS_FOREST_CODES))
-    herb_override_mask = cosc_herbaceous & effis_forest
-    out_klass[herb_override_mask] = 0
-    out_sev[herb_override_mask] = herbaceous_sev_x100
-
-    return out_klass, out_sev
+    return fl._apply_cosc_rules(klass_in, sev_in, cosc_values, cw)
 
 
 def test_rule1_non_fuel_overrides_effis() -> None:

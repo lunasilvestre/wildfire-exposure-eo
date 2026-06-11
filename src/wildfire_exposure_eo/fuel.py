@@ -164,8 +164,10 @@ def reclass_effis(
     """Reproject the EFFIS raster to grid and apply the crosswalk.
 
     Returns two uint8 arrays on the pilot grid:
-      - klass: internal class code (0 = non-fuel / nodata)
-      - severity_x100: severity × 100 (0–100, 255 = nodata from missing EFFIS)
+      - klass: EFFIS NFFL code (0 = non-fuel / EFFIS nodata)
+      - severity_x100: severity × 100 (0–100; EFFIS-nodata pixels map to
+        class 0 / severity 0, so every output pixel is assigned — the COG
+        nodata value 255 is reserved but not produced on this path)
 
     CRS is set explicitly from the EFFIS file; reprojection uses nearest-
     neighbour (categorical source — no interpolation of class codes).
@@ -215,6 +217,39 @@ def reclass_effis(
     severity_x100[effis_nodata_mask] = 0
 
     return klass, severity_x100
+
+
+def _apply_cosc_rules(
+    klass: np.ndarray,
+    severity_x100: np.ndarray,
+    cosc_dst: np.ndarray,
+    crosswalk: Crosswalk,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the COSc decision table to EFFIS-derived arrays (pure array logic).
+
+    Split from refine_with_cosc so the decision-table unit tests exercise the
+    shipped implementation directly, without rasterio I/O.
+    """
+    out_klass = klass.copy()
+    out_sev = severity_x100.copy()
+
+    herbaceous_sev_x100 = round(crosswalk.cosc_herbaceous_override_severity * 100)
+
+    # Rule 1: COSc non-fuel pixels → class 0, severity 0
+    non_fuel_mask = np.isin(cosc_dst, list(_COSC_NON_FUEL_CODES))
+    out_klass[non_fuel_mask] = 0
+    out_sev[non_fuel_mask] = 0
+
+    # Rule 2: COSc herbaceous + EFFIS forest → downgrade to herbaceous severity
+    cosc_herbaceous = cosc_dst == _COSC_HERBACEOUS_CODE
+    effis_forest = np.isin(klass, list(_EFFIS_FOREST_CODES))
+    herb_override_mask = cosc_herbaceous & effis_forest
+    out_klass[herb_override_mask] = 0  # treat as non-fuel-class (herbaceous → no EFFIS code)
+    out_sev[herb_override_mask] = herbaceous_sev_x100
+
+    # Rule 3: all other COSc codes — retain EFFIS class and severity (no-op)
+
+    return out_klass, out_sev
 
 
 def refine_with_cosc(
@@ -272,26 +307,7 @@ def refine_with_cosc(
         dst_nodata=0,
     )
 
-    out_klass = klass.copy()
-    out_sev = severity_x100.copy()
-
-    herbaceous_sev_x100 = round(crosswalk.cosc_herbaceous_override_severity * 100)
-
-    # Rule 1: COSc non-fuel pixels → class 0, severity 0
-    non_fuel_mask = np.isin(cosc_dst, list(_COSC_NON_FUEL_CODES))
-    out_klass[non_fuel_mask] = 0
-    out_sev[non_fuel_mask] = 0
-
-    # Rule 2: COSc herbaceous + EFFIS forest → downgrade to herbaceous severity
-    cosc_herbaceous = cosc_dst == _COSC_HERBACEOUS_CODE
-    effis_forest = np.isin(klass, list(_EFFIS_FOREST_CODES))
-    herb_override_mask = cosc_herbaceous & effis_forest
-    out_klass[herb_override_mask] = 0  # treat as non-fuel-class (herbaceous → no EFFIS code)
-    out_sev[herb_override_mask] = herbaceous_sev_x100
-
-    # Rule 3: all other COSc codes — retain EFFIS class and severity (no-op)
-
-    return out_klass, out_sev
+    return _apply_cosc_rules(klass, severity_x100, cosc_dst, crosswalk)
 
 
 def write_fuel_cog(
@@ -321,7 +337,7 @@ def write_fuel_cog(
         "WILDFIRE_EXPOSURE_EO_PROVENANCE": provenance.model_dump_json(),
         "RUN_ID": provenance.run_id,
         "BAND_1": "fuel_class (EFFIS NFFL code; 0=non-fuel or COSc override)",
-        "BAND_2": "severity_x100 (severity * 100, 0–100; 255=nodata outside extent)",
+        "BAND_2": "severity_x100 (severity * 100, 0–100; 255 reserved as nodata, unused)",
         "VALUE_DESCRIPTION": (
             "Fuel-class raster derived from EFFIS European Fuel Map crosswalk "
             "refined by DGT COSc 2024 land-cover. "
@@ -436,7 +452,7 @@ def write_stac_item(
                 spatial=pystac.SpatialExtent([bbox]),
                 temporal=pystac.TemporalExtent([[datetime.now(UTC), None]]),
             ),
-            license="proprietary",
+            license="MIT",
         )
         catalog.add_child(collection)
 
