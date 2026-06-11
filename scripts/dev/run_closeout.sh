@@ -32,15 +32,19 @@ for wu in "$@"; do
   # which would silently follow whatever model the orchestrator session is
   # on; the stretch-2 orchestrator is Opus). Implementation WUs run on
   # Sonnet (~3x cheaper per token, and Max meters Sonnet against its own
-  # separate weekly pool, so it barely touches the shared 5h block). The
-  # judgment-heavy WUs (WU-6 scoring semantics, WU-7 validation honesty)
-  # build on Opus 4.8 — top-tier capability at HALF Fable's per-token cost
-  # on the shared pool (Nelson 2026-06-11, to relieve throttle pressure);
-  # the independent Fable review below stays the quality gate that backs
-  # the cheaper build. Effort goes via --settings — a "/effort high" inside
-  # a -p prompt is plain text, not a command.
+  # separate weekly pool, so it barely touches the shared 5h block).
+  # Judgment-heavy WUs build on the strongest model. WU-6 (scoring
+  # semantics) built on Opus 4.8 — top-tier at HALF Fable's per-token cost
+  # on the shared pool. WU-7 (validation honesty + the public README
+  # close-out narrative) is pinned to FABLE explicitly (Nelson 2026-06-11):
+  # the credibility-critical WU, so we spend the 2x cost for maximum
+  # build-side depth, accepting it may throttle mid-WU. WU-8 stays Sonnet.
+  # The independent Fable review below is the quality gate on every WU.
+  # Effort goes via --settings — a "/effort high" inside a -p prompt is
+  # plain text, not a command.
   case "$wu" in
     WU-2|WU-3|WU-4|WU-5|WU-8) MODEL="${CLOSEOUT_MODEL_IMPL:-sonnet}" ;;
+    WU-7)                     MODEL="${CLOSEOUT_MODEL_WU7:-fable}" ;;
     *)                        MODEL="${CLOSEOUT_MODEL_DEFAULT:-opus}" ;;
   esac
   MODEL_FLAGS=()
