@@ -209,6 +209,43 @@ def main() -> int:
     m_full = _compute(scores_full, labels)
     m_ablation = _compute(scores_ablation, labels)
 
+    # Machine-readable lift-curve data for WU-8's fig5 (prompt 12: re-emit from
+    # this script's outputs, never re-derived numbers). Deterministic content —
+    # keyed by the source run id, no clock. outputs/ is gitignored.
+    metrics_path = Path("outputs/validation") / f"metrics{tag}_{run_id}.json"
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _metrics_json(m: dict[str, Any], features: list[str]) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "active_features": features,
+            "n": m["n"],
+            "n_burned": m["n_burned"],
+            "base_rate": m["base_rate"],
+            "degenerate": m["degenerate"],
+        }
+        if not m["degenerate"]:
+            out["spearman_rho"] = m["spearman_rho"]
+            out["spearman_p"] = m["spearman_p"]
+            out["lift_table"] = m["table"].to_dict(orient="records")
+        return out
+
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "source_exposure_parquet": exposure_path.name,
+                "source_run_id": run_id,
+                "code_commit_sha": commit,
+                "window_start": score_window.start.isoformat(),
+                "window_end": score_window.end.isoformat(),
+                "validation_years": validation_years,
+                "full": _metrics_json(m_full, present_full),
+                "ablation": _metrics_json(m_ablation, present_ablation),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
     # Fuel scale-mismatch caveat (#3): read the effective EFFIS resolution honestly.
     fuel_sidecar = json.loads(fuel_path.with_suffix(".json").read_text())
     effis_res = fuel_sidecar.get("effis_native_res_m")
