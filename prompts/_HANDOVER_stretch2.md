@@ -26,8 +26,9 @@
      >> outputs/logs/closeout_stretch2_$(date +%Y%m%d).log 2>&1 &
    ```
    The driver handles per-WU usage gating (time-sensitive, 50 % floor),
-   Sonnet builds for WU-5/WU-8, default-model builds for WU-6/WU-7,
-   the independent review pass, gates ×2, push, CI watch.
+   Sonnet builds for WU-5/WU-8, **Fable builds for WU-6/WU-7 and Fable
+   reviews for every WU — pinned explicitly in the script**, never
+   inherited from your (Opus) session. Gates ×2, push, CI watch.
 2. Arm one lean Monitor on the log: `^=== WU-[0-9]+ : done|^REVIEW: |
    THROTTLED|HIL required|exited non-zero|produced no commits|CI red|
    no CI run appeared|Stretch complete`. Stay silent between events.
