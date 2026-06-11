@@ -79,7 +79,13 @@ validated against subsequent burns"* — nothing stronger.
    with the civic-tech framing (municípios / civil-protection / open-data
    audience first; no vendor adjacency beyond one related-work line), the
    validation headline numbers (script-generated), and a placeholder section
-   for the WU-8 figures embed. Then write `prompts/_HIL.md` asking Nelson to
+   for the WU-8 figures embed. The related-work paragraph **must include
+   FireScope** (INSAIT, CVPR 2026, arXiv:2511.17171; public Europe-wide
+   wildfire *risk* map, CC-BY-4.0 — keep "risk" as their attributed
+   vocabulary, ours stays *exposure rank*) as the planned external
+   reference for a post-ship comparison (`prompts/13_firescope_comparison.md`);
+   one to two sentences, links included, no claims about results we have
+   not produced. Then write `prompts/_HIL.md` asking Nelson to
    approve (a) the README status text and (b) the upcoming WU-8 figure-embed
    section, commit both, and **end the session** — the driver halts there by
    design (public surface, CLAUDE.md "Don't surprise the human").
