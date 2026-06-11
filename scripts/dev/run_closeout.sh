@@ -28,16 +28,20 @@ for wu in "$@"; do
   echo "=== $wu : usage gate ==="
   scripts/dev/check_usage.sh || { echo "THROTTLED before $wu — rerun after block reset"; exit 3; }
 
-  # Model per WU: implementation WUs run on Sonnet (~3x cheaper per token,
-  # and Max meters Sonnet against its own separate weekly pool); the
+  # Model per WU (pinned EXPLICITLY per WU — never "inherit the default",
+  # which would silently follow whatever model the orchestrator session is
+  # on; the stretch-2 orchestrator is Opus). Implementation WUs run on
+  # Sonnet (~3x cheaper per token, and Max meters Sonnet against its own
+  # separate weekly pool, so it barely touches the shared 5h block). The
   # judgment-heavy WUs (WU-6 scoring semantics, WU-7 validation honesty)
-  # run on Fable EXPLICITLY — never "inherit the default", which would
-  # silently follow whatever model the orchestrator session happens to be
-  # on (stretch-2 orchestrator is Opus). Effort goes via --settings — a
-  # "/effort high" inside a -p prompt is plain text, not a command.
+  # build on Opus 4.8 — top-tier capability at HALF Fable's per-token cost
+  # on the shared pool (Nelson 2026-06-11, to relieve throttle pressure);
+  # the independent Fable review below stays the quality gate that backs
+  # the cheaper build. Effort goes via --settings — a "/effort high" inside
+  # a -p prompt is plain text, not a command.
   case "$wu" in
     WU-2|WU-3|WU-4|WU-5|WU-8) MODEL="${CLOSEOUT_MODEL_IMPL:-sonnet}" ;;
-    *)                        MODEL="${CLOSEOUT_MODEL_DEFAULT:-fable}" ;;
+    *)                        MODEL="${CLOSEOUT_MODEL_DEFAULT:-opus}" ;;
   esac
   MODEL_FLAGS=()
   [ -n "$MODEL" ] && MODEL_FLAGS=(--model "$MODEL")
