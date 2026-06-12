@@ -1,0 +1,47 @@
+{
+  "type": "Collection",
+  "id": "exposure-assets",
+  "stac_version": "1.1.0",
+  "description": "Per-run GeoParquet of OSM-derived critical-infrastructure assets scored for relative wildfire exposure. One row per asset with the full ScoredAsset provenance contract (source artefact SHA-256s, STAC item ids, config + code commit). The exposure score is a relative, AOI-normalised screening rank in [0, 1] and exposure_rank the integer position (1 = most exposed) \u2014 never a probability of fire. CRS EPSG:4326.",
+  "links": [
+    {
+      "rel": "root",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    },
+    {
+      "rel": "item",
+      "href": "./exposure-assets-20260611T170549Z/exposure-assets-20260611T170549Z.json",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.json",
+      "type": "application/json",
+      "title": "wildfire-exposure-eo STAC catalog"
+    }
+  ],
+  "title": "Scored critical-infrastructure assets (exposure rank)",
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -8.7769047,
+          40.1249405,
+          -8.1302474,
+          41.1565925
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2023-12-31T00:00:00Z",
+          "2026-06-11T17:05:49Z"
+        ]
+      ]
+    }
+  },
+  "license": "MIT"
+}

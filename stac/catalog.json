@@ -21,6 +21,12 @@
       "href": "./fuel-layer/collection.json",
       "type": "application/json",
       "title": "Fuel-layer COG (EFFIS + COSc crosswalk)"
+    },
+    {
+      "rel": "child",
+      "href": "./exposure-assets/collection.json",
+      "type": "application/json",
+      "title": "Scored critical-infrastructure assets (exposure rank)"
     }
   ],
   "title": "wildfire-exposure-eo STAC catalog"

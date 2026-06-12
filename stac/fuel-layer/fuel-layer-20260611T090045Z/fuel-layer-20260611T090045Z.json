@@ -93,7 +93,7 @@
   ],
   "assets": {
     "fuel_class": {
-      "href": "../../../outputs/cogs/fuel_class_smoke_20260611T090045Z.tif",
+      "href": "./fuel_class_smoke_20260611T090045Z.tif",
       "type": "image/tiff; application=geotiff; profile=cloud-optimized",
       "title": "Fuel-class COG (EFFIS NFFL class + severity \u00d7 100)",
       "description": "Band 1: EFFIS NFFL fuel-model code (0=non-fuel). Band 2: severity \u00d7 100. EFFIS native res 250 m, output grid 10 m EPSG:32629. Crosswalk version 0.1.0.",
