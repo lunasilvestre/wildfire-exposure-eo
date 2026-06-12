@@ -17,14 +17,15 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "12_make_figures.py"
 _FIGS_DIR = _ROOT / "docs" / "figures"
 
-# All artefacts the smoke run must produce
+# All artefacts the smoke run must produce. The HTML map carries the smoke
+# suffix too — a smoke run must never clobber the pilot exposure_map.html.
 _EXPECTED_SMOKE = [
     "fig1_exposure_map_smoke.png",
     "fig2_fuel_layer_smoke.png",
     "fig3_burn_scar_smoke.png",
     "fig4_icnf_overlay_smoke.png",
     "fig5_lift_curve_smoke.png",
-    "exposure_map.html",
+    "exposure_map_smoke.html",
 ]
 
 
@@ -50,21 +51,22 @@ def test_smoke_produces_all_artefacts() -> None:
 
 @pytest.mark.slow
 def test_smoke_html_under_size_limit() -> None:
-    """The HTML map must be under 25 MB."""
-    html_path = _FIGS_DIR / "exposure_map.html"
+    """The smoke HTML map must be under 25 MB."""
+    html_path = _FIGS_DIR / "exposure_map_smoke.html"
     if not html_path.exists():
-        pytest.skip("exposure_map.html not present; run the smoke test first")
+        pytest.skip("exposure_map_smoke.html not present; run the smoke test first")
     size_mb = html_path.stat().st_size / 1e6
-    assert size_mb < 25, f"exposure_map.html is {size_mb:.1f} MB, exceeds 25 MB limit"
+    assert size_mb < 25, f"exposure_map_smoke.html is {size_mb:.1f} MB, exceeds 25 MB limit"
 
 
 @pytest.mark.slow
 def test_smoke_no_prohibited_language() -> None:
-    """HTML map must not contain prohibited risk-probability language."""
-    html_path = _FIGS_DIR / "exposure_map.html"
-    if not html_path.exists():
-        pytest.skip("exposure_map.html not present; run the smoke test first")
-    text = html_path.read_text(errors="replace").lower()
+    """No HTML map under docs/figures/ may contain prohibited risk-probability language."""
+    html_paths = sorted(_FIGS_DIR.glob("*.html"))
+    if not html_paths:
+        pytest.skip("no HTML maps present; run the smoke test first")
     prohibited = ("risk probability", "chance of fire", "fire probability", "risk score")
-    for term in prohibited:
-        assert term not in text, f"Prohibited term '{term}' found in exposure_map.html"
+    for html_path in html_paths:
+        text = html_path.read_text(errors="replace").lower()
+        for term in prohibited:
+            assert term not in text, f"Prohibited term '{term}' found in {html_path.name}"

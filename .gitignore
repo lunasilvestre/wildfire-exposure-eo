@@ -34,6 +34,10 @@ data/cache/
 outputs/
 !outputs/.gitkeep
 
+# Pilot interactive map — ~14 MB, above the 2 MB committed-file cap; the
+# committed sample under docs/figures/ is exposure_map_smoke.html instead.
+docs/figures/exposure_map.html
+
 # Model checkpoints — never committed; distribute via GitHub releases
 checkpoints/
 *.pt

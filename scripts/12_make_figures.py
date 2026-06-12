@@ -283,8 +283,14 @@ def _add_attribution(ax: matplotlib.axes.Axes) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def make_fig1(gdf: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame, out: Path) -> None:
-    """Assets coloured by exposure rank (viridis, 1 = highest exposure)."""
+def make_fig1(
+    gdf: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame, out: Path, *, aoi_label: str, t0: str
+) -> None:
+    """Assets coloured by exposure rank (viridis, 1 = highest exposure).
+
+    *aoi_label* and *t0* come from the loaded artefacts (metrics JSON window),
+    never hardcoded — the smoke and pilot variants carry different values.
+    """
     fig, ax = plt.subplots(figsize=_FIGSIZE)
 
     # Background: fuel severity as light gray reference layer (already local)
@@ -342,8 +348,9 @@ def make_fig1(gdf: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame, out: Path) -> None:
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
-        "Critical infrastructure — wildfire exposure rank (pilot AOI, T₀ = 2024-12-31)",
+        f"Critical infrastructure — wildfire exposure rank ({aoi_label}, T₀ = {t0})",
         fontsize=10,
+        pad=18,  # leave room for the caveat line at y=1.01
     )
     ax.text(
         0.5,
@@ -408,6 +415,7 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
     ax.set_title(
         "Fuel-class layer (EFFIS NFFL-13 + DGT COSc crosswalk)",
         fontsize=10,
+        pad=18,  # leave room for the caveat line at y=1.01
     )
     ax.text(
         0.5,
@@ -432,7 +440,17 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
 
 
 def make_fig3(burn_path: Path, out: Path) -> None:
-    """Burn-scar max-probability composite with 0.5 threshold contour."""
+    """Burn-scar max-composite (inference probability) with 0.5 threshold contour.
+
+    Scene count and window come from the COG's provenance sidecar JSON
+    (same stem, ``.json``) — never hardcoded, so smoke and pilot variants
+    carry their own true values.
+    """
+    sidecar = json.loads(burn_path.with_suffix(".json").read_text())
+    n_scenes = len(sidecar["s2_item_ids"])
+    window_start = sidecar["window_start"]
+    window_end = sidecar["window_end"]
+
     data, lons, lats, _ = raster_to_epsg4326(burn_path)
 
     # Downsample to cap the pixel count (keeps file size under 2 MB).
@@ -452,7 +470,7 @@ def make_fig3(burn_path: Path, out: Path) -> None:
         shading="auto",
     )
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.01)
-    cbar.set_label("Prithvi burn-scar probability (per-pixel, max composite)", fontsize=8)
+    cbar.set_label("Prithvi burn-scar inference probability (per-pixel, max composite)", fontsize=8)
 
     # 0.5 threshold contour — suppress UserWarning for all-NaN slices
     with warnings.catch_warnings():
@@ -467,15 +485,16 @@ def make_fig3(burn_path: Path, out: Path) -> None:
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
-        "Prithvi-EO-2.0 burn-scar probability composite\n"
-        "(12-month trailing window, T₀ = 2026-06-09)",
+        "Prithvi-EO-2.0 burn-scar inference composite\n"
+        f"(trailing window {window_start} → {window_end})",
         fontsize=10,
+        pad=28,  # leave room for the wrapped caveat at y=1.01
     )
     ax.text(
         0.5,
         1.01,
-        "Max-composite over 179 Sentinel-2 scenes; values represent max single-scene probability, "
-        "not frequency. Use as a relative rank input, not a threshold.",
+        f"Max-composite over {n_scenes} Sentinel-2 scenes; values represent max single-scene "
+        "inference probability, not frequency. Use as a relative rank input, not a threshold.",
         ha="center",
         va="bottom",
         transform=ax.transAxes,
@@ -501,8 +520,13 @@ def make_fig4(
     aoi: gpd.GeoDataFrame,
     val_year: int,
     out: Path,
+    *,
+    t0: str,
 ) -> None:
-    """Exposure rank (dimmed) with ICNF validation-year burn perimeters on top."""
+    """Exposure rank (dimmed) with ICNF validation-year burn perimeters on top.
+
+    *t0* (score input-window end) comes from the metrics JSON, never hardcoded.
+    """
     fig, ax = plt.subplots(figsize=_FIGSIZE)
 
     aoi.to_crs("EPSG:4326").boundary.plot(ax=ax, color="#444444", linewidth=0.8, linestyle="--")
@@ -561,11 +585,12 @@ def make_fig4(
         f"Exposure rank vs ICNF burn perimeters {val_year} "
         f"(assets dimmed; red outline = validated burn)",
         fontsize=10,
+        pad=18,  # leave room for the caveat line at y=1.01
     )
     ax.text(
         0.5,
         1.01,
-        "ICNF perimeters are strictly after the score's input window (T₀ = 2024-12-31). "
+        f"ICNF perimeters are strictly after the score's input window (T₀ = {t0}). "
         "Red = area that burned; asset colour = exposure rank.",
         ha="center",
         va="bottom",
@@ -650,11 +675,15 @@ def make_fig5(metrics: dict, out: Path) -> None:  # type: ignore[type-arg]
     ax.legend(fontsize=8)
 
     n_burned = full["n_burned"]
+    # One-asset lift granularity in a decile: (1/decile_n) / (n_burned/n) —
+    # computed from the metrics JSON, never hardcoded.
+    decile_n = full["lift_table"][0]["n_assets"]
+    granularity = full["n"] / (decile_n * n_burned)
     ax.text(
         0.5,
         0.03,
         f"With only {n_burned} burned assets, a single asset moving deciles changes "
-        "lift by 2.00×.\nThis run does not resolve which features carry the signal. "
+        f"lift by {granularity:.2f}×.\nThis run does not resolve which features carry the signal. "
         "Read docs/validation_report.md.",
         ha="center",
         va="bottom",
@@ -877,15 +906,22 @@ def main() -> None:
     val_year: int = int(val_years[0]) if val_years else int(burns["vintage_year"].max())
 
     suffix = "_smoke" if smoke else ""
+    aoi_label = "smoke AOI" if smoke else "pilot AOI"
+    # Score input-window end, from the metrics JSON (matches the scored parquet).
+    t0 = str(metrics.get("window_end", "?"))
 
     print("Generating figures …")
 
-    make_fig1(gdf, aoi, _FIGS_DIR / f"fig1_exposure_map{suffix}.png")
+    make_fig1(gdf, aoi, _FIGS_DIR / f"fig1_exposure_map{suffix}.png", aoi_label=aoi_label, t0=t0)
     make_fig2(fuel_path, crosswalk, _FIGS_DIR / f"fig2_fuel_layer{suffix}.png")
     make_fig3(burn_path, _FIGS_DIR / f"fig3_burn_scar{suffix}.png")
-    make_fig4(gdf, burns, aoi, val_year, _FIGS_DIR / f"fig4_icnf_overlay{suffix}.png")
+    make_fig4(gdf, burns, aoi, val_year, _FIGS_DIR / f"fig4_icnf_overlay{suffix}.png", t0=t0)
     make_fig5(metrics, _FIGS_DIR / f"fig5_lift_curve{suffix}.png")
-    make_html_map(gdf, fuel_path, burns, aoi, _FIGS_DIR / "exposure_map.html")
+    # The HTML map gets the same smoke suffix as the PNGs — a smoke run must
+    # never clobber the pilot map. The pilot map (~14 MB) exceeds the repo's
+    # 2 MB committed-file cap and is NOT committed; the committed sample is
+    # the smoke-AOI map (see README).
+    make_html_map(gdf, fuel_path, burns, aoi, _FIGS_DIR / f"exposure_map{suffix}.html")
 
     print("\nDone. Artefacts under docs/figures/:")
     for f in sorted(_FIGS_DIR.iterdir()):
