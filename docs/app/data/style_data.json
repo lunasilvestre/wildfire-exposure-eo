@@ -1,6 +1,6 @@
 {
- "generated_by": "scripts/15_make_geobrowser_data.py at 43bc62cd564e7abfa30d0fafd35724c1b4dc0b47-dirty",
- "code_commit_sha": "43bc62cd564e7abfa30d0fafd35724c1b4dc0b47-dirty",
+ "generated_by": "scripts/15_make_geobrowser_data.py at 0db5a6827616a31d7c94791f3a254ef494cf36a1",
+ "code_commit_sha": "0db5a6827616a31d7c94791f3a254ef494cf36a1",
  "viridis_lut": [
   [
    68,
