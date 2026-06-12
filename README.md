@@ -1,14 +1,23 @@
 # wildfire-exposure-eo
 
-A STAC-native pipeline that scores OpenStreetMap-derived critical infrastructure by wildfire exposure for a Portuguese pilot AOI, combining Sentinel-2 fuel-class mapping, canopy-height features, ICNF burned-area history, and topographic + fire-weather priors. Built on public Earth Observation data with full provenance per asset, validated against historical burn polygons.
+<!-- WU-8 fig1: ranked assets coloured by exposure rank over a Sentinel-2
+     true-colour composite — docs/figures/fig1_ranked_assets.png. A reviewer
+     should see ranked infrastructure on satellite imagery within ten
+     seconds of opening the repo. -->
+<!-- WU-8 fig5: lift curve (full vs ablation) from the metrics JSON sidecar
+     emitted by scripts/11_validate.py — docs/figures/fig5_lift_curve.png -->
+<!-- WU-8: link to the self-contained interactive HTML map under
+     docs/figures/ -->
 
-> **Status.** Pre-development. See [`PRE_DEV_CHECKLIST.md`](PRE_DEV_CHECKLIST.md) before opening a Claude Code session. See [`CLAUDE.md`](CLAUDE.md) for session conventions.
+Which schools, substations, water plants and fire stations in a Portuguese fire district are most exposed to wildfire this season? This STAC-native pipeline answers that with a transparent, per-asset exposure **rank** built entirely from open data — OSM infrastructure, Sentinel-2, EFFIS/DGT fuel layers, ETH canopy height, Copernicus DEM terrain, and ICNF burned-area history — with full provenance on every scored asset and validation against the burns that happened after the score's input window. Built for municípios, civil-protection planners, and open-data auditors first: every number is reproducible from this repo.
+
+> **Status (2026-06-11). Demonstrator complete — scope.** A thin, honest end-to-end slice: OSM-derived critical infrastructure on a Portuguese pilot AOI (Sever do Vouga / Albergaria-a-Velha / Oliveira de Azeméis), scored for relative wildfire exposure from public EO data with full per-asset provenance, and validated against the ICNF burns that happened *after* the score's input window ([validation report](docs/validation_report.md)). The smoke-AOI demo path is CPU-only and documented step-by-step in [`docs/demo.md`](docs/demo.md). Scope boundaries: exposure is a screening **rank**, not a probability; scores are AOI-relative; this is a public-data demonstrator, not an operational service. See [`CLAUDE.md`](CLAUDE.md) for session conventions.
 
 ## Why this exists
 
 Critical infrastructure — power lines, substations, transformers, water-treatment plants, telecom towers, hospitals, schools, emergency-services facilities — is unevenly exposed to wildfire risk. Static hazard maps published by national agencies tend to be land-cover-driven, slow to update, and asset-agnostic. This project produces a per-asset wildfire-exposure score, derived from current-year EO data and validated against historical burn outcomes, scoped initially to a single Portuguese fire district as a methodology demonstrator.
 
-The methodology generalizes nationally and beyond. The pilot is intentionally small so that the demo target — end-to-end on a fresh clone in *target wall-clock* under 30 minutes on CPU with pretrained checkpoints — is achievable. Some stages (foundation-model fuel-class fine-tuning, full Prithvi-Burn-Scar inference) run on the `atlas` GPU host and are skipped or replaced with pre-baked artefacts in the CPU demo; see [`docs/methodology.md`](docs/methodology.md).
+The methodology generalizes nationally and beyond. The pilot is intentionally small so that the demo path runs end-to-end on the smoke AOI in minutes on CPU (~2.5 min cache-warm). The fuel-class layer is a rule-based EFFIS + DGT-COSc crosswalk — no model training. The recent-burn feature uses a pre-baked Prithvi-EO Burn-Scar COG produced on the `atlas` GPU host; that inference is the one GPU-only stage, replaced by a committed artefact in the CPU demo. See [`docs/methodology.md`](docs/methodology.md).
 
 ## What this is not
 
@@ -19,36 +28,37 @@ The methodology generalizes nationally and beyond. The pilot is intentionally sm
 ## Architecture
 
 ```
-┌─────────────────────┐      ┌──────────────────────┐      ┌────────────────────┐
-│  Critical infra     │      │  Earth-observation   │      │  Reference layers  │
-│  (OSM via Overpass) │      │  (Sentinel-2/1, HLS, │      │  (ICNF burns, COS, │
-│  → GeoParquet       │      │   DEM, canopy ht)    │      │   FWI, Scott&Burgan│
-│                     │      │  → STAC items + COGs │      │   crosswalk)       │
-└──────────┬──────────┘      └──────────┬───────────┘      └─────────┬──────────┘
-           │                            │                            │
-           └─────────┬──────────────────┴──────────────┬─────────────┘
-                     │                                 │
-                     ▼                                 ▼
-           ┌───────────────────────┐       ┌─────────────────────────┐
-           │  Fuel-class model     │       │  Per-asset feature      │
-           │  (TerraTorch-fine-   │       │  extraction (rasterio + │
-           │   tuned Prithvi-EO    │       │   stackstac, buffered   │
-           │   or SegFormer base)  │       │   per asset class)      │
-           └───────────┬───────────┘       └────────────┬────────────┘
+┌─────────────────────┐      ┌──────────────────────┐      ┌─────────────────────┐
+│  Critical infra     │      │  Earth observation   │      │  Reference layers   │
+│  (OSM via Overpass) │      │  (Sentinel-2/1, DEM, │      │  (ICNF burns, EFFIS,│
+│  → GeoParquet       │      │   ETH canopy height) │      │   DGT COSc, Prithvi │
+│                     │      │  → STAC items + COGs │      │   burn-scar COG)    │
+└──────────┬──────────┘      └──────────┬───────────┘      └──────────┬──────────┘
+           │                            │                             │
+           └─────────┬──────────────────┴───────────────┬────────────┘
+                     │                                  │
+                     ▼                                  ▼
+           ┌───────────────────────┐       ┌──────────────────────────┐
+           │  Fuel-class layer     │       │  Per-asset feature       │
+           │  (EFFIS NFFL + DGT    │       │  extraction (rasterio +  │
+           │   COSc crosswalk      │       │   exactextract, buffered │
+           │   → COG)              │       │   per asset class)       │
+           └───────────┬───────────┘       └────────────┬─────────────┘
                        │                                │
-                       └──────────────┬─────────────────┘
-                                      ▼
+                       └───────────────┬────────────────┘
+                                       ▼
                          ┌───────────────────────────┐
                          │  Exposure score           │
-                         │  (composite, calibrated)  │
-                         │  → GeoParquet + STAC      │
-                         │  → COG (raster)           │
+                         │  (transparent linear      │
+                         │   composite → rank)       │
+                         │  → GeoParquet + STAC + COG│
                          └───────────────┬───────────┘
                                          ▼
                          ┌───────────────────────────┐
                          │  Validation               │
-                         │  (ICNF burns 2017–24)     │
-                         │  Lift / Spearman / Brier  │
+                         │  (ICNF burns, post-window)│
+                         │  Lift / Spearman /        │
+                         │  ablation                 │
                          └───────────────────────────┘
 ```
 
@@ -59,6 +69,25 @@ The methodology generalizes nationally and beyond. The pilot is intentionally sm
 A 1 × 1 km smoke AOI under `data/aoi/smoke.geojson`, centred on Sever do Vouga town, is the development-loop target.
 
 Generalizable to any AOI by editing `data/aoi/pilot.geojson` and re-running the pipeline.
+
+## Validation headline (pilot AOI)
+
+<!-- generated by: scripts/11_validate.py at b06ba80364ea35b5e1d661334d1ba2c5185b293a ; input exposure_20260611T170549Z.parquet scored at 988e59f2eab0fde3bf389ee0d3c6eb2312b81ae7 -->
+
+The exposure rank was computed from inputs **≤ 2024-12-31** and validated
+against the ICNF burn perimeters of **2025** (19 perimeters, 95 ha inside the
+AOI) — strictly after the input window, enforced by a hard temporal-leakage
+gate. Of **3,045** scored assets, **5** had buffers that burned (base rate
+0.16%). Cumulative lift at the top-30% of the rank: **2.66×**; Spearman ρ
+**0.0371** (p = 0.041). The mandatory ablation (burn-history features
+removed) scores top-decile lift 2.00× vs 0.00× for the full configuration —
+with only 5 burned assets, a single asset moving deciles changes lift by
+2.00×, so this run **does not resolve which features carry the signal**, and
+fire's spatial autocorrelation means lift flatters any screen that uses burn
+history. Read [`docs/validation_report.md`](docs/validation_report.md) — the
+ablation row first. The defensible claim, in full: *a transparent,
+reproducible prioritization screen validated against subsequent burns* —
+nothing stronger.
 
 ## Data sources
 
@@ -126,15 +155,11 @@ Class list is intentionally short for the pilot. Extending is a YAML edit.
 
 ## Modeling approach
 
-Two stages, each with a documented baseline and an optional foundation-model variant. The baseline must work on its own; the foundation-model variant is a credibility-builder, not a dependency.
+Two stages: a rule-based fuel-class layer, and a per-asset feature/score step. A planned fuel-class *segmentation model* (a SegFormer baseline plus an optional Prithvi/TerraTorch fine-tuned variant) was **scoped out** — the demonstrator derives fuel class from an EFFIS + DGT-COSc crosswalk instead, which is transparent, network-light, and needs no training. The one learned model in the shipped pipeline is the Prithvi-EO Burn-Scar inference (Stage 1b), run on GPU and consumed as a pre-baked COG.
 
-### Stage 1 — fuel-class segmentation
+### Stage 1 — fuel-class layer (rule-based crosswalk)
 
-**Task.** Pixel-level segmentation of Sentinel-2 imagery into the project's 9-class internal fuel taxonomy (`non-fuel`, `grass`, `shrub-low`, `shrub-tall`, `broadleaf-open`, `broadleaf-closed`, `conifer-open`, `conifer-closed`, `mixed-forest`), crosswalked to NFFL-13 via EFFIS for international readability and to Scott & Burgan FBFM40 for fire-behaviour modelling. ICNF's Carta de Combustíveis Florestais is the alignment target once obtainable, but is *not* the training input — see `data/crosswalks/icnf_to_scott_burgan.yaml` for the full chain.
-
-**Baseline (must ship).** SegFormer-B0 trained on weak labels combining (a) DGT COSc 2024 4-class fuel-cover for the fuel / non-fuel and shrub / forest splits, (b) DGT COS 2023 species codes for the broadleaf / conifer / mixed and Pinus / Eucalyptus / Quercus splits, with Sentinel-2 NDVI/NBR seasonal delta + Sentinel-1 cross-pol ratio as auxiliary input features for canopy openness. Pure PyTorch + `transformers`, no TerraTorch. This is the reproducibility floor.
-
-**Foundation-model variant (nice-to-have).** Prithvi-EO 2.0 or Clay v1.5, fine-tuned with LoRA via TerraTorch. Documented as a comparison: same val split, same metrics, side-by-side IoU and class-confusion table. Demonstrates current-EO-ML literacy without making the pipeline depend on it.
+**Task.** Derive a per-pixel fuel-class COG over the AOI from existing fuel/land-cover products — no model training. `fuel-layer` reclassifies the EFFIS European Fuel Map (NFFL-13 codes) and refines it with DGT COSc 2024 land-cover via a documented crosswalk — e.g. where EFFIS says forest (models 8–10) but COSc says herbaceous, trust COSc, since the stand has likely burned or been cleared since the EFFIS vintage. The crosswalk to Scott & Burgan FBFM40 is retained for international fire-behaviour readability. Species-level DGT COS refinement (broadleaf/conifer/Pinus/Eucalyptus splits) is future work, not in the shipped path. See [`src/wildfire_exposure_eo/fuel.py`](src/wildfire_exposure_eo/fuel.py) and [`config/fuel_crosswalk.yaml`](config/fuel_crosswalk.yaml).
 
 ### Stage 1b — burn-scar inference (recent burns)
 
@@ -163,41 +188,42 @@ For each OSM asset, buffer by a class-specific radius (e.g., 30 m for power line
 | `historical_burn_share` | ICNF Áreas Ardidas | fraction of buffer area burned in last 25 years |
 | `recent_burn_share_12mo` | **Stage 1b — Prithvi-Burn-Scar → S2** | fraction of buffer area flagged as burned in past 12 months |
 | `nbr_delta_recent` | Sentinel-2 spring vs late-summer | mean |
-| `fwi_p95_recent_season` | IPMA | 95th percentile (optional) |
+| ~~`fwi_p95_recent_season`~~ | IPMA | *dropped in score v0.2.0 (no verified public FWI source) — future work* |
 
 The composite exposure score is a transparent linear combination of normalized features with documented weights. No black-box ensemble. The point is auditability: any utility analyst should be able to read the score formula in five lines of YAML.
 
-Materialised in [`config/exposure_score.yaml`](config/exposure_score.yaml):
+Materialised in [`config/exposure_score.yaml`](config/exposure_score.yaml) (v0.2.0):
 
 ```yaml
-# config/exposure_score.yaml
+# config/exposure_score.yaml — six weights, sum to 1.0 (CI asserts this)
+version: "0.2.0"
 weights:
-  fuel_class_severity_weight: 0.30
-  canopy_height_p90_m: 0.20
-  slope_max_deg: 0.10
-  historical_burn_share: 0.15        # decadal pattern (ICNF, ~1-yr lag)
-  recent_burn_share_12mo: 0.10       # current season (Prithvi-Burn-Scar, monthly)
-  nbr_delta_recent: 0.05
-  fwi_p95_recent_season: 0.10
+  fuel_class_severity_weight: 0.3333   # crosswalk-derived per-class severity
+  canopy_height_p90_m:        0.2222   # ETH GCH 10 m, p90 in buffer
+  slope_max_deg:              0.1111   # Cop-DEM GLO-30, max slope in buffer
+  historical_burn_share:      0.1667   # decadal pattern (ICNF, ~1-yr lag)
+  recent_burn_share_12mo:     0.1111   # current season (Prithvi burn-scar)
+  nbr_delta_recent:           0.0556   # Sentinel-2 spring-vs-summer NBR delta
 normalization: percentile_rank_within_aoi
 ```
 
-Calibration is reported, not promised. We publish a calibration plot against the historical-burn validation, not a probability claim.
+A seventh feature, `fwi_p95_recent_season` (fire-weather), was **dropped in v0.2.0**: there is no GREEN, public, programmatic FWI source verifiable in-session, so the six remaining weights are renormalised (each old weight ÷ 0.90) and still sum to 1.0. FWI returns as future work behind a verified IPMA/Copernicus fetcher.
+
+Calibration is **reported, not promised** — and in practice the output is a relative *rank*, so validation compares it against subsequent burns (lift, Spearman, ablation) with **no probability claim and no calibration plot**.
 
 ## Validation
 
-The killer feature. Operates entirely on public data with no leakage:
+The killer feature. Operates entirely on public data with a hard temporal-leakage gate:
 
-1. Freeze the OSM snapshot at a date `T₀` (default: 2017-01-01).
-2. Compute exposure scores using only EO data prior to `T₀`.
-3. Take ICNF burned-area polygons from `T₀` to present.
-4. Compute, per asset class:
-   - **Lift chart** — P(asset intersects burn zone | top-decile score) / P(asset intersects burn zone | random).
-   - **Spearman rank correlation** — exposure rank vs. nearest-burn distance.
-   - **Brier score** for binary "asset-in-burned-area" prediction (post-calibration).
-   - **Class-stratified confusion** — separately for each infrastructure class.
+1. Score the assets with `score --window-end T₀` — the demonstrator uses **T₀ = 2024-12-31**, so the rank sees only inputs on or before that date.
+2. Take ICNF burned-area perimeters whose vintage is **strictly after** T₀ (the 2025 vintage for this run). `validation.assert_no_temporal_leakage` raises unless every validation burn post-dates the window.
+3. Label each asset binary: does its class buffer intersect a post-T₀ burn perimeter?
+4. Compute, over all scored assets:
+   - **Lift** — burn rate within the top decile (and each cumulative decile) of the exposure rank, versus the AOI base rate.
+   - **Spearman rank correlation** — exposure rank vs. subsequent burning.
+   - A **mandatory ablation** with the burn-history features removed, reported beside the full configuration.
 
-Results land in `docs/validation_report.md` and are regenerated by `make validate`. No fudging — even a negative result is a publishable result with a clear narrative ("this signal works for transmission corridors but not for emergency-services siting because…").
+There is **no Brier score and no calibration plot**: the output is a relative *rank*, not a probability (non-negotiable #6). Results land in [`docs/validation_report.md`](docs/validation_report.md), regenerated by `uv run python scripts/11_validate.py` (there is no `make validate` target). The report is honest in both directions — with few post-window burns it states plainly when a run *does not resolve* which features carry the signal, and it notes that fire's spatial autocorrelation makes burn-history lift partly mechanical. Read the ablation row first.
 
 ## Stack
 
@@ -206,30 +232,30 @@ Results land in `docs/validation_report.md` and are regenerated by `make validat
 ```
 Python 3.11
 uv (lockfile)
-PyTorch 2.4 + CUDA 12.1
-TorchGeo >= 0.6
-TerraTorch >= 0.5 (optional path)
-transformers >= 4.45 (SegFormer baseline)
-pystac-client >= 0.8
-stackstac >= 0.5
-odc-stac >= 0.3
+torch >= 2.6, torchvision >= 0.21     # Prithvi burn-scar inference (Stage 1b, GPU)
+torchgeo >= 0.9
+terratorch >= 1.2                     # Prithvi-EO 2.0 loader for the burn-scar model
+transformers >= 4.50, lightning, peft, safetensors
+pystac-client >= 0.8, pystac >= 1.11
+stackstac >= 0.5, odc-stac >= 0.3
 rioxarray, rasterio, xarray, dask
-geopandas >= 1.0, shapely 2.x
-duckdb (for GeoParquet workflows)
-fastapi, asyncpg, sqlalchemy 2.x async
-alembic
-pgstac-py (catalog ingestion, optional)
-pytest, hypothesis, ruff, pyright, pre-commit
+geopandas >= 1.0, shapely 2.x, pyproj, fiona
+duckdb, pyarrow (GeoParquet workflows)
+exactextract (zonal stats), osmnx (OSM), earthaccess (HLS auth)
+pydantic, jsonschema, stac-validator
+typer, rich (CLI)
+fastapi, asyncpg, sqlalchemy 2.x, alembic   # optional serve/PostGIS path, unused in the pilot
+pytest, hypothesis, ruff, pyright, pre-commit (dev extra)
 ```
 
 ### Why these and not others
 
 - **STAC + stackstac/odc-stac** is the modern best practice for satellite ingestion. Eliminates manual scene download, makes provenance auto-citable.
 - **TorchGeo** for samplers/transforms is canonical. We're not reinventing tile-grid logic.
-- **TerraTorch** is included as the modern path for foundation-model fine-tuning, but the project does not depend on it. The SegFormer baseline ships first.
+- **TerraTorch + torch** carry the Prithvi-EO Burn-Scar inference (Stage 1b, GPU). There is no fuel-class model training in the shipped pipeline — fuel class is the EFFIS + DGT-COSc crosswalk.
 - **GeoParquet** for vector outputs (not Shapefile, not GeoPackage as primary). Modern, columnar, plays with DuckDB and the broader Lake stack.
 - **COG everywhere** for rasters. Cloud-friendly, range-readable, STAC-compatible.
-- **No PostGIS for the pilot.** Asset volumes are small (<100k features at AOI scale). DuckDB + GeoParquet is faster, simpler, and zero-infra. PostGIS is documented as the production path in `docs/scaling.md`.
+- **No PostGIS for the pilot.** Asset volumes are small (<100k features at AOI scale). DuckDB + GeoParquet is faster, simpler, and zero-infra. PostGIS is the documented production path if asset volumes grow.
 - **No live API for the pilot.** Optional `serve` command using FastAPI + DuckDB if needed for a demo, but the primary deliverable is the reproducible repo + STAC catalog + GeoParquet table.
 
 ## Outputs
@@ -269,8 +295,8 @@ outputs/
   "exposure_score": 0.81,
   "score_components": {...},  # all normalized features
   "provenance": {
-    "model_id": "fuel-class-segformer-b0",
-    "model_version": "0.3.1",
+    "score_config_version": "0.2.0",
+    "burn_scar_model_id": "ibm-nasa-geospatial/Prithvi-EO-2.0-300M-BurnScars",
     "sentinel_2_stac_ids": ["S2A_MSIL2A_..."],
     "sentinel_1_stac_ids": ["..."],
     "dem_stac_id": "cop-dem-glo-30/...",
@@ -303,30 +329,27 @@ wildfire-exposure-eo/
 │       ├── icnf_to_scott_burgan.yaml
 │       └── osm_tags.yaml
 ├── config/
-│   ├── exposure_score.yaml
-│   └── model_configs/
+│   ├── exposure_score.yaml         # composite weights (v0.2.0)
+│   └── fuel_crosswalk.yaml         # EFFIS NFFL + COSc → fuel-class crosswalk
 ├── src/wildfire_exposure_eo/
+│   ├── audit.py                    # data-availability probes (audit / audit-all)
 │   ├── osm.py                      # Overpass query + GeoParquet writer
 │   ├── stac.py                     # pystac-client wrappers, deterministic ordering
-│   ├── imagery.py                  # stackstac loaders, AOI clipping
-│   ├── canopy.py                   # ETH GCH + Meta CH loaders
-│   ├── dem.py                      # DEM features (slope, aspect, TPI)
-│   ├── burns.py                    # ICNF + EFFIS loaders + burn-history features
-│   ├── fuel/
-│   │   ├── baseline_segformer.py
-│   │   └── foundation_terratorch.py
-│   ├── features.py                 # per-asset feature extraction
-│   ├── score.py                    # composite exposure score
-│   ├── validation.py               # lift, Spearman, Brier
-│   ├── catalog.py                  # STAC catalog construction
+│   ├── static_rasters.py           # ETH-GCH / EFFIS / DGT COSc fetch + cache
+│   ├── burn_scar.py                # Prithvi-EO Burn-Scar inference (GPU) → COG
+│   ├── burns.py                    # ICNF Áreas Ardidas loader + burn-history features
+│   ├── fuel.py                     # EFFIS + DGT COSc crosswalk → fuel-class COG (no training)
+│   ├── features.py                 # per-asset feature extraction (exactextract)
+│   ├── scoring.py                  # composite exposure rank
+│   ├── validation.py               # temporal-leakage gate, lift, Spearman, ablation
+│   ├── schemas/                    # Pydantic v2 models (ScoredAsset, FuelLayer, …)
 │   └── cli.py                      # `wildfire-exposure-eo <command>`
 ├── scripts/
-│   ├── 00_fetch_osm.py
-│   ├── 01_query_stac.py
-│   ├── 02_train_fuel.py
-│   ├── 03_score_assets.py
-│   ├── 04_validate.py
-│   └── 05_build_catalog.py
+│   ├── 00_overpass_smoke.py        # source probes (overpass / earthdata / planetary-computer)
+│   ├── 09_burn_scar_audit.py       # ICNF Spearman/lift crosscheck for the burn-scar COG
+│   ├── 09_burn_scar_sanity.py      # domain-shift sanity vs ICNF perimeters
+│   ├── 11_validate.py              # historical-burn validation report emitter
+│   └── 11_demo_timing.py           # times the CPU demo path → docs/demo.md
 ├── notebooks/                      # exploratory only, kept out of the critical path
 ├── tests/
 │   ├── unit/
@@ -334,48 +357,65 @@ wildfire-exposure-eo/
 │   ├── golden/                     # frozen-output regression tests
 │   └── conftest.py
 ├── docs/
-│   ├── data_sources.md             # detailed evaluation, links
+│   ├── data_sources.md             # detailed source evaluation, links
 │   ├── methodology.md              # the long-form spec
-│   ├── validation_report.md        # generated by `make validate`
-│   ├── scaling.md                  # PostGIS / production path
-│   └── limitations.md              # honest scope boundaries
+│   ├── aoi_rationale.md            # pilot AOI justification
+│   ├── demo.md                     # step-by-step CPU demo path + timings
+│   ├── validation_report.md        # generated by scripts/11_validate.py
+│   ├── burn_scar_audit.md          # WU-1 burn-scar ICNF crosscheck
+│   ├── glossary.md, roadmap.md
+│   └── figures/                    # WU-8 figures (ranked-assets map, lift curve)
 ├── prompts/                        # canonical Claude Code prompts per work-unit
-│   ├── 01_data_audit.md
-│   ├── 02_train_fuel_baseline.md
-│   ├── 03_train_fuel_foundation.md
-│   ├── 04_score_assets.md
-│   └── 05_validate.md
+│   ├── 01_data_audit.md … 06_fuel_layer.md
+│   ├── 09_burn_scar_inference.md   # WU-1 (GPU)
+│   ├── 10_asset_features_score.md  # WU-6
+│   ├── 11_validation_closeout.md   # WU-7
+│   └── 12_maps_story.md            # WU-8
 ├── stac/                           # generated STAC catalog (committed)
 └── .github/workflows/
-    ├── ci.yml                      # ruff, pyright, pytest, stac-validator
-    └── validate-catalog.yml        # on STAC change, validate
+    └── ci.yml                      # ruff, pyright, pytest, stac-validator, schema checks
 ```
 
 ## CLI surface
 
 ```bash
-uv run wildfire-exposure-eo audit            # data-availability check, no compute
+uv run wildfire-exposure-eo audit            # data-availability check for one source group, no compute
+uv run wildfire-exposure-eo audit-all        # full data-availability sweep across sources
+uv run wildfire-exposure-eo resolve-stac     # STAC item resolution → manifest (deterministic ordering)
+uv run wildfire-exposure-eo infer-burn-scar  # Prithvi-EO Burn-Scar inference → burn-probability COG (GPU)
 uv run wildfire-exposure-eo fetch-osm        # OSM Overpass query → GeoParquet
-uv run wildfire-exposure-eo query-stac       # STAC item resolution → manifest
-uv run wildfire-exposure-eo train-fuel       # fuel-class segmentation training
-uv run wildfire-exposure-eo score            # per-asset feature extraction + scoring
-uv run wildfire-exposure-eo validate         # historical-burn validation
-uv run wildfire-exposure-eo build-catalog    # STAC catalog assembly
-uv run wildfire-exposure-eo demo             # end-to-end on pilot AOI, pretrained checkpoints
+uv run wildfire-exposure-eo fetch-rasters    # static rasters (ETH-GCH, EFFIS, DGT COSc) → cache
+uv run wildfire-exposure-eo fetch-burns      # ICNF Áreas Ardidas → GeoParquet
+uv run wildfire-exposure-eo fuel-layer       # EFFIS + DGT COSc crosswalk → fuel-class COG
+uv run wildfire-exposure-eo score            # per-asset feature extraction + composite exposure rank
+uv run wildfire-exposure-eo validate-schema  # validate a GeoParquet against the ScoredAsset schema
 ```
 
-`demo` is the headline: a single-command end-to-end run on a fresh clone with pretrained checkpoints, target wall-clock under 30 minutes on CPU.
+There is no single-command `demo`. The CPU demo is the step-by-step sequence in [`docs/demo.md`](docs/demo.md) — `audit → fetch-osm → fetch-rasters → fetch-burns → fuel-layer → score → validate` on the smoke AOI, ~2.5 min cache-warm (well under the 30-minute budget). Historical-burn validation runs via `uv run python scripts/11_validate.py`.
 
 ## Definition of done
 
 - Public repo, MIT license, green CI on `main`.
-- Target: `uv run wildfire-exposure-eo demo` runs end-to-end on a fresh clone in under 30 minutes on CPU using pretrained checkpoints distributed as GitHub release attachments. The foundation-model variant and full Prithvi-Burn-Scar inference are gated behind explicit flags and `atlas` GPU access — see [`docs/methodology.md`](docs/methodology.md) → "Demo command, 30-minute CPU budget".
-- A STAC 1.1 catalog under `stac/` validates with `stac-validator --recursive`.
-- A GeoParquet asset table under `outputs/parquet/` validates against the documented schema.
-- `docs/validation_report.md` reports lift, Spearman, and Brier against ICNF burns 2017–24, with a calibration plot.
-- `docs/limitations.md` enumerates honest scope boundaries.
-- Training is reproducible on `atlas` (RTX 3090); training run log + metrics committed under `docs/training_runs/`.
+- The CPU demo path runs on the smoke AOI — `audit → fetch-osm → fetch-rasters → fetch-burns → fuel-layer → score → validate`, with the pre-baked WU-1 burn-scar COG — well under a 30-minute budget (~2.5 min cache-warm). Documented step-by-step in [`docs/demo.md`](docs/demo.md). The GPU burn-scar inference (`atlas`, see [`docs/methodology.md`](docs/methodology.md)) is the documented reproduction route for that artefact, not part of the CPU demo.
+- A STAC 1.1 catalog under `stac/` validates with `stac-validator validate --recursive`.
+- A GeoParquet asset table under `outputs/parquet/` validates against the documented `ScoredAsset` schema (`validate-schema`).
+- [`docs/validation_report.md`](docs/validation_report.md) is committed with reproducible lift, Spearman, and the mandatory ablation against subsequent ICNF burns — no Brier or calibration plot (the output is a rank, not a probability).
+- Scope boundaries are stated honestly up front (the status note, "What this is not", and the validation report's caveats): exposure is a rank not a probability, AOI-relative, a public-data demonstrator.
+- No dangling references to killed phases (foundation-model / SegFormer fuel-class training) in README, docs, or prompts.
 - `CLAUDE.md` enforced by CI and pre-commit (see [`CLAUDE.md`](CLAUDE.md)).
+
+## Related work
+
+[FireScope](https://arxiv.org/abs/2511.17171) (INSAIT, CVPR 2026) publishes
+a public Europe-wide wildfire *risk* map ("risk" is their vocabulary —
+everything in this repo stays *exposure rank*), released CC-BY-4.0. A
+post-ship comparison of this repo's transparent screen against FireScope on
+the pilot AOI is sketched in
+[`prompts/13_firescope_comparison.md`](prompts/13_firescope_comparison.md);
+no comparison results exist yet. Commercial utility vegetation-management
+products mirror the operational shape of this pipeline with proprietary
+imagery and ground truth; this repo is the open-data, open-method
+counterpart.
 
 ## Acknowledgments
 
