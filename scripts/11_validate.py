@@ -323,8 +323,10 @@ def main() -> int:
             "",
         ]
     else:
-        d_lift = m_full["top_decile_lift"] - m_ablation["top_decile_lift"]
-        d_rho = m_full["spearman_rho"] - m_ablation["spearman_rho"]
+        # Deltas read in the direction of the sentence ("removing the features
+        # changes X by Δ"): Δ = ablation − full, so the sign matches the arrow.
+        d_lift = m_ablation["top_decile_lift"] - m_full["top_decile_lift"]
+        d_rho = m_ablation["spearman_rho"] - m_full["spearman_rho"]
         # One burned asset entering/leaving the top decile moves its lift by
         # 1/(n_decile × base_rate). If the full-vs-ablation difference is within
         # that one-asset granularity, the comparison does not resolve which
@@ -346,7 +348,8 @@ def main() -> int:
                 f"later ICNF vintages publish."
             )
         else:
-            carries = "the burn-history features" if d_lift > 0 else "the non-burn features"
+            # Δ < 0: removing burn history *lowered* lift, so those features carry it.
+            carries = "the burn-history features" if d_lift < 0 else "the non-burn features"
             carries_txt = f"The signal is carried substantially by {carries}."
         lines += [
             f"{delta_txt} {carries_txt}",
