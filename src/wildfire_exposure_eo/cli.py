@@ -649,7 +649,11 @@ def fetch_rasters(
         False, "--smoke", help="Use data/aoi/smoke.geojson and the smoke output path."
     ),
 ) -> None:
-    """Fetch static rasters (ETH GCH, EFFIS, DGT COSc, DGT COS); write a provenance manifest.
+    """Fetch static rasters (ETH GCH, EFFIS, DGT COSc); write a provenance manifest.
+
+    DGT COS (species-level GeoPackage) is opt-in via ``--only cos`` only — it is
+    future work and its DGT download URL currently 404s, so the default fetch
+    excludes it.
 
     Downloads are idempotent: re-running without --force skips files whose
     SHA-256 matches the sidecar written on first download.
@@ -712,7 +716,11 @@ def fetch_rasters(
         status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"
         console.print(f"  dgt-cosc ({cosc_vintage}): {rec.bytes_downloaded:,} bytes  {status}")
 
-    if source_filter is None or "cos" in source_filter:
+    # DGT COS (species-level GeoPackage) is OPT-IN ONLY — request it explicitly
+    # with `--only cos`. It is future work (unused by the fuel/score path; see
+    # fuel.py) and its DGT download URL currently 404s, so it is excluded from
+    # the default fetch to keep `fetch-rasters` (and the CPU demo) green.
+    if source_filter is not None and "cos" in source_filter:
         rec = sr_mod.fetch_dgt_cos(cos_vintage, cache_dir=cache_dir, force=force)
         records.append(rec)
         status = "[dim]cache hit[/dim]" if rec.cache_hit else "[green]downloaded[/green]"

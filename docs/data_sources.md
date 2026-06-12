@@ -107,14 +107,14 @@ For each source: URL, access mechanism, license, update cadence, known gaps, dec
 - **Known gaps.** 4-class fuel taxonomy is coarse — no species split (broadleaf vs conifer, eucalyptus vs pine); resolved by combining with DGT COS species codes (see next entry). Trees / shrubs near the COSc class boundaries are inherently noisy due to S2 mixed pixels at 10 m.
 - **Used for.** Coarse weak labels for fuel-class segmentation training. Replaces ICNF CCF as the operational training input until the CCF raster is accessible (see below).
 
-### DGT COS 2018 / 2023 — `PRIMARY` (fine labels)
+### DGT COS 2018 / 2023 — `FUTURE` (species-level fine labels; not in the shipped path)
 
 - **Source.** DGT — *Carta de Ocupação do Solo*, formal national LULC vector.
-- **Access.** [DGT Dados abertos](https://www.dgterritorio.gov.pt/dados-abertos); GeoPackage, EPSG:3763. Confirmed fetchable from `geo2.dgterritorio.gov.pt` (PRE_DEV_CHECKLIST §B.6).
+- **Access.** [DGT Dados abertos](https://www.dgterritorio.gov.pt/dados-abertos); GeoPackage, EPSG:3763. **The COS 2023_v1 GeoPackage zip (`geo2.dgterritorio.gov.pt/cos/S2/COS2023v1/COS2023v1-S2-gpkg.zip`) returns 404 as of 2026-06-12** — DGT appears to have moved/removed it. `fetch-rasters` therefore treats `cos` as **opt-in only** (`--only cos`); the default fetch and the CPU demo exclude it.
 - **License.** CC-BY 4.0.
 - **Cadence.** Major releases every ~5 years (2007, 2010, 2015, 2018, 2023).
 - **Known gaps.** Vector polygons (not raster) — requires per-asset rasterisation to the project's grid. Multi-year publication gap means COS species codes can lag actual forest state by 2–4 years; for the Sever do Vouga pilot AOI, the eucalyptus-vs-pine boundary changes faster than this cadence captures. Mitigate with COSc-derived recency cross-check.
-- **Used for.** Species-level fine labels — resolves COSc's broadleaf/conifer ambiguity (Pinus pinaster, Pinus pinea, Eucalyptus globulus, Quercus suber, Q. ilex, Q. pyrenaica).
+- **Used for.** *Future work* — species-level fine labels (broadleaf/conifer, Pinus/Eucalyptus/Quercus splits) for a possible fuel-class refinement. The shipped fuel layer (`fuel.py`) uses EFFIS + DGT COSc only; COS is not consumed.
 
 ### ICNF Carta de Combustíveis Florestais — `FUTURE`
 
@@ -187,7 +187,7 @@ For each source: URL, access mechanism, license, update cadence, known gaps, dec
 
 ### Carta de Ocupação do Solo (COS) — see *Fire and reference* above
 
-The formal DGT COS layer is now treated as a PRIMARY input rather than an auxiliary one, because it provides the species-level codes the operational fuel-class model needs. See the `DGT COS 2018 / 2023 — PRIMARY` entry under *Fire and reference*.
+The formal DGT COS layer was originally scoped as a PRIMARY input for a species-aware fuel-class model; that model was scoped out, so COS is now **future work** — unused by the shipped EFFIS + DGT COSc crosswalk, and its download URL currently 404s. See the `DGT COS 2018 / 2023 — FUTURE` entry under *Fire and reference*.
 
 ## Inference models (derived data sources)
 
