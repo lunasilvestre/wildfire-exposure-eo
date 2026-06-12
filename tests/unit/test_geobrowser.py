@@ -1,0 +1,154 @@
+"""Unit + schema tests for the WU-9 geobrowser data bundle (prompt 15)."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import geopandas as gpd
+import pytest
+from pydantic import ValidationError
+from shapely.geometry import Point
+
+from wildfire_exposure_eo.schemas import (
+    ExposureFeatureProperties,
+    FuelLegendEntry,
+    GeobrowserArtifact,
+    GeobrowserStyleData,
+    ValidationHeadline,
+)
+
+# Repo-root import shim (mirrors the script itself)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import importlib
+
+geobrowser_mod = importlib.import_module("15_make_geobrowser_data")
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+# --------------------------------------------------------------------------- #
+# Schemas
+# --------------------------------------------------------------------------- #
+
+
+def _headline(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "run_id": "20260611T170549Z",
+        "n_assets": 3045,
+        "n_burned": 5,
+        "base_rate": 0.0016420361247947454,
+        "degenerate": False,
+        "top_decile_lift": 0.0,
+        "cumulative_lift_top30pct": 2.66,
+        "spearman_rho": 0.0371,
+        "spearman_p": 0.0409,
+        "ablation_top_decile_lift": 2.0,
+        "window_end": "2024-12-31",
+        "validation_years": [2025],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_validation_headline_parses_full() -> None:
+    v = ValidationHeadline.model_validate(_headline())
+    assert v.cumulative_lift_top30pct == 2.66
+
+
+def test_validation_headline_degenerate_allows_missing_lift() -> None:
+    v = ValidationHeadline.model_validate(
+        {
+            "run_id": "20260612T061227Z",
+            "n_assets": 14,
+            "n_burned": 0,
+            "base_rate": 0.0,
+            "degenerate": True,
+            "window_end": "2026-06-09",
+            "validation_years": [],
+        }
+    )
+    assert v.top_decile_lift is None
+
+
+def test_exposure_feature_properties_rejects_score_above_one() -> None:
+    props = {
+        "asset_id": "osm:node/1",
+        "osm_type": "node",
+        "osm_id": 1,
+        "asset_class": "education.school",
+        "criticality_weight": 0.8,
+        "exposure_score": 1.2,
+        "exposure_rank": 1,
+    }
+    with pytest.raises(ValidationError):
+        ExposureFeatureProperties.model_validate(props)
+
+
+def test_style_data_round_trip() -> None:
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="scripts/15_make_geobrowser_data.py at deadbeef",
+        code_commit_sha="deadbeef",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[FuelLegendEntry(code=0, label="Non-fuel (0)", color=(204, 204, 204))],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={
+            "aoi": GeobrowserArtifact(
+                href="app/data/aoi.geojson",
+                crs="EPSG:4326",
+                run_id="frozen",
+                role="authoritative",
+                description="AOI boundary",
+            )
+        },
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert parsed.artifacts["aoi"].crs == "EPSG:4326"
+
+
+def test_style_data_rejects_short_lut() -> None:
+    with pytest.raises(ValidationError):
+        GeobrowserStyleData(
+            generated_by="x",
+            code_commit_sha="x",
+            viridis_lut=[(0, 0, 0)] * 16,
+            ylorrd_lut=[(0, 0, 0)] * 256,
+            fuel_legend=[],
+            validation=ValidationHeadline.model_validate(_headline()),
+            artifacts={},
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Script helpers
+# --------------------------------------------------------------------------- #
+
+
+def test_lut_samples_256_rgb_triples() -> None:
+    lut = geobrowser_mod._lut("viridis")
+    assert len(lut) == 256
+    assert all(len(c) == 3 and all(0 <= v <= 255 for v in c) for c in lut)
+    # Viridis orientation: index 0 is dark (purple), index 255 bright (yellow).
+    assert sum(lut[0]) < sum(lut[255])
+
+
+def test_export_exposure_geojson_requires_explicit_crs(tmp_path: Path) -> None:
+    gdf = gpd.GeoDataFrame({"a": [1]}, geometry=[Point(0, 0)])  # no CRS set
+    src = tmp_path / "exposure_x.parquet"
+    gdf.to_parquet(src)
+    with pytest.raises(ValueError, match="EPSG:4326"):
+        geobrowser_mod.export_exposure_geojson(src, tmp_path / "out.geojson")
+
+
+def test_validation_headline_from_degenerate_metrics() -> None:
+    metrics = {
+        "full": {"n": 14, "n_burned": 0, "base_rate": 0.0, "degenerate": True},
+        "ablation": {"n": 14, "n_burned": 0, "base_rate": 0.0, "degenerate": True},
+        "window_end": "2026-06-09",
+        "validation_years": [],
+    }
+    v = geobrowser_mod.validation_headline("rid", metrics)
+    assert v.degenerate is True
+    assert v.spearman_rho is None

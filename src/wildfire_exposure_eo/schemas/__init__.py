@@ -20,6 +20,13 @@ from wildfire_exposure_eo.schemas.fuel_layer import (
     FuelLayerProvenance,
     GridSpec,
 )
+from wildfire_exposure_eo.schemas.geobrowser import (
+    ExposureFeatureProperties,
+    FuelLegendEntry,
+    GeobrowserArtifact,
+    GeobrowserStyleData,
+    ValidationHeadline,
+)
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
 from wildfire_exposure_eo.schemas.scored_asset import (
     FEATURE_NAMES,
@@ -46,8 +53,12 @@ __all__ = [
     "BurnScarRun",
     "Crosswalk",
     "CrosswalkEntry",
+    "ExposureFeatureProperties",
     "FetchRecord",
     "FuelLayerProvenance",
+    "FuelLegendEntry",
+    "GeobrowserArtifact",
+    "GeobrowserStyleData",
     "GridSpec",
     "IcnfLayerDescriptor",
     "OsmAsset",
@@ -59,5 +70,6 @@ __all__ = [
     "StacManifest",
     "StacWindow",
     "StaticRasterManifest",
+    "ValidationHeadline",
     "source_health_from_check",
 ]
