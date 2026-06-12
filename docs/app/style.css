@@ -1,0 +1,118 @@
+/* wildfire-exposure-eo geobrowser (WU-9). Two-pane layout: study panel + map. */
+
+:root {
+  --panel-width: 380px;
+  --ink: #222;
+  --muted: #666;
+  --accent: #b34700;
+  --border: #ddd;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+}
+
+#layout {
+  display: flex;
+  height: 100vh;
+}
+
+#panel {
+  width: var(--panel-width);
+  flex: none;
+  overflow-y: auto;
+  padding: 16px 18px 24px;
+  border-right: 1px solid var(--border);
+  background: #fdfdfb;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+#map { flex: 1; min-width: 0; }
+
+h1 { font-size: 19px; margin: 0 0 8px; }
+h2 { font-size: 14px; margin: 18px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+h3 { font-size: 12.5px; margin: 10px 0 4px; }
+
+a { color: #0b5394; }
+code { font-size: 12px; background: #f0efe9; padding: 0 3px; border-radius: 3px; }
+
+.lead { margin: 0 0 8px; }
+
+.scope-banner {
+  background: #fff3e0;
+  border-left: 3px solid var(--accent);
+  padding: 7px 10px;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+
+.caption { color: var(--muted); font-size: 12px; margin: 2px 0 0 22px; }
+footer .caption, #validation-section .caption { margin-left: 0; }
+
+.layer-row { margin: 8px 0; }
+.layer-row label { font-weight: 600; cursor: pointer; }
+
+.tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.tag.output { background: #2a6f3c; color: #fff; }
+.tag.input { background: #e8e6df; color: #555; }
+
+.error { color: #b00020; font-size: 12px; }
+
+#legend-section canvas { display: block; border: 1px solid var(--border); }
+.ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  width: 220px;
+}
+
+#fuel-legend-list { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+#fuel-legend-list li { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.swatch {
+  width: 14px; height: 14px; flex: none;
+  border: 1px solid #999; border-radius: 2px;
+}
+
+#validation-body table { border-collapse: collapse; font-size: 12.5px; margin: 6px 0; }
+#validation-body td { padding: 2px 8px 2px 0; vertical-align: top; }
+#validation-body td:first-child { color: var(--muted); }
+
+#downloads-list { padding-left: 18px; margin: 4px 0; }
+#downloads-list li { margin: 3px 0; }
+#downloads-list .size { color: var(--muted); font-size: 11.5px; }
+
+#diagrams pre.mermaid {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+#diagrams h3 { margin-top: 14px; }
+
+footer { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 8px; }
+
+.maplibregl-popup-content { font-size: 12.5px; line-height: 1.4; }
+.maplibregl-popup-content h4 { margin: 0 0 4px; font-size: 13px; }
+
+@media (max-width: 760px) {
+  #layout { flex-direction: column; }
+  #panel { width: 100%; height: 45vh; border-right: none; border-bottom: 1px solid var(--border); }
+  #map { height: 55vh; }
+}
