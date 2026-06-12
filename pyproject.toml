@@ -97,6 +97,15 @@ serve = [
     "alembic>=1.14",
 ]
 
+viz = [
+    # WU-8: static map figures (perceptually uniform colourmaps, scale bars).
+    "matplotlib>=3.9",
+    # WU-8: self-contained interactive HTML map with layer toggles + popups.
+    # Lightest mature option; lonboard rejected (heavier GPU/Jupyter stack
+    # with no benefit at 3 k assets).
+    "folium>=0.18",
+]
+
 [project.scripts]
 wildfire-exposure-eo = "wildfire_exposure_eo.cli:app"
 
