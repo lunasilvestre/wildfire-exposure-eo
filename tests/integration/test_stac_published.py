@@ -38,9 +38,7 @@ def test_local_asset_hrefs_resolve_to_committed_files() -> None:
             target = (item_dir / asset.href).resolve()
             assert target.is_file(), f"{item.id}:{name} → missing file {target}"
             assert target.is_relative_to(_ROOT), f"{item.id}:{name} escapes the repo"
-            assert (
-                "outputs" not in target.parts
-            ), f"{item.id}:{name} points at gitignored outputs/: {asset.href}"
+            assert "outputs" not in target.parts, f"{item.id}:{name} gitignored: {asset.href}"
 
 
 def test_remote_asset_hrefs_are_github_release_urls() -> None:
