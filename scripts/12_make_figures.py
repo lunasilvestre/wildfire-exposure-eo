@@ -700,8 +700,11 @@ def make_html_map(
     import base64
     import io
 
-    import folium
-    from folium.plugins import MeasureControl
+    # folium is an optional `viz` extra — not installed by the default/CI sync
+    # (`uv sync --extra dev`), only with `--extra viz`. Suppress the missing-import
+    # error there; this function only runs when the map is built (viz present).
+    import folium  # pyright: ignore[reportMissingImports]
+    from folium.plugins import MeasureControl  # pyright: ignore[reportMissingImports]
 
     cfg = load_exposure_config(_SCORE_YAML)
     weights: dict[str, float] = dict(cfg.weights)
