@@ -292,8 +292,8 @@ async function main() {
     }
   });
 
-  /* Release-hosted layers load lazily on first toggle (large files; the
-   * Release may also lag the site by one approval step). */
+  /* R2-hosted layers (Cloudflare) load lazily on first toggle — large files
+   * served with CORS + byte-range from https://wildfire.cheias.pt. */
   let burnScarAdded = false;
   function addBurnScar() {
     map.addSource("burnscar", { type: "raster", url: `cog://${burnScarUrl}`, tileSize: 256 });
@@ -307,7 +307,7 @@ async function main() {
   let burnsAdded = false;
   async function addBurns() {
     const resp = await fetch(style.artifacts.icnf_burns.href);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ICNF burns from the Release`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ICNF burns from Cloudflare R2`);
     const gj = await resp.json();
     map.addSource("burns", { type: "geojson", data: gj });
     map.addLayer({
@@ -360,8 +360,8 @@ async function main() {
         await fn(e.target.checked);
       } catch (err) {
         e.target.checked = false;
-        showError(`Layer failed to load: ${err.message}. If the GitHub Release ` +
-                  `is not published yet, this layer has no data source.`);
+        showError(`Layer failed to load: ${err.message}. If the Cloudflare R2 ` +
+                  `host is unreachable, this layer has no data source.`);
       }
     });
   }
