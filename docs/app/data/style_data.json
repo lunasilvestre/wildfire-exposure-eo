@@ -1,6 +1,6 @@
 {
- "generated_by": "scripts/15_make_geobrowser_data.py at 0db5a6827616a31d7c94791f3a254ef494cf36a1",
- "code_commit_sha": "0db5a6827616a31d7c94791f3a254ef494cf36a1",
+ "generated_by": "scripts/15_make_geobrowser_data.py at 2e141bb05a8afd224682ca456dc1dc3edfcdccb4",
+ "code_commit_sha": "2e141bb05a8afd224682ca456dc1dc3edfcdccb4",
  "viridis_lut": [
   [
    68,
@@ -2669,14 +2669,14 @@
    "description": "Fuel-class COG display copy (warped from the authoritative EPSG:32629 STAC asset, NEAREST, no resolution loss)"
   },
   "burn_scar": {
-   "href": "https://github.com/lunasilvestre/wildfire-exposure-eo/releases/download/geodata-v1/burn_scar_3857_20260610T072820Z.tif",
+   "href": "https://wildfire.cheias.pt/burn_scar_3857_20260610T072820Z.tif",
    "crs": "EPSG:3857",
    "run_id": "20260610T072820Z",
    "role": "display",
-   "description": "Burn-scar inference-probability COG display copy (warped from the authoritative EPSG:4326 STAC/Release asset, NEAREST)"
+   "description": "Burn-scar inference-probability COG display copy (warped from the authoritative EPSG:4326 STAC/R2 asset, NEAREST)"
   },
   "icnf_burns": {
-   "href": "https://github.com/lunasilvestre/wildfire-exposure-eo/releases/download/geodata-v1/icnf_burns_20260610T164453Z.geojson",
+   "href": "https://wildfire.cheias.pt/icnf_burns_20260610T164453Z.geojson",
    "crs": "EPSG:4326",
    "run_id": "20260610T164453Z",
    "role": "display",
