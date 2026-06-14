@@ -8,6 +8,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Suppress the Referer header on all subresource fetches: the R2-hosted
+       COG/GeoJSON sit behind Cloudflare Hotlink Protection, which 403s image
+       requests carrying a cross-domain Referer. Origin is still sent, so CORS
+       (and maplibre-cog-protocol range reads) keep working. -->
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>wildfire-exposure-eo — exposure-ranked critical infrastructure (pilot AOI)</title>
   <meta name="description"
