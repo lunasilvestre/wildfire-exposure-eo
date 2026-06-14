@@ -23,6 +23,12 @@ case "$PERM" in
   *)    PERM_FLAGS=(--permission-mode "$PERM") ;;
 esac
 
+# Reasoning effort per phase (Claude Code --effort: low|medium|high|xhigh).
+# Builds default to high; the independent review defaults to xhigh so it
+# exhausts the use-cases a deterministic gate can't. Override via env.
+BUILD_EFFORT="${CLOSEOUT_EFFORT_BUILD:-high}"
+REVIEW_EFFORT="${CLOSEOUT_EFFORT_REVIEW:-xhigh}"
+
 HIL=prompts/_HIL.md
 for wu in "$@"; do
   echo "=== $wu : usage gate ==="
@@ -30,21 +36,17 @@ for wu in "$@"; do
 
   # Model per WU (pinned EXPLICITLY per WU — never "inherit the default",
   # which would silently follow whatever model the orchestrator session is
-  # on; the stretch-2 orchestrator is Opus). Implementation WUs run on
-  # Sonnet (~3x cheaper per token, and Max meters Sonnet against its own
-  # separate weekly pool, so it barely touches the shared 5h block).
-  # Judgment-heavy WUs build on the strongest model. WU-6 (scoring
-  # semantics) built on Opus 4.8 — top-tier at HALF Fable's per-token cost
-  # on the shared pool. WU-7 (validation honesty + the public README
-  # close-out narrative) is pinned to FABLE explicitly (Nelson 2026-06-11):
-  # the credibility-critical WU, so we spend the 2x cost for maximum
-  # build-side depth, accepting it may throttle mid-WU. WU-8 stays Sonnet.
-  # The independent Fable review below is the quality gate on every WU.
-  # Effort goes via --settings — a "/effort high" inside a -p prompt is
-  # plain text, not a command.
+  # on). Implementation WUs run on Sonnet (~3x cheaper per token, and Max
+  # meters Sonnet against its own separate weekly pool, so it barely touches
+  # the shared 5h block). Judgment-heavy WUs build on the strongest model
+  # (Opus 4.8). NOTE 2026-06-14: Fable is no longer available — the former
+  # Fable pins (WU-7 build, the review below) now default to Opus 4.8. The
+  # independent Opus review below, at extra-high effort (REVIEW_EFFORT), is
+  # the quality gate on every WU. Effort goes via --effort, not a "/effort"
+  # line inside the -p prompt (that would be plain text, not a command).
   case "$wu" in
     WU-2|WU-3|WU-4|WU-5|WU-8) MODEL="${CLOSEOUT_MODEL_IMPL:-sonnet}" ;;
-    WU-7)                     MODEL="${CLOSEOUT_MODEL_WU7:-fable}" ;;
+    WU-7)                     MODEL="${CLOSEOUT_MODEL_WU7:-opus}" ;;
     *)                        MODEL="${CLOSEOUT_MODEL_DEFAULT:-opus}" ;;
   esac
   MODEL_FLAGS=()
@@ -54,7 +56,7 @@ for wu in "$@"; do
 
   echo "=== $wu : session (model=${MODEL:-default}, effort=high) ==="
   claude -p "Read prompts/00_CLOSEOUT_PLAN.md and CLAUDE.md end-to-end, then execute ${wu} ONLY, following the session loop (smoke before pilot, gates, session-log entry, scoped commits). UNATTENDED RUN RULES: NEVER invent identifiers, endpoints, or spec details — if a value cannot be verified by querying, leave a '# TODO(provenance):' marker and surface it in the session log; if a deliverable cannot be completed without guessing, write the question to ${HIL}, commit it, and end the session. Redirect long-running command output to a file under outputs/logs/ and poll it instead of streaming; if a stop condition fires or anything needs human approval, write the question to ${HIL}, commit it, and end the session immediately." \
-    "${MODEL_FLAGS[@]}" --settings '{"effortLevel":"high"}' \
+    "${MODEL_FLAGS[@]}" --effort "$BUILD_EFFORT" \
     "${PERM_FLAGS[@]}" || { echo "$wu session exited non-zero"; exit 1; }
 
   echo "=== $wu : gates ==="
@@ -75,12 +77,12 @@ for wu in "$@"; do
   # identifiers. Disable with CLOSEOUT_REVIEW=off; override model with
   # CLOSEOUT_MODEL_REVIEW.
   if [ "${CLOSEOUT_REVIEW:-on}" != "off" ]; then
-    REVIEW_MODEL="${CLOSEOUT_MODEL_REVIEW:-fable}"
+    REVIEW_MODEL="${CLOSEOUT_MODEL_REVIEW:-opus}"
     REVIEW_FLAGS=(--model "$REVIEW_MODEL")
 
     echo "=== $wu : review (model=${REVIEW_MODEL}) ==="
     claude -p "You are the INDEPENDENT REVIEWER for ${wu}; a separate session built it in commits ${WU_BASE}..HEAD. Read CLAUDE.md, prompts/00_CLOSEOUT_PLAN.md, and the WU's prompt file end-to-end, then adversarially review 'git diff ${WU_BASE}..HEAD' against the prompt's deliverables and every CLAUDE.md non-negotiable. Hunt specifically for: invented or unverified identifiers (verify STAC/OSM/HF IDs against live sources when cheap); implicit CRS or silent reprojection; missing provenance fields; self-confirming tests that encode the implementation's own misunderstanding; hardcoded AOI coordinates; wrong output formats; probability language for the exposure rank. Re-run any verification you need (gates, --smoke runs, ad-hoc probes). Minor defects: fix them directly with scoped commits and append a one-line review note to the WU entry in prompts/_session_log.md. Structural failures (missing deliverable, wrong approach, needs a rewrite): write your assessment to ${HIL}, commit it, and end the session. UNATTENDED RUN RULES: never guess values you cannot verify; redirect long output to outputs/logs/ and poll. You are a HEADLESS one-shot session: never arm monitors, background jobs, or anything expecting to resume after your final message — wait synchronously (poll the log file) for any run you start, and finish everything before ending. Your ABSOLUTE LAST line of output must start exactly with 'REVIEW: ' — 'REVIEW: PASS', 'REVIEW: FIXED <n>', or 'REVIEW: HIL'." \
-      "${REVIEW_FLAGS[@]}" --settings '{"effortLevel":"high"}' \
+      "${REVIEW_FLAGS[@]}" --effort "$REVIEW_EFFORT" \
       "${PERM_FLAGS[@]}" || { echo "$wu review exited non-zero"; exit 1; }
 
     echo "=== $wu : gates (post-review) ==="
