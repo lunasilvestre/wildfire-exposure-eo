@@ -290,8 +290,8 @@ stac/                                          # committed STAC 1.1 catalog (val
 ├── catalog.json
 ├── exposure-assets/exposure-assets-<run_id>/  # scored-asset GeoParquet, committed as the item's asset
 ├── fuel-layer/fuel-layer-<run_id>/            # fuel-class COG, committed as the item's asset
-└── burn-scar-recent/burn-scar-<run_id>/       # item; the 38 MB COG itself is a GitHub Release asset
-                                               #   (release tag geodata-v1; href in the item)
+└── burn-scar-recent/burn-scar-<run_id>/       # item; the 38 MB COG itself is a Cloudflare R2 asset
+                                               #   (https://wildfire.cheias.pt/…; href in the item)
 ```
 
 The [geobrowser](https://lunasilvestre.github.io/wildfire-exposure-eo/) renders

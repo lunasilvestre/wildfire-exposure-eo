@@ -14,10 +14,10 @@ pipeline artefacts — nothing hand-made:
   maplibre-cog-protocol renders EPSG:3857 COGs only — the authoritative
   EPSG:32629 COG stays the STAC asset.
 * ``outputs/geobrowser/burn_scar_3857_<run_id>.tif`` — same warp for the
-  burn-scar COG (authoritative CRS EPSG:4326); uploaded to the GitHub Release,
+  burn-scar COG (authoritative CRS EPSG:4326); uploaded to Cloudflare R2,
   too large to commit.
 * ``outputs/geobrowser/icnf_burns_<run_id>.geojson`` — ICNF perimeter display
-  copy (EPSG:4326, full precision); uploaded to the GitHub Release (7.8 MB,
+  copy (EPSG:4326, full precision); uploaded to Cloudflare R2 (7.8 MB,
   over the repo's 2 000 kB committed-file cap).
 * ``docs/app/data/style_data.json`` — colour LUTs sampled from the same
   matplotlib colormaps the WU-8 figures use (viridis rank / YlOrRd burn-scar /
@@ -74,10 +74,11 @@ _CROSSWALK = _ROOT / "config" / "fuel_crosswalk.yaml"
 _AOI_PILOT = _ROOT / "data" / "aoi" / "pilot.geojson"
 _AOI_SMOKE = _ROOT / "data" / "aoi" / "smoke.geojson"
 
-#: GitHub Release that hosts the geodata too large to commit (burn-scar COGs,
-#: ICNF burns GeoJSON). The tag is created by the WU-9 session via
-#: ``gh release create`` — recorded in prompts/_session_log.md.
-_RELEASE_BASE = "https://github.com/lunasilvestre/wildfire-exposure-eo/releases/download"
+#: Cloudflare R2 bucket (custom domain ``wildfire.cheias.pt``) hosting the geodata
+#: too large for the 2 000 kB committed-file cap — the burn-scar display COG and
+#: ICNF burns GeoJSON. CORS + byte-range enabled (verified) so the static
+#: geobrowser reads the COG client-side. See prompts/_session_log.md.
+_ASSET_BASE_URL = "https://wildfire.cheias.pt"
 
 #: GeoJSON feature properties exported for the site (subset of ScoredAsset).
 _EXPORT_PROPS = [
@@ -232,9 +233,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true", help="smoke AOI, outputs/logs only")
     parser.add_argument(
-        "--release-tag",
-        default="geodata-v1",
-        help="GitHub Release tag hosting the burn-scar display COG + burns GeoJSON",
+        "--asset-base-url",
+        default=_ASSET_BASE_URL,
+        help="public base URL (Cloudflare R2) hosting the burn-scar display COG + burns GeoJSON",
     )
     args = parser.parse_args()
     smoke = bool(args.smoke)
@@ -283,7 +284,7 @@ def main() -> int:
     n_burns = export_burns_geojson(burns_pq, burns_geojson)
     print(f"burns GeoJSON: {n_burns} perimeters → {burns_geojson.name}")
 
-    release = f"{_RELEASE_BASE}/{args.release_tag}"
+    asset_base = args.asset_base_url
     style = GeobrowserStyleData(
         generated_by=f"scripts/15_make_geobrowser_data.py at {code_commit_sha(cwd=_ROOT)}",
         code_commit_sha=code_commit_sha(cwd=_ROOT),
@@ -320,17 +321,17 @@ def main() -> int:
                 ),
             ),
             "burn_scar": GeobrowserArtifact(
-                href=f"{release}/burn_scar_3857_{burn_scar_run_id}.tif",
+                href=f"{asset_base}/burn_scar_3857_{burn_scar_run_id}.tif",
                 crs="EPSG:3857",
                 run_id=burn_scar_run_id,
                 role="display",
                 description=(
                     "Burn-scar inference-probability COG display copy (warped from "
-                    "the authoritative EPSG:4326 STAC/Release asset, NEAREST)"
+                    "the authoritative EPSG:4326 STAC/R2 asset, NEAREST)"
                 ),
             ),
             "icnf_burns": GeobrowserArtifact(
-                href=f"{release}/icnf_burns_{burns_run_id}.geojson",
+                href=f"{asset_base}/icnf_burns_{burns_run_id}.geojson",
                 crs="EPSG:4326",
                 run_id=burns_run_id,
                 role="display",

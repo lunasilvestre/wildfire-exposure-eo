@@ -12,10 +12,10 @@ One-shot, idempotent publishing step:
    ``outputs/cogs/`` path into the item's directory under ``stac/fuel-layer/``
    and repoints the asset href at the committed file.
 3. **Burn-scar COG** — 38 MB, over the repo's 2 000 kB committed-file cap:
-   repoints the asset href at its GitHub Release download URL
-   (``--release-tag``, default ``geodata-v1``) and records the tag in the item
-   properties. The file itself is uploaded to the Release by ``gh release
-   create`` (human-executed; see prompts/_session_log.md).
+   repoints the asset href at its Cloudflare R2 public URL (``--asset-base-url``,
+   default ``https://wildfire.cheias.pt``). The file itself is uploaded to the R2
+   bucket out-of-band (see prompts/_session_log.md); R2 serves it with CORS +
+   byte-range so the static geobrowser can read the COG client-side.
 
 Usage::
 
@@ -48,7 +48,11 @@ _PARQUET_DIR = _ROOT / "outputs" / "parquet"
 _COG_DIR = _ROOT / "outputs" / "cogs"
 _VAL_DIR = _ROOT / "outputs" / "validation"
 
-_RELEASE_BASE = "https://github.com/lunasilvestre/wildfire-exposure-eo/releases/download"
+#: Cloudflare R2 bucket (custom domain ``wildfire.cheias.pt``) hosting the geodata
+#: too large for the 2 000 kB committed-file cap — the burn-scar COG. CORS +
+#: byte-range enabled (verified) so the static Pages geobrowser reads the COG
+#: client-side. See prompts/_session_log.md.
+_ASSET_BASE_URL = "https://wildfire.cheias.pt"
 #: IANA-registered media type for (Geo)Parquet assets.
 _PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 _COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
@@ -184,23 +188,24 @@ def commit_fuel_cogs(catalog: pystac.Catalog, *, dry_run: bool) -> None:
         print(f"fuel-layer: committed {href_name} ({committed.stat().st_size} B)")
 
 
-def point_burn_scar_at_release(catalog: pystac.Catalog, release_tag: str, *, dry_run: bool) -> None:
-    """Repoint the burn-scar asset href at its GitHub Release download URL."""
+def point_burn_scar_at_r2(catalog: pystac.Catalog, asset_base_url: str, *, dry_run: bool) -> None:
+    """Repoint the burn-scar asset href at its Cloudflare R2 public URL."""
     collection = catalog.get_child("burn-scar-recent")
     if not isinstance(collection, pystac.Collection):
         raise TypeError("stac child 'burn-scar-recent' missing or not a Collection")
     for item in collection.get_items():
         asset = item.assets["burn_scar_probability"]
         href_name = Path(asset.href).name
-        url = f"{_RELEASE_BASE}/{release_tag}/{href_name}"
+        url = f"{asset_base_url}/{href_name}"
         if asset.href == url:
-            print(f"burn-scar-recent: {item.id} already points at the release — skipping")
+            print(f"burn-scar-recent: {item.id} already points at R2 — skipping")
             continue
         if dry_run:
             print(f"[dry-run] would repoint {item.id} → {url}")
             continue
         asset.href = url
-        item.properties["wildfire_exposure_eo:release_tag"] = release_tag
+        # Drop the legacy GitHub-Release tag property if an earlier run set it.
+        item.properties.pop("wildfire_exposure_eo:release_tag", None)
         print(f"burn-scar-recent: {item.id} → {url}")
 
 
@@ -208,9 +213,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="report, write nothing")
     parser.add_argument(
-        "--release-tag",
-        default="geodata-v1",
-        help="GitHub Release tag hosting the burn-scar COG",
+        "--asset-base-url",
+        default=_ASSET_BASE_URL,
+        help="public base URL (Cloudflare R2) hosting the burn-scar COG",
     )
     args = parser.parse_args()
 
@@ -218,7 +223,7 @@ def main() -> int:
     run_id = _validated_run_id()
     publish_exposure_assets(catalog, run_id, dry_run=args.dry_run)
     commit_fuel_cogs(catalog, dry_run=args.dry_run)
-    point_burn_scar_at_release(catalog, args.release_tag, dry_run=args.dry_run)
+    point_burn_scar_at_r2(catalog, args.asset_base_url, dry_run=args.dry_run)
     if not args.dry_run:
         catalog.normalize_hrefs(str(_STAC_ROOT))
         for child in catalog.get_children():

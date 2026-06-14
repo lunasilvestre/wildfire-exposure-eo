@@ -41,18 +41,17 @@ def test_local_asset_hrefs_resolve_to_committed_files() -> None:
             assert "outputs" not in target.parts, f"{item.id}:{name} gitignored: {asset.href}"
 
 
-def test_remote_asset_hrefs_are_github_release_urls() -> None:
+def test_remote_asset_hrefs_are_r2_urls() -> None:
     remote = [
         (item.id, asset.href)
         for item in _items()
         for asset in item.assets.values()
         if asset.href.startswith(("http://", "https://"))
     ]
-    assert remote, "expected at least the burn-scar COG on a Release"
+    assert remote, "expected at least the burn-scar COG on R2"
     for item_id, href in remote:
-        assert href.startswith(
-            "https://github.com/lunasilvestre/wildfire-exposure-eo/releases/download/"
-        ), f"{item_id}: unexpected remote asset host: {href}"
+        is_r2 = href.startswith("https://wildfire.cheias.pt/")
+        assert is_r2, f"{item_id}: unexpected remote asset host: {href}"
 
 
 def test_published_exposure_parquet_satisfies_scored_asset_contract() -> None:
