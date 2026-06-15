@@ -52,3 +52,13 @@ inference:
   # on; stride < size so terratorch's tiled_inference blends overlaps.
   tile_size: 512
   tile_stride: 448
+  # De-grid (WU-10). terratorch tiled_inference anchors a fixed axis-aligned
+  # crop lattice (origin 0,0; stride tile_stride) on every scene. Each
+  # Prithvi/ViT 512px crop has a tent-shaped class-1 response (~5x core/border)
+  # phase-locked to the same UTM grid across all scenes, so a per-pixel
+  # composite stacks every tent at the same pixels into a saturated grid of
+  # squares. Jittering the crop-grid ORIGIN by a deterministic per-scene offset
+  # (seed 42 + STAC item id) lands the tent at different pixels each scene, so
+  # the p85 composite averages it out. Inverted per scene, so the composite
+  # stays on the common grid. See burn_scar.scene_origin_offset.
+  tile_origin_jitter: true

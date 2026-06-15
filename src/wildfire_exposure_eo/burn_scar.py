@@ -25,6 +25,7 @@ test/CLI contexts that never run inference.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import json
 import logging
 import time
@@ -58,6 +59,12 @@ NODATA = -9999.0
 OUTPUT_CRS = "EPSG:4326"
 RESAMPLING = "nearest"  # probability raster: never interpolate values (prompt 09)
 SCL_ASSET = "SCL"
+
+#: Default deterministic seed (CLAUDE.md non-negotiable #4). Mixed with each
+#: scene's STAC item id to choose that scene's crop-grid origin offset, so the
+#: choice is reproducible across runs and stable per scene regardless of input
+#: order.
+DEFAULT_SEED = 42
 PC_SAS_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{collection}"
 S2_COLLECTION = "sentinel-2-l2a"
 
@@ -445,6 +452,35 @@ def _pad_to_min(arr: np.ndarray, min_h: int, min_w: int) -> tuple[np.ndarray, in
     return arr, h, w
 
 
+def scene_origin_offset(
+    item_id: str, tile_stride: int, *, seed: int = DEFAULT_SEED
+) -> tuple[int, int]:
+    """Deterministic per-scene crop-grid origin offset ``(dy, dx)`` in ``[0, stride)``.
+
+    De-grid fix (WU-10). terratorch ``tiled_inference`` slides a fixed
+    axis-aligned crop lattice (origin 0,0; stride ``tile_stride``) over every
+    scene. Each Prithvi/ViT crop carries a tent-shaped class-1 response
+    (~5x core/border), and because the lattice is phase-locked to the same UTM
+    grid across all ~179 scenes, the per-pixel composite stacks every tent at
+    the same pixels into a saturated grid of squares.
+
+    Shifting the crop-grid ORIGIN by a per-scene ``(dy, dx)`` makes the tent
+    land at different pixels each scene, so a percentile composite (p85)
+    averages it out instead of reinforcing it. The offset is derived from a
+    stable per-scene key (the STAC ``item_id``) mixed with ``seed`` via blake2b
+    — NOT Python ``hash`` (salted, non-reproducible) — so the choice is
+    deterministic (non-negotiable #4) and independent of input order.
+
+    Returns ``(0, 0)`` when ``tile_stride <= 1`` (no room to jitter).
+    """
+    if tile_stride <= 1:
+        return 0, 0
+    digest = hashlib.blake2b(f"{seed}:{item_id}".encode(), digest_size=8).digest()
+    dy = int.from_bytes(digest[:4], "big") % tile_stride
+    dx = int.from_bytes(digest[4:], "big") % tile_stride
+    return dy, dx
+
+
 def _scene_probability(
     item: pystac.Item,
     handle: ModelHandle,
@@ -455,11 +491,20 @@ def _scene_probability(
     scl_mask_classes: tuple[int, ...],
     tile_size: int,
     tile_stride: int,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Class-1 softmax for one scene on the common grid; NaN where masked.
 
     Returns `(prob, x_coords, y_coords)` or None when no valid pixel survives
     the SCL/no-data mask.
+
+    When `tile_origin_jitter` is set the crop-grid origin is shifted by a
+    deterministic per-scene `(dy, dx)` (see `scene_origin_offset`) before
+    `tiled_inference` and the shift is inverted on the returned probability, so
+    the per-crop ViT centre-bias tent lands at different pixels each scene and a
+    percentile composite averages it out instead of phase-locking it into a
+    saturated grid (WU-10 de-grid fix).
     """
     import numpy as np
     import stackstac
@@ -490,14 +535,34 @@ def _scene_probability(
         logger.info("[burn-scar]   %s: fully masked on AOI grid, skipped", item.id)
         return None
 
-    offset = _boa_offset(item)
-    refl = np.clip((bands - offset) / 10000.0, 0.0, None)
-    refl = np.where(valid[None, :, :], refl, 0.0)  # no_data_replace=0, per model config
     means = np.asarray(handle.means, dtype=np.float32)[:, None, None]
     stds = np.asarray(handle.stds, dtype=np.float32)[:, None, None]
+    offset = _boa_offset(item)
+    refl = np.clip((bands - offset) / 10000.0, 0.0, None)
+    # Masked pixels are replaced with the per-band reflectance MEAN so they
+    # normalise to ~0.0 (neutral) rather than -mean/std (a strongly negative,
+    # out-of-distribution value the US-HLS fine-tune never saw). This closes a
+    # latent fragility flagged in WU-10 — not the root cause of the grid, but a
+    # cleaner no-data treatment than the old `0.0` fill.
+    refl = np.where(valid[None, :, :], refl, means)
     normed = ((refl - means) / stds).astype(np.float32)
 
     normed, orig_h, orig_w = _pad_to_min(normed, tile_size, tile_size)
+
+    dy, dx = (0, 0)
+    if tile_origin_jitter:
+        dy, dx = scene_origin_offset(item.id, tile_stride, seed=seed)
+        if dy or dx:
+            # Reflect-pad the top/left by (dy, dx) so the crop lattice that
+            # tiled_inference anchors at (0, 0) now starts (dy, dx) earlier
+            # relative to the real scene — i.e. the origin is jittered. Reflect
+            # (not edge/zero) keeps the padded border in-distribution. The shift
+            # is inverted by slicing [dy:dy+H, dx:dx+W] off the result below.
+            normed = np.pad(normed, [(0, 0), (dy, 0), (dx, 0)], mode="reflect")
+            # tiled_inference still needs the array to cover at least one crop.
+            normed, _, _ = _pad_to_min(normed, tile_size, tile_size)
+        logger.info("[burn-scar]   %s: crop-origin jitter (dy=%d, dx=%d)", item.id, dy, dx)
+
     model = handle.model
 
     def forward(x: torch.Tensor) -> torch.Tensor:
@@ -519,7 +584,11 @@ def _scene_probability(
             device=handle.device,
             verbose=False,
         )
-    prob = probs[0, 1].cpu().numpy()[:orig_h, :orig_w].astype(np.float32)
+    # Invert the origin jitter: drop the (dy, dx) reflect-pad, then crop to the
+    # original (unpadded) scene extent. np.ascontiguousarray makes an owned copy
+    # so the in-place NaN mask below does not alias the padded buffer.
+    prob_full = probs[0, 1].cpu().numpy().astype(np.float32)
+    prob = np.ascontiguousarray(prob_full[dy : dy + orig_h, dx : dx + orig_w])
     prob[~valid] = np.nan
     return prob, arr.x.values, arr.y.values
 
@@ -541,12 +610,14 @@ def infer_burn_probability(
     reducer: str = "max",
     tile_size: int = 512,
     tile_stride: int = 448,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> xr.DataArray:
     """Composite burn-scar inference scores over `items`, clipped to `aoi`.
 
     `reducer="max"` is bit-identical to the legacy np.fmax composite. Thin
     single-reducer wrapper over `infer_burn_probability_multi` — see there for
-    the streaming / memory-bounded details.
+    the streaming / memory-bounded details and the `tile_origin_jitter` de-grid.
     """
     return infer_burn_probability_multi(
         items,
@@ -557,6 +628,8 @@ def infer_burn_probability(
         reducers=(reducer,),
         tile_size=tile_size,
         tile_stride=tile_stride,
+        tile_origin_jitter=tile_origin_jitter,
+        seed=seed,
     )[reducer]
 
 
@@ -570,6 +643,8 @@ def infer_burn_probability_multi(
     reducers: tuple[str, ...] = ("max",),
     tile_size: int = 512,
     tile_stride: int = 448,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> dict[str, xr.DataArray]:
     """Composite burn-scar scores under one or more reducers in a single pass.
 
@@ -581,6 +656,12 @@ def infer_burn_probability_multi(
     After the loop the stack is reduced block-wise by each `reduce_stack(name)`,
     reprojected to EPSG:4326 (nearest, explicit CRS — non-negotiable #2) and
     clipped to the AOI; masked pixels are NaN. Returns ``{reducer: DataArray}``.
+
+    When `tile_origin_jitter` is set, each scene's crop-grid origin is shifted by
+    a deterministic per-scene offset (seeded by `seed` + item id) so the per-crop
+    ViT centre-bias tent does not phase-lock into a saturated grid across the
+    stack (WU-10 de-grid). The offset is inverted per scene, so the composites
+    stay on the common grid.
 
     Emitting several candidate composites from the SAME scene stack is how the
     WU-10 validation harness picks a reducer data-drivenly without paying for
@@ -640,6 +721,8 @@ def infer_burn_probability_multi(
                         scl_mask_classes=scl_mask_classes,
                         tile_size=tile_size,
                         tile_stride=tile_stride,
+                        tile_origin_jitter=tile_origin_jitter,
+                        seed=seed,
                     )
                     break
                 except Exception as exc:

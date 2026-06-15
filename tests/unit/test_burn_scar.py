@@ -348,6 +348,59 @@ def test_reduce_stack_blockwise_matches_unblocked(monkeypatch: pytest.MonkeyPatc
 
 
 # ---------------------------------------------------------------------------
+# de-grid: per-scene crop-origin jitter (WU-10)
+# ---------------------------------------------------------------------------
+
+
+def test_scene_origin_offset_is_deterministic_and_in_range() -> None:
+    """Offset is reproducible per (seed, item_id) and bounded by [0, stride)."""
+    stride = 448
+    a = burn_scar.scene_origin_offset("S2A_MSIL2A_20250607T113911_R080_T29TNF", stride)
+    b = burn_scar.scene_origin_offset("S2A_MSIL2A_20250607T113911_R080_T29TNF", stride)
+    assert a == b  # deterministic — not Python's salted hash
+    for v in (*a, *b):
+        assert 0 <= v < stride
+
+
+def test_scene_origin_offset_varies_by_item_and_seed() -> None:
+    """Different item ids (and different seeds) decorrelate the origin offset."""
+    stride = 448
+    ids = [f"S2_SCENE_{i:03d}" for i in range(40)]
+    offs = {burn_scar.scene_origin_offset(i, stride) for i in ids}
+    # phase-lock would give one offset for all scenes; jitter must spread them
+    assert len(offs) > 20
+    # seed changes the draw for a fixed item id
+    assert burn_scar.scene_origin_offset(ids[0], stride, seed=42) != burn_scar.scene_origin_offset(
+        ids[0], stride, seed=7
+    )
+
+
+def test_scene_origin_offset_zero_for_degenerate_stride() -> None:
+    """No room to jitter when stride <= 1 -> (0, 0), inversion is a no-op."""
+    assert burn_scar.scene_origin_offset("any", 1) == (0, 0)
+    assert burn_scar.scene_origin_offset("any", 0) == (0, 0)
+
+
+def test_origin_jitter_roundtrip_recovers_identity_field() -> None:
+    """Reflect-pad by (dy,dx) then crop [dy:dy+H, dx:dx+W] is an exact inverse.
+
+    This is the core de-grid invariant: the jitter only changes which pixels the
+    crop lattice lands on; after inversion the result is back on the original
+    grid. We assert it on the pad/crop arithmetic the scene path uses.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    orig_h, orig_w = 37, 53
+    base = rng.random((orig_h, orig_w)).astype(np.float32)
+    for dy, dx in [(0, 0), (5, 0), (0, 9), (11, 7)]:
+        padded = np.pad(base[None], [(0, 0), (dy, 0), (dx, 0)], mode="reflect")[0]
+        recovered = padded[dy : dy + orig_h, dx : dx + orig_w]
+        assert recovered.shape == (orig_h, orig_w)
+        assert np.array_equal(recovered, base)
+
+
+# ---------------------------------------------------------------------------
 # fire-season filter (WU-10)
 # ---------------------------------------------------------------------------
 
@@ -512,31 +565,50 @@ def test_burn_scar_run_round_trips_json() -> None:
 
 
 def test_burn_scar_run_reducer_field() -> None:
-    """The WU-10 reducer/season fields round-trip and default for old records."""
+    """The WU-10 reducer/season/de-grid fields round-trip and default for old records."""
     # explicit value survives a JSON round-trip
     record = _run_record().model_copy(
-        update={"reducer": "p85", "season_start_month": 6, "season_end_month": 10}
+        update={
+            "reducer": "p85",
+            "season_start_month": 6,
+            "season_end_month": 10,
+            "tile_origin_jitter": True,
+            "tile_size": 512,
+            "tile_stride": 448,
+        }
     )
     again = BurnScarRun.model_validate(json.loads(record.model_dump_json()))
     assert again.reducer == "p85"
     assert (again.season_start_month, again.season_end_month) == (6, 10)
+    assert again.tile_origin_jitter is True
+    assert (again.tile_size, again.tile_stride) == (512, 448)
 
-    # a provenance dict written BEFORE WU-10 (no reducer/season keys) still
-    # deserialises, defaulting to the backward-compatible max / full-year window
+    # a provenance dict written BEFORE WU-10 (no reducer/season/de-grid keys)
+    # still deserialises, defaulting to the backward-compatible behaviour
     legacy = _run_record().model_dump(mode="json")
-    for key in ("reducer", "season_start_month", "season_end_month"):
+    for key in (
+        "reducer",
+        "season_start_month",
+        "season_end_month",
+        "tile_origin_jitter",
+        "tile_size",
+        "tile_stride",
+    ):
         legacy.pop(key, None)
     restored = BurnScarRun.model_validate(legacy)
     assert restored.reducer == "max"
     assert (restored.season_start_month, restored.season_end_month) == (1, 12)
+    assert restored.tile_origin_jitter is False
+    assert (restored.tile_size, restored.tile_stride) == (512, 448)
 
 
 def test_burn_scar_inference_config_reducer_defaults() -> None:
-    """An inference config without the WU-10 keys defaults to max / full year."""
+    """An inference config without the WU-10 keys defaults to the legacy behaviour."""
     cfg = _config()
-    # the test _config() omits reducer/season — must default for backward compat
+    # the test _config() omits reducer/season/de-grid — must default for back-compat
     assert cfg.inference.reducer == "max"
     assert (cfg.inference.season_start_month, cfg.inference.season_end_month) == (1, 12)
+    assert cfg.inference.tile_origin_jitter is False
 
 
 # ---------------------------------------------------------------------------

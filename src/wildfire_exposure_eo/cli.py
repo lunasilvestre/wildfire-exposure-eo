@@ -443,6 +443,7 @@ def infer_burn_scar(
         reducer=bs_config.inference.reducer,
         tile_size=bs_config.inference.tile_size,
         tile_stride=bs_config.inference.tile_stride,
+        tile_origin_jitter=bs_config.inference.tile_origin_jitter,
     )
 
     from importlib.metadata import version as pkg_version
@@ -468,6 +469,9 @@ def infer_burn_scar(
         reducer=bs_config.inference.reducer,
         season_start_month=bs_config.inference.season_start_month,
         season_end_month=bs_config.inference.season_end_month,
+        tile_origin_jitter=bs_config.inference.tile_origin_jitter,
+        tile_size=bs_config.inference.tile_size,
+        tile_stride=bs_config.inference.tile_stride,
         binarisation_threshold=bs_config.inference.binarisation_threshold,
         output_crs=burn_scar_mod.OUTPUT_CRS,
         resampling=burn_scar_mod.RESAMPLING,

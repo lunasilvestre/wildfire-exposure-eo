@@ -62,6 +62,13 @@ class BurnScarInferenceConfig(BaseModel):
     #: unchanged; the shipped config sets 6..10 (ICNF's principal fire season).
     season_start_month: int = Field(default=1, ge=1, le=12)
     season_end_month: int = Field(default=12, ge=1, le=12)
+    #: De-grid (WU-10): when true, each scene's tiled-inference crop-grid origin
+    #: is shifted by a deterministic per-scene offset (seed 42 + STAC item id) so
+    #: the per-crop ViT centre-bias tent does not phase-lock into a saturated
+    #: grid across the stack. Defaults to False so configs that predate the
+    #: de-grid reproduce the fixed-lattice behaviour; the shipped config sets
+    #: true. See `wildfire_exposure_eo.burn_scar.scene_origin_offset`.
+    tile_origin_jitter: bool = Field(default=False)
 
 
 class BurnScarConfig(BaseModel):
@@ -106,6 +113,14 @@ class BurnScarRun(BaseModel):
     #: inclusive. Defaulted to 1..12 (no restriction) for backward compat.
     season_start_month: int = Field(default=1, ge=1, le=12)
     season_end_month: int = Field(default=12, ge=1, le=12)
+    #: Whether the per-scene crop-grid origin jitter (de-grid) was applied during
+    #: this run (WU-10). Defaulted to False so provenance records written before
+    #: the de-grid still deserialise and reproduce the fixed-lattice behaviour.
+    tile_origin_jitter: bool = Field(default=False)
+    #: Inference tiling actually used for this run (WU-10 de-grid provenance).
+    #: Defaulted to the historical pilot values so pre-WU-10 records deserialise.
+    tile_size: int = Field(default=512, gt=0)
+    tile_stride: int = Field(default=448, gt=0)
 
     binarisation_threshold: float = Field(..., gt=0.0, lt=1.0)
     output_crs: str = Field(..., min_length=1)

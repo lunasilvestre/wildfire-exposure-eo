@@ -97,6 +97,30 @@ def main() -> int:
     )
     parser.add_argument("--out-dir", type=Path, required=True, help="absolute output dir for COGs")
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--tile-origin-jitter",
+        dest="tile_origin_jitter",
+        action="store_true",
+        default=None,
+        help="force the WU-10 de-grid crop-origin jitter on (default: config value)",
+    )
+    parser.add_argument(
+        "--no-tile-origin-jitter",
+        dest="tile_origin_jitter",
+        action="store_false",
+        help="force the de-grid crop-origin jitter off (A/B against jitter on)",
+    )
+    parser.add_argument(
+        "--tile-stride",
+        type=int,
+        default=None,
+        help="override config tile_stride (smaller = more overlap, flatter tent, more GPU)",
+    )
+    parser.add_argument(
+        "--out-prefix",
+        default=None,
+        help="override the COG filename prefix (e.g. burn_scar_wu10degrid)",
+    )
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
 
@@ -113,6 +137,12 @@ def main() -> int:
     aoi_path = Path("data/aoi/smoke.geojson") if args.smoke else args.aoi
     reducers = tuple(r.strip() for r in args.reducers.split(",") if r.strip())
     cfg = burn_scar.load_burn_scar_config(args.config)
+    tile_origin_jitter = (
+        cfg.inference.tile_origin_jitter
+        if args.tile_origin_jitter is None
+        else args.tile_origin_jitter
+    )
+    tile_stride = args.tile_stride if args.tile_stride is not None else cfg.inference.tile_stride
     months = args.window_months if args.window_months is not None else cfg.inference.window_months
     end = (
         datetime.fromisoformat(args.window_end).date()
@@ -143,6 +173,11 @@ def main() -> int:
         print("[multi] no S2 items after season filter — nothing to infer", file=sys.stderr)
         return 1
 
+    print(
+        f"[multi] de-grid: tile_origin_jitter={tile_origin_jitter} "
+        f"tile_size={cfg.inference.tile_size} tile_stride={tile_stride}",
+        file=sys.stderr,
+    )
     composites = burn_scar.infer_burn_probability_multi(
         items,
         handle,
@@ -151,7 +186,9 @@ def main() -> int:
         scl_mask_classes=cfg.inference.scl_mask_classes,
         reducers=reducers,
         tile_size=cfg.inference.tile_size,
-        tile_stride=cfg.inference.tile_stride,
+        tile_stride=tile_stride,
+        tile_origin_jitter=tile_origin_jitter,
+        seed=SEED,
     )
 
     created_at = datetime.now(UTC)
@@ -167,9 +204,15 @@ def main() -> int:
         "window_end": end.isoformat(),
         "n_items": len(items),
         "reducers": list(reducers),
+        "tile_origin_jitter": tile_origin_jitter,
+        "tile_size": cfg.inference.tile_size,
+        "tile_stride": tile_stride,
         "candidates": {},
     }
-    prefix = "burn_scar_smoke_wu10multi" if args.smoke else "burn_scar_wu10multi"
+    if args.out_prefix is not None:
+        prefix = args.out_prefix
+    else:
+        prefix = "burn_scar_smoke_wu10multi" if args.smoke else "burn_scar_wu10multi"
     for reducer, da in composites.items():
         cog_path = args.out_dir / f"{prefix}_{reducer}_{run_id}.tif"
         provenance = burn_scar.BurnScarRun(
@@ -193,6 +236,9 @@ def main() -> int:
             reducer=reducer,
             season_start_month=cfg.inference.season_start_month,
             season_end_month=cfg.inference.season_end_month,
+            tile_origin_jitter=tile_origin_jitter,
+            tile_size=cfg.inference.tile_size,
+            tile_stride=tile_stride,
             binarisation_threshold=cfg.inference.binarisation_threshold,
             output_crs=burn_scar.OUTPUT_CRS,
             resampling=burn_scar.RESAMPLING,
