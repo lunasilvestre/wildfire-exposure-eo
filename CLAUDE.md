@@ -37,7 +37,7 @@ uv run pytest
 For changes that touch the STAC catalog:
 
 ```bash
-uv run stac-validator stac/catalog.json --recursive
+uv run stac-validator validate stac/catalog.json --recursive
 ```
 
 For changes that touch the asset GeoParquet schema:
