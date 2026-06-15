@@ -42,23 +42,29 @@ The gate reads, in order of preference:
    meter numbers; no calibration needed. Skipped if the snapshot is older
    than 35 min (cron broken / cookie expired).
 2. **ccusage fallback** — token-count heuristic. `CLOSEOUT_BLOCK_TOKEN_BUDGET`
-   (default 34M tokens/block) was calibrated 2026-06-10 against the in-app
-   meter: ccusage reported 19,235,855 block tokens at "56% used" → ≈34M
-   tokens per block in ccusage counting (cache reads dominate). Re-check the
-   alignment occasionally and adjust the default in
-   `scripts/dev/check_usage.sh` if it drifts.
+   (default **100M tokens/block**) sizes the slot. The original 2026-06-10
+   calibration was ≈34M (ccusage 19,235,855 block tokens at "56% used"), but
+   that mix leaned on expensive **Fable** review passes. Fable was retired
+   2026-06-14 — all builds and reviews now run on Opus 4.8, cheaper per token,
+   so the same block-cost limit buys many more raw tokens. The budget was
+   therefore enlarged to a much bigger slot (≈100M); treat it as an interim
+   estimate and re-derive against the real meter if you ever lean on the
+   fallback. Adjust the default in `scripts/dev/check_usage.sh` if it drifts.
 
 ## Gate rule (time-sensitive, Nelson 2026-06-10)
 
-A WU (build + independent review) costs **~35% of a 5h block** with Sonnet
-builds and Fable reviews. The gate therefore requires real headroom — unless
-the block reset is imminent, in which case the WU mostly runs in the next
-block and high usage is irrelevant:
+A WU (build + independent review) cost **~35% of a 5h block** on the
+pre-2026-06-14 model mix (Sonnet builds, Fable reviews). With Fable retired
+(builds and reviews now Opus 4.8) the raw-token slot per block is much larger,
+so a WU consumes a smaller share and the gate can let more work through before
+the floor. The gate still requires real headroom — unless the block reset is
+imminent, in which case the WU mostly runs in the next block and high usage is
+irrelevant:
 
 ```
-allowed_used% = max(FLOOR, CEIL − minutes_to_reset)    # FLOOR 50, CEIL 92
-90% used &  2 min to reset → pass     70% used & 20 min → pass
-80% used & 10 min to reset → pass     70% used &  3 h   → throttle
+allowed_used% = max(FLOOR, CEIL − minutes_to_reset)    # FLOOR 85, CEIL 92
+90% used &  2 min to reset → pass     80% used & any time → pass
+88% used & 10 min to reset → throttle 90% used &  3 h     → throttle
 ```
 
 Weekly all-models ≥ 90% always throttles. Knobs: `CLOSEOUT_SESSION_PCT_MAX`

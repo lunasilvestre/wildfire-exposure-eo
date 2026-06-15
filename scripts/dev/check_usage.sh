@@ -5,32 +5,37 @@
 # Primary source: claude-usage-tracker's data/latest.jsonl — real percentages
 # from the claude.ai usage API, refreshed every 15 min by the crontab entry
 # on atlas (claude-track --quiet). These ARE the in-app /usage meter numbers.
-# Fallback: ccusage token-count heuristic. Budget calibrated 2026-06-10:
-# ccusage 19,235,855 block tokens <-> in-app "56% used" => ~34M tokens/block
-# in ccusage counting (cache reads dominate).
+# Fallback: ccusage token-count heuristic. Original calibration 2026-06-10:
+# ccusage 19,235,855 block tokens <-> in-app "56% used" => ~34M tokens/block,
+# but that mix leaned on expensive Fable review passes. Fable was retired
+# 2026-06-14 (all builds + reviews now Opus 4.8, cheaper per token), so the
+# same block-cost limit now buys many more raw tokens => bigger slots. Default
+# bumped to 100M as a much-bigger interim estimate; the primary source
+# (claude-usage-tracker, real meter %) needs no calibration — re-derive against
+# it if you ever lean on this fallback.
 #
 # Gate rule (Nelson, 2026-06-10): start a WU only if enough of the session
 # block remains for a full build+review (~35%), UNLESS the reset is imminent —
 # then the WU mostly runs in the next block and high usage is fine:
 #   allowed_used% = max(FLOOR, CEIL - minutes_to_reset)
-#   e.g. floor 50 / ceil 92:  90% & 2 min -> pass;  80% & 10 min -> pass;
-#        70% & 20 min -> pass;  70% & 3 h -> throttle.
+#   e.g. floor 85 / ceil 92:  90% & 2 min -> pass (allowed 90);  80% any time
+#        -> pass (floor 85);  90% & 3 h -> throttle;  86% & 20 min -> throttle.
 #
 # Env knobs:
-#   CLOSEOUT_SESSION_PCT_MAX     floor: max used% far from reset (default 50)
+#   CLOSEOUT_SESSION_PCT_MAX     floor: max used% far from reset (default 85)
 #   CLOSEOUT_PCT_CEIL            ceiling for the time-relief ramp (default 92)
 #   CLOSEOUT_WEEKLY_PCT_MAX      throttle at/above this weekly all-models % (default 90)
 #   CLOSEOUT_TRACKER_LATEST      tracker snapshot path (default: atlas location)
 #   CLOSEOUT_TRACKER_MAX_AGE_MIN max snapshot age before fallback (default 35)
-#   CLOSEOUT_BLOCK_TOKEN_BUDGET  fallback budget, tokens per 5h block (default 34_000_000)
+#   CLOSEOUT_BLOCK_TOKEN_BUDGET  fallback budget, tokens per 5h block (default 100_000_000; was 34M before Fable retired)
 set -uo pipefail
 
-PCT_FLOOR="${CLOSEOUT_SESSION_PCT_MAX:-50}"
+PCT_FLOOR="${CLOSEOUT_SESSION_PCT_MAX:-85}"
 PCT_CEIL="${CLOSEOUT_PCT_CEIL:-92}"
 WEEKLY_MAX="${CLOSEOUT_WEEKLY_PCT_MAX:-90}"
 LATEST="${CLOSEOUT_TRACKER_LATEST:-$HOME/Documents/dev/claude-usage-tracker/data/latest.jsonl}"
 MAX_AGE_MIN="${CLOSEOUT_TRACKER_MAX_AGE_MIN:-35}"
-BUDGET="${CLOSEOUT_BLOCK_TOKEN_BUDGET:-34000000}"
+BUDGET="${CLOSEOUT_BLOCK_TOKEN_BUDGET:-100000000}"
 
 # minutes until a given ISO-8601 timestamp (fractional seconds tolerated);
 # prints 99999 if unparsable/empty.
