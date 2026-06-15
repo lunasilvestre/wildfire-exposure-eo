@@ -233,6 +233,168 @@ def test_months_back_clamps_day() -> None:
 
 
 # ---------------------------------------------------------------------------
+# composite reducers (WU-10)
+# ---------------------------------------------------------------------------
+
+
+def _legacy_fmax_composite(stack: Any) -> Any:
+    """The pre-WU-10 accumulator: composite = np.fmax(composite, prob) per scene."""
+    import numpy as np
+
+    composite = stack[0].copy()
+    for layer in stack[1:]:
+        composite = np.fmax(composite, layer)
+    return composite
+
+
+def test_reducer_max_backward_compat() -> None:
+    """`reducer="max"` must be bit-identical to the old np.fmax accumulator."""
+    import numpy as np
+
+    nan = np.nan
+    stack = np.array(
+        [
+            [[0.10, nan], [0.30, nan]],
+            [[0.90, 0.20], [nan, nan]],
+            [[nan, 0.70], [0.50, nan]],
+        ],
+        dtype=np.float32,
+    )
+    reduced = burn_scar.reduce_stack(stack, "max")
+    legacy = _legacy_fmax_composite(stack)
+    assert np.array_equal(reduced, legacy, equal_nan=True)
+    # the all-NaN pixel stays NaN (no scene observed it)
+    assert np.isnan(reduced[1, 1])
+
+
+def test_reducer_p85() -> None:
+    """`reducer="p85"` returns the NaN-ignoring 85th percentile per pixel."""
+    import numpy as np
+
+    # 10 scenes, one pixel: scores 0.0..0.9; p85 interpolates between 0.7/0.8.
+    scores = np.linspace(0.0, 0.9, 10, dtype=np.float32)
+    stack = scores.reshape(10, 1, 1)
+    reduced = burn_scar.reduce_stack(stack, "p85")
+    assert reduced[0, 0] == pytest.approx(np.percentile(scores, 85), abs=1e-5)
+    # a single high spike does not survive p85 (it would under max)
+    spiky = np.zeros((10, 1, 1), dtype=np.float32)
+    spiky[0, 0, 0] = 1.0
+    assert burn_scar.reduce_stack(spiky, "p85")[0, 0] == pytest.approx(0.0, abs=1e-6)
+    assert burn_scar.reduce_stack(spiky, "max")[0, 0] == pytest.approx(1.0)
+
+
+def test_reducer_percentile_ignores_nan() -> None:
+    import numpy as np
+
+    nan = np.nan
+    stack = np.array([[[0.2]], [[nan]], [[0.4]], [[0.6]]], dtype=np.float32)
+    # median over observed {0.2,0.4,0.6} == 0.4, NaN ignored
+    assert burn_scar.reduce_stack(stack, "median")[0, 0] == pytest.approx(0.4, abs=1e-6)
+    all_nan = np.full((3, 1, 1), nan, dtype=np.float32)
+    assert np.isnan(burn_scar.reduce_stack(all_nan, "median")[0, 0])
+
+
+def test_reducer_consensus() -> None:
+    """`consensus_5` flags 1.0 only when >5/10 observing scenes score >=0.5."""
+    import numpy as np
+
+    # pixel A: 6 of 10 scenes >=0.5  -> share 0.6 > 0.5 -> 1.0
+    # pixel B: 5 of 10 scenes >=0.5  -> share 0.5, NOT > 0.5 -> 0.0
+    a = np.array([0.9] * 6 + [0.1] * 4, dtype=np.float32)
+    b = np.array([0.9] * 5 + [0.1] * 5, dtype=np.float32)
+    stack = np.stack([a, b], axis=1).reshape(10, 1, 2)
+    reduced = burn_scar.reduce_stack(stack, "consensus_5")
+    assert reduced[0, 0] == pytest.approx(1.0)
+    assert reduced[0, 1] == pytest.approx(0.0)
+
+
+def test_reducer_consensus_ignores_nan_in_denominator() -> None:
+    import numpy as np
+
+    nan = np.nan
+    # 4 observed scenes (2 NaN ignored), 3 of 4 >=0.5 -> share 0.75 > 0.5 -> 1.0
+    col = np.array([0.9, 0.9, 0.9, 0.1, nan, nan], dtype=np.float32)
+    stack = col.reshape(6, 1, 1)
+    assert burn_scar.reduce_stack(stack, "consensus_5")[0, 0] == pytest.approx(1.0)
+    all_nan = np.full((3, 1, 1), nan, dtype=np.float32)
+    assert np.isnan(burn_scar.reduce_stack(all_nan, "consensus_5")[0, 0])
+
+
+def test_reducer_unknown_raises() -> None:
+    import numpy as np
+
+    stack = np.zeros((2, 1, 1), dtype=np.float32)
+    with pytest.raises(ValueError, match="unrecognised reducer"):
+        burn_scar.reduce_stack(stack, "bogus")
+    with pytest.raises(ValueError, match="consensus_N"):
+        burn_scar.reduce_stack(stack, "consensus_99")
+    with pytest.raises(ValueError, match="consensus_N"):
+        burn_scar.reduce_stack(stack, "consensus_x")
+
+
+def test_reduce_stack_blockwise_matches_unblocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Block-wise reduction must equal the unblocked reduce for every reducer."""
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    stack = rng.random((7, 600, 11), dtype=np.float64).astype(np.float32)
+    # punch some NaNs so masked pixels exercise the all-NaN handling
+    stack[:, rng.integers(0, 600, 50), rng.integers(0, 11, 50)] = np.nan
+    monkeypatch.setattr(burn_scar, "_REDUCE_BLOCK_ROWS", 256)
+    for reducer in ("max", "median", "p85", "p90", "consensus_3"):
+        blocked = burn_scar._reduce_stack_blockwise(stack, reducer)
+        whole = burn_scar.reduce_stack(stack, reducer)
+        assert np.array_equal(blocked, whole, equal_nan=True), reducer
+
+
+# ---------------------------------------------------------------------------
+# fire-season filter (WU-10)
+# ---------------------------------------------------------------------------
+
+
+def test_season_filter_drops_off_season_items() -> None:
+    items = [
+        _FakeItem("S2_MAY", datetime(2025, 5, 15, tzinfo=UTC)),
+        _FakeItem("S2_JUL", datetime(2025, 7, 15, tzinfo=UTC)),
+        _FakeItem("S2_OCT", datetime(2025, 10, 1, tzinfo=UTC)),
+        _FakeItem("S2_NOV", datetime(2025, 11, 1, tzinfo=UTC)),
+    ]
+    kept = burn_scar.filter_to_season(
+        items,  # pyright: ignore[reportArgumentType]
+        season_start_month=6,
+        season_end_month=10,
+    )
+    assert [it.id for it in kept] == ["S2_JUL", "S2_OCT"]
+
+
+def test_season_filter_noop_for_full_year() -> None:
+    items = [
+        _FakeItem("S2_JAN", datetime(2025, 1, 1, tzinfo=UTC)),
+        _FakeItem("S2_DEC", datetime(2025, 12, 1, tzinfo=UTC)),
+    ]
+    kept = burn_scar.filter_to_season(
+        items,  # pyright: ignore[reportArgumentType]
+        season_start_month=1,
+        season_end_month=12,
+    )
+    assert [it.id for it in kept] == ["S2_JAN", "S2_DEC"]
+
+
+def test_season_filter_wraps_year_end() -> None:
+    items = [
+        _FakeItem("S2_NOV", datetime(2025, 11, 1, tzinfo=UTC)),
+        _FakeItem("S2_JAN", datetime(2026, 1, 1, tzinfo=UTC)),
+        _FakeItem("S2_JUN", datetime(2025, 6, 1, tzinfo=UTC)),
+    ]
+    kept = burn_scar.filter_to_season(
+        items,  # pyright: ignore[reportArgumentType]
+        season_start_month=11,
+        season_end_month=2,
+    )
+    assert [it.id for it in kept] == ["S2_NOV", "S2_JAN"]
+
+
+# ---------------------------------------------------------------------------
 # COG writer
 # ---------------------------------------------------------------------------
 
@@ -347,6 +509,34 @@ def test_burn_scar_run_rejects_extra_fields() -> None:
 def test_burn_scar_run_round_trips_json() -> None:
     record = _run_record()
     assert BurnScarRun.model_validate(json.loads(record.model_dump_json())) == record
+
+
+def test_burn_scar_run_reducer_field() -> None:
+    """The WU-10 reducer/season fields round-trip and default for old records."""
+    # explicit value survives a JSON round-trip
+    record = _run_record().model_copy(
+        update={"reducer": "p85", "season_start_month": 6, "season_end_month": 10}
+    )
+    again = BurnScarRun.model_validate(json.loads(record.model_dump_json()))
+    assert again.reducer == "p85"
+    assert (again.season_start_month, again.season_end_month) == (6, 10)
+
+    # a provenance dict written BEFORE WU-10 (no reducer/season keys) still
+    # deserialises, defaulting to the backward-compatible max / full-year window
+    legacy = _run_record().model_dump(mode="json")
+    for key in ("reducer", "season_start_month", "season_end_month"):
+        legacy.pop(key, None)
+    restored = BurnScarRun.model_validate(legacy)
+    assert restored.reducer == "max"
+    assert (restored.season_start_month, restored.season_end_month) == (1, 12)
+
+
+def test_burn_scar_inference_config_reducer_defaults() -> None:
+    """An inference config without the WU-10 keys defaults to max / full year."""
+    cfg = _config()
+    # the test _config() omits reducer/season — must default for backward compat
+    assert cfg.inference.reducer == "max"
+    assert (cfg.inference.season_start_month, cfg.inference.season_end_month) == (1, 12)
 
 
 # ---------------------------------------------------------------------------

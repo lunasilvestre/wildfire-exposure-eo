@@ -51,6 +51,17 @@ class BurnScarInferenceConfig(BaseModel):
     scl_mask_classes: tuple[int, ...]
     tile_size: int = Field(..., gt=0)
     tile_stride: int = Field(..., gt=0)
+    #: Composite reducer applied across the scene stack — see
+    #: `wildfire_exposure_eo.burn_scar.reduce_stack`. Defaults to ``max`` so a
+    #: config that predates WU-10 (no `reducer:` key) reproduces the original
+    #: np.fmax composite exactly; the shipped config sets ``p85``.
+    reducer: str = Field(default="max", min_length=1)
+    #: Fire-season window: only S2 scenes whose acquisition month falls in
+    #: ``[season_start_month, season_end_month]`` (1-indexed, inclusive) are
+    #: composited. Defaults to 1..12 (no restriction) so pre-WU-10 configs are
+    #: unchanged; the shipped config sets 6..10 (ICNF's principal fire season).
+    season_start_month: int = Field(default=1, ge=1, le=12)
+    season_end_month: int = Field(default=12, ge=1, le=12)
 
 
 class BurnScarConfig(BaseModel):
@@ -86,6 +97,15 @@ class BurnScarRun(BaseModel):
     s2_max_cloud_cover: int = Field(..., ge=0, le=100)
     s2_item_ids: tuple[str, ...]
     scl_mask_classes: tuple[int, ...]
+
+    #: Composite reducer applied across the scene stack (WU-10). Defaulted so
+    #: provenance records written before WU-10 still deserialise; ``max``
+    #: reproduces the original np.fmax composite.
+    reducer: str = Field(default="max", min_length=1)
+    #: Fire-season window actually applied to the scene query (WU-10), 1-indexed
+    #: inclusive. Defaulted to 1..12 (no restriction) for backward compat.
+    season_start_month: int = Field(default=1, ge=1, le=12)
+    season_end_month: int = Field(default=12, ge=1, le=12)
 
     binarisation_threshold: float = Field(..., gt=0.0, lt=1.0)
     output_crs: str = Field(..., min_length=1)
