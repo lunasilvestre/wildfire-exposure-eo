@@ -62,6 +62,32 @@ them gate the primary fix. The diagnostic script ships at
 `scripts/16_burn_scar_prefire_diag.py`; sidecar at
 `outputs/diagnostics/burn_scar_prefire_diag_*.json`.
 
+### Phase-3 result — de-grid (EXECUTED 2026-06-15)
+
+After the p85 reducer cut the wash ~3.3×, a faint *grid* (lattice of squares)
+remained. Two-line diagnostic + the grid metric
+(`scripts/16_burn_scar_gridmetric.py`) confirmed the root cause: the **Prithvi/ViT
+per-crop positional bias**. Each terratorch `tiled_inference` 512 px crop has a
+tent-shaped class-1 response (~5× core/border), **phase-locked** to the same UTM
+crop lattice (crop 512 / stride 448) across all scenes, amplified by the per-pixel
+composite. The composite autocorrelation period is **anisotropic** — on the
+pre-de-grid p85 pilot, row ≈ 504 px / col ≈ 384 px (the *reprojected* inference
+stride), proving an inference artifact, not a display/COG-block artifact.
+Refuted by measurement: **H1** nodata/zero-fill OOD (corr(masked-frac, crop-score)
+≈ 0), **H2** blend seams (cosine feather works; period = stride, not seam),
+**H3** per-tile normalisation (global constants applied pre-tiling).
+
+**De-grid method:** deterministic per-scene crop-grid **origin jitter** — reflect-
+pad the normalised scene by a per-scene `(dy, dx)` ∈ `[0, stride)` (seed 42 +
+STAC item id via blake2b) before `tiled_inference`, invert by cropping the result
+back. No extra forward passes (GPU cost unchanged), stride left at 448. The tent
+lands at different pixels each scene so p85 averages it out. Exposed as
+`config/burn_scar.yaml: inference.tile_origin_jitter` (default `false`; shipped
+`true`); recorded additively in `BurnScarRun` provenance. Hygiene rider: masked
+pixels now filled with the per-band mean (→ ~0 after normalisation) instead of
+`0.0` (→ −mean/std, OOD). Full diagnosis + A/B table in `docs/burn_scar_audit.md`
+(section "WU-10 tiling artifact — diagnosis and de-grid").
+
 ## Prerequisites (confirm before starting)
 
 - [ ] `uv run pytest -q` green on a clean checkout.

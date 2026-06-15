@@ -2,8 +2,10 @@
 
 Runs the pretrained `Prithvi-EO-2.0-300M-BurnScars` checkpoint (inference
 only, frozen weights) over the trailing window of Sentinel-2 L2A scenes and
-composites a single per-pixel max raster of the model's class-1 softmax
-score, written as a COG with full provenance.
+composites a single per-pixel raster of the model's class-1 softmax score
+under the configured reducer (`reduce_stack`: max | median | p75 | p85 | p90 |
+consensus_N — WU-10), written as a COG with full provenance. `max` is
+bit-identical to the original np.fmax composite.
 
 Terminology guard (CLAUDE.md): this detects burn *scars* — post-event
 spectral signatures of fires that already happened. The raster value is a
@@ -23,6 +25,7 @@ test/CLI contexts that never run inference.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import json
 import logging
 import time
@@ -56,6 +59,12 @@ NODATA = -9999.0
 OUTPUT_CRS = "EPSG:4326"
 RESAMPLING = "nearest"  # probability raster: never interpolate values (prompt 09)
 SCL_ASSET = "SCL"
+
+#: Default deterministic seed (CLAUDE.md non-negotiable #4). Mixed with each
+#: scene's STAC item id to choose that scene's crop-grid origin offset, so the
+#: choice is reproducible across runs and stable per scene regardless of input
+#: order.
+DEFAULT_SEED = 42
 PC_SAS_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{collection}"
 S2_COLLECTION = "sentinel-2-l2a"
 
@@ -194,6 +203,121 @@ def resolve_prithvi_burn_scar_model(
     )
 
 
+#: Reducer names that map to a NaN-aware percentile of the per-scene scores.
+#: `max` is handled separately so it is *bit-identical* to the legacy np.fmax
+#: accumulator (and never emits an all-NaN-slice warning).
+_PERCENTILE_REDUCERS = {"median": 50.0, "p75": 75.0, "p85": 85.0, "p90": 90.0}
+
+
+def _parse_consensus_fraction(reducer: str) -> float:
+    """`consensus_N` -> required fraction N/10 of scenes scoring >=0.5.
+
+    Raises `ValueError` on a malformed suffix (non-integer or outside 1..10).
+    """
+    suffix = reducer[len("consensus_") :]
+    try:
+        n = int(suffix)
+    except ValueError as exc:
+        raise ValueError(
+            f"unrecognised reducer {reducer!r}: consensus_N needs an integer N (got {suffix!r})"
+        ) from exc
+    if not 1 <= n <= 10:
+        raise ValueError(f"unrecognised reducer {reducer!r}: consensus_N needs 1<=N<=10")
+    return n / 10.0
+
+
+def reduce_stack(stack: np.ndarray, reducer: str) -> np.ndarray:
+    """Reduce a `(n_scene, y, x)` per-scene score stack to one `(y, x)` composite.
+
+    Masked pixels are NaN per scene. Supported reducers:
+
+    * ``max`` — per-pixel maximum, NaN only where every scene is NaN. This is
+      *bit-identical* to the legacy ``np.fmax``-accumulator path (asserted in
+      `tests/unit/test_burn_scar.py::test_reducer_max_backward_compat`), so the
+      key being absent in an old config reproduces the original composite.
+    * ``median`` / ``p75`` / ``p85`` / ``p90`` — NaN-ignoring percentile across
+      the scenes that observed each pixel; a single-scene spike no longer
+      survives the whole window. NaN where every scene is NaN.
+    * ``consensus_N`` (N in 1..10) — a pixel is 1.0 only when the fraction of
+      *observing* scenes scoring >=0.5 exceeds N/10 (e.g. consensus_5 = majority
+      vote), else 0.0; NaN where every scene is NaN.
+
+    Raises `ValueError` on any other string.
+    """
+    import warnings
+
+    import numpy as np
+
+    if stack.ndim != 3:
+        raise ValueError(f"reduce_stack expects a (n_scene, y, x) stack, got shape {stack.shape}")
+
+    if reducer == "max":
+        # np.fmax.reduce == the old `composite = np.fmax(composite, prob)` loop,
+        # all-NaN -> NaN, and emits no all-NaN-slice warning.
+        return np.fmax.reduce(stack, axis=0)
+
+    all_nan = np.all(np.isnan(stack), axis=0)
+
+    if reducer in _PERCENTILE_REDUCERS:
+        q = _PERCENTILE_REDUCERS[reducer]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN slices
+            out = np.nanpercentile(stack, q, axis=0).astype(np.float32)
+        out[all_nan] = np.nan
+        return out
+
+    if reducer.startswith("consensus_"):
+        frac_required = _parse_consensus_fraction(reducer)
+        observed = np.sum(~np.isnan(stack), axis=0)
+        hits = np.nansum(stack >= 0.5, axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            share = np.where(observed > 0, hits / observed, np.nan)
+        out = (share > frac_required).astype(np.float32)
+        out[all_nan] = np.nan
+        return out
+
+    raise ValueError(
+        f"unrecognised reducer {reducer!r}; expected one of "
+        "max | median | p75 | p85 | p90 | consensus_N"
+    )
+
+
+def filter_to_season(
+    items: list[pystac.Item],
+    *,
+    season_start_month: int,
+    season_end_month: int,
+) -> list[pystac.Item]:
+    """Keep only items whose acquisition month is in `[start, end]` (1-indexed).
+
+    Logs how many items are dropped (CLAUDE.md verify-then-act). When the
+    window spans the year boundary (start > end, e.g. Nov..Feb) the range wraps.
+    A 1..12 window is a no-op. Order is preserved.
+    """
+    if not 1 <= season_start_month <= 12 or not 1 <= season_end_month <= 12:
+        raise ValueError(
+            f"season months must be 1..12, got {season_start_month}..{season_end_month}"
+        )
+    if season_start_month == 1 and season_end_month == 12:
+        return items
+
+    def in_season(month: int) -> bool:
+        if season_start_month <= season_end_month:
+            return season_start_month <= month <= season_end_month
+        return month >= season_start_month or month <= season_end_month  # wraps year-end
+
+    kept = [it for it in items if in_season(_item_datetime(it).month)]
+    dropped = len(items) - len(kept)
+    logger.info(
+        "[burn-scar] fire-season filter [%d..%d]: kept %d, dropped %d off-season item(s)",
+        season_start_month,
+        season_end_month,
+        len(kept),
+        dropped,
+    )
+    return kept
+
+
 def months_back(end: date, months: int) -> date:
     """`end` minus `months` calendar months, day clamped to the target month."""
     year, month = end.year, end.month - months
@@ -328,6 +452,35 @@ def _pad_to_min(arr: np.ndarray, min_h: int, min_w: int) -> tuple[np.ndarray, in
     return arr, h, w
 
 
+def scene_origin_offset(
+    item_id: str, tile_stride: int, *, seed: int = DEFAULT_SEED
+) -> tuple[int, int]:
+    """Deterministic per-scene crop-grid origin offset ``(dy, dx)`` in ``[0, stride)``.
+
+    De-grid fix (WU-10). terratorch ``tiled_inference`` slides a fixed
+    axis-aligned crop lattice (origin 0,0; stride ``tile_stride``) over every
+    scene. Each Prithvi/ViT crop carries a tent-shaped class-1 response
+    (~5x core/border), and because the lattice is phase-locked to the same UTM
+    grid across all ~179 scenes, the per-pixel composite stacks every tent at
+    the same pixels into a saturated grid of squares.
+
+    Shifting the crop-grid ORIGIN by a per-scene ``(dy, dx)`` makes the tent
+    land at different pixels each scene, so a percentile composite (p85)
+    averages it out instead of reinforcing it. The offset is derived from a
+    stable per-scene key (the STAC ``item_id``) mixed with ``seed`` via blake2b
+    — NOT Python ``hash`` (salted, non-reproducible) — so the choice is
+    deterministic (non-negotiable #4) and independent of input order.
+
+    Returns ``(0, 0)`` when ``tile_stride <= 1`` (no room to jitter).
+    """
+    if tile_stride <= 1:
+        return 0, 0
+    digest = hashlib.blake2b(f"{seed}:{item_id}".encode(), digest_size=8).digest()
+    dy = int.from_bytes(digest[:4], "big") % tile_stride
+    dx = int.from_bytes(digest[4:], "big") % tile_stride
+    return dy, dx
+
+
 def _scene_probability(
     item: pystac.Item,
     handle: ModelHandle,
@@ -338,11 +491,20 @@ def _scene_probability(
     scl_mask_classes: tuple[int, ...],
     tile_size: int,
     tile_stride: int,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Class-1 softmax for one scene on the common grid; NaN where masked.
 
     Returns `(prob, x_coords, y_coords)` or None when no valid pixel survives
     the SCL/no-data mask.
+
+    When `tile_origin_jitter` is set the crop-grid origin is shifted by a
+    deterministic per-scene `(dy, dx)` (see `scene_origin_offset`) before
+    `tiled_inference` and the shift is inverted on the returned probability, so
+    the per-crop ViT centre-bias tent lands at different pixels each scene and a
+    percentile composite averages it out instead of phase-locking it into a
+    saturated grid (WU-10 de-grid fix).
     """
     import numpy as np
     import stackstac
@@ -373,14 +535,34 @@ def _scene_probability(
         logger.info("[burn-scar]   %s: fully masked on AOI grid, skipped", item.id)
         return None
 
-    offset = _boa_offset(item)
-    refl = np.clip((bands - offset) / 10000.0, 0.0, None)
-    refl = np.where(valid[None, :, :], refl, 0.0)  # no_data_replace=0, per model config
     means = np.asarray(handle.means, dtype=np.float32)[:, None, None]
     stds = np.asarray(handle.stds, dtype=np.float32)[:, None, None]
+    offset = _boa_offset(item)
+    refl = np.clip((bands - offset) / 10000.0, 0.0, None)
+    # Masked pixels are replaced with the per-band reflectance MEAN so they
+    # normalise to ~0.0 (neutral) rather than -mean/std (a strongly negative,
+    # out-of-distribution value the US-HLS fine-tune never saw). This closes a
+    # latent fragility flagged in WU-10 — not the root cause of the grid, but a
+    # cleaner no-data treatment than the old `0.0` fill.
+    refl = np.where(valid[None, :, :], refl, means)
     normed = ((refl - means) / stds).astype(np.float32)
 
     normed, orig_h, orig_w = _pad_to_min(normed, tile_size, tile_size)
+
+    dy, dx = (0, 0)
+    if tile_origin_jitter:
+        dy, dx = scene_origin_offset(item.id, tile_stride, seed=seed)
+        if dy or dx:
+            # Reflect-pad the top/left by (dy, dx) so the crop lattice that
+            # tiled_inference anchors at (0, 0) now starts (dy, dx) earlier
+            # relative to the real scene — i.e. the origin is jittered. Reflect
+            # (not edge/zero) keeps the padded border in-distribution. The shift
+            # is inverted by slicing [dy:dy+H, dx:dx+W] off the result below.
+            normed = np.pad(normed, [(0, 0), (dy, 0), (dx, 0)], mode="reflect")
+            # tiled_inference still needs the array to cover at least one crop.
+            normed, _, _ = _pad_to_min(normed, tile_size, tile_size)
+        logger.info("[burn-scar]   %s: crop-origin jitter (dy=%d, dx=%d)", item.id, dy, dx)
+
     model = handle.model
 
     def forward(x: torch.Tensor) -> torch.Tensor:
@@ -402,9 +584,20 @@ def _scene_probability(
             device=handle.device,
             verbose=False,
         )
-    prob = probs[0, 1].cpu().numpy()[:orig_h, :orig_w].astype(np.float32)
+    # Invert the origin jitter: drop the (dy, dx) reflect-pad, then crop to the
+    # original (unpadded) scene extent. np.ascontiguousarray makes an owned copy
+    # so the in-place NaN mask below does not alias the padded buffer.
+    prob_full = probs[0, 1].cpu().numpy().astype(np.float32)
+    prob = np.ascontiguousarray(prob_full[dy : dy + orig_h, dx : dx + orig_w])
     prob[~valid] = np.nan
     return prob, arr.x.values, arr.y.values
+
+
+#: Row-block height (pixels) for the block-wise stack reduction. Reading a
+#: `(n_scene, _REDUCE_BLOCK_ROWS, W)` slab across all scenes at once bounds peak
+#: RAM regardless of scene count: at W~3500 / 179 scenes a 256-row block is
+#: ~0.6 GB, vs ~9 GB to hold every full-res scene array simultaneously.
+_REDUCE_BLOCK_ROWS = 256
 
 
 def infer_burn_probability(
@@ -414,17 +607,69 @@ def infer_burn_probability(
     *,
     s2_assets: tuple[str, ...],
     scl_mask_classes: tuple[int, ...],
+    reducer: str = "max",
     tile_size: int = 512,
     tile_stride: int = 448,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> xr.DataArray:
-    """Max-composite burn-scar inference probability over `items`, clipped to `aoi`.
+    """Composite burn-scar inference scores over `items`, clipped to `aoi`.
 
-    Scenes are processed one at a time in the given (deterministic) order on
-    a shared 10 m grid in the items' majority UTM zone; per-scene SAS signing
-    keeps tokens fresh on long runs. The composite is reprojected to
-    EPSG:4326 with nearest resampling (explicit CRS, non-negotiable #2) and
-    clipped to the AOI polygon; masked pixels are NaN.
+    `reducer="max"` is bit-identical to the legacy np.fmax composite. Thin
+    single-reducer wrapper over `infer_burn_probability_multi` — see there for
+    the streaming / memory-bounded details and the `tile_origin_jitter` de-grid.
     """
+    return infer_burn_probability_multi(
+        items,
+        model_handle,
+        aoi,
+        s2_assets=s2_assets,
+        scl_mask_classes=scl_mask_classes,
+        reducers=(reducer,),
+        tile_size=tile_size,
+        tile_stride=tile_stride,
+        tile_origin_jitter=tile_origin_jitter,
+        seed=seed,
+    )[reducer]
+
+
+def infer_burn_probability_multi(
+    items: list[pystac.Item],
+    model_handle: ModelHandle,
+    aoi: BaseGeometry,
+    *,
+    s2_assets: tuple[str, ...],
+    scl_mask_classes: tuple[int, ...],
+    reducers: tuple[str, ...] = ("max",),
+    tile_size: int = 512,
+    tile_stride: int = 448,
+    tile_origin_jitter: bool = False,
+    seed: int = DEFAULT_SEED,
+) -> dict[str, xr.DataArray]:
+    """Composite burn-scar scores under one or more reducers in a single pass.
+
+    Scenes are processed one at a time in the given (deterministic) order on a
+    shared 10 m grid in the items' majority UTM zone; per-scene SAS signing
+    keeps tokens fresh on long runs. Each scene's per-pixel score is streamed
+    to an on-disk memmap stack so peak RAM stays bounded (`_REDUCE_BLOCK_ROWS`
+    rows × every scene at a time), never the whole ~179-scene stack at once.
+    After the loop the stack is reduced block-wise by each `reduce_stack(name)`,
+    reprojected to EPSG:4326 (nearest, explicit CRS — non-negotiable #2) and
+    clipped to the AOI; masked pixels are NaN. Returns ``{reducer: DataArray}``.
+
+    When `tile_origin_jitter` is set, each scene's crop-grid origin is shifted by
+    a deterministic per-scene offset (seeded by `seed` + item id) so the per-crop
+    ViT centre-bias tent does not phase-lock into a saturated grid across the
+    stack (WU-10 de-grid). The offset is inverted per scene, so the composites
+    stay on the common grid.
+
+    Emitting several candidate composites from the SAME scene stack is how the
+    WU-10 validation harness picks a reducer data-drivenly without paying for
+    inference once per candidate.
+    """
+    import shutil
+    import tempfile
+
     import numpy as np
     import rioxarray  # noqa: F401  (registers the .rio accessor)
     import xarray as xr
@@ -433,6 +678,12 @@ def infer_burn_probability(
 
     if not items:
         raise ValueError("no S2 items to infer over — query_recent_s2 returned an empty list")
+    if not reducers:
+        raise ValueError("at least one reducer is required")
+    # Validate every reducer string up front so a long pilot run never reaches
+    # the reduce step only to fail on a typo.
+    for name in reducers:
+        _validate_reducer_name(name)
     _apply_gdal_http_defaults()
 
     epsg_counts = Counter(_item_epsg(it) for it in items)
@@ -446,61 +697,131 @@ def infer_burn_probability(
         )
     bounds = transform_bounds("EPSG:4326", f"EPSG:{epsg}", *aoi.bounds)
 
-    composite: np.ndarray | None = None
+    # Stream each scene's score into an on-disk memmap stack so we never hold
+    # every full-res scene array in RAM at once (CLAUDE.md verify-then-act /
+    # the WU-10 memory budget on a single 24 GB GPU host).
+    tmpdir = tempfile.mkdtemp(prefix="burn_scar_stack_")
+    stack_path = Path(tmpdir) / "scene_stack.dat"
+    stack: np.memmap | None = None
     xs: np.ndarray | None = None
     ys: np.ndarray | None = None
-    for i, item in enumerate(items, start=1):
-        logger.info("[burn-scar] scene %d/%d %s", i, len(items), item.id)
-        result = None
-        for attempt in range(1, _SCENE_ATTEMPTS + 1):
-            try:
-                result = _scene_probability(
-                    item,
-                    model_handle,
-                    s2_assets=s2_assets,
-                    bounds=bounds,
-                    epsg=epsg,
-                    scl_mask_classes=scl_mask_classes,
-                    tile_size=tile_size,
-                    tile_stride=tile_stride,
+    n_used = 0
+    try:
+        for i, item in enumerate(items, start=1):
+            logger.info("[burn-scar] scene %d/%d %s", i, len(items), item.id)
+            result = None
+            for attempt in range(1, _SCENE_ATTEMPTS + 1):
+                try:
+                    result = _scene_probability(
+                        item,
+                        model_handle,
+                        s2_assets=s2_assets,
+                        bounds=bounds,
+                        epsg=epsg,
+                        scl_mask_classes=scl_mask_classes,
+                        tile_size=tile_size,
+                        tile_stride=tile_stride,
+                        tile_origin_jitter=tile_origin_jitter,
+                        seed=seed,
+                    )
+                    break
+                except Exception as exc:
+                    # Transient blob/network failures, including a SAS token
+                    # that expired mid-scene. Drop the cached token and retry
+                    # with delays that outlast PC's server-side token rotation.
+                    _SAS_CACHE.clear()
+                    if attempt == _SCENE_ATTEMPTS:
+                        raise RuntimeError(
+                            f"scene {item.id} failed after {attempt} attempt(s)"
+                        ) from exc
+                    delay = _SCENE_RETRY_DELAYS_S[attempt - 1]
+                    logger.warning(
+                        "[burn-scar]   %s attempt %d/%d failed (%s); re-signing, retrying in %ds",
+                        item.id,
+                        attempt,
+                        _SCENE_ATTEMPTS,
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+            if result is None:
+                continue
+            prob, xs, ys = result
+            if stack is None:
+                # First surviving scene fixes the grid; size the memmap for the
+                # worst case (every item contributes) — unused trailing scenes
+                # are simply never reduced over.
+                stack = np.memmap(
+                    stack_path,
+                    dtype=np.float32,
+                    mode="w+",
+                    shape=(len(items), prob.shape[0], prob.shape[1]),
                 )
-                break
-            except Exception as exc:
-                # Transient blob/network failures, including a SAS token that
-                # expired mid-scene. Drop the cached token and retry with
-                # delays that outlast PC's server-side token rotation.
-                _SAS_CACHE.clear()
-                if attempt == _SCENE_ATTEMPTS:
-                    raise RuntimeError(
-                        f"scene {item.id} failed after {attempt} attempt(s)"
-                    ) from exc
-                delay = _SCENE_RETRY_DELAYS_S[attempt - 1]
-                logger.warning(
-                    "[burn-scar]   %s attempt %d/%d failed (%s); re-signing, retrying in %ds",
-                    item.id,
-                    attempt,
-                    _SCENE_ATTEMPTS,
-                    exc,
-                    delay,
+            elif prob.shape != stack.shape[1:]:
+                raise ValueError(
+                    f"scene {item.id} grid {prob.shape} != reference {stack.shape[1:]}"
                 )
-                time.sleep(delay)
-        if result is None:
-            continue
-        prob, xs, ys = result
-        composite = prob if composite is None else np.fmax(composite, prob)
+            stack[n_used] = prob
+            n_used += 1
 
-    if composite is None or xs is None or ys is None:
-        raise ValueError(
-            f"all {len(items)} scene(s) were fully masked over the AOI — "
-            "nothing to composite (clouds/no-data); widen the window"
+        if stack is None or xs is None or ys is None:
+            raise ValueError(
+                f"all {len(items)} scene(s) were fully masked over the AOI — "
+                "nothing to composite (clouds/no-data); widen the window"
+            )
+        stack.flush()
+        used = stack[:n_used]
+        logger.info(
+            "[burn-scar] reducing %d scene(s) with %s in %d-row blocks",
+            n_used,
+            list(reducers),
+            _REDUCE_BLOCK_ROWS,
         )
+        composites = {name: _reduce_stack_blockwise(used, name) for name in reducers}
+    finally:
+        # Release the memmap before deleting its backing file.
+        stack = None
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-    da = xr.DataArray(composite, dims=("y", "x"), coords={"y": ys, "x": xs})
-    da = da.rio.write_crs(f"EPSG:{epsg}")
-    da = da.rio.write_nodata(np.nan)
-    da4326 = da.rio.reproject(OUTPUT_CRS, resampling=Resampling.nearest, nodata=np.nan)
-    clipped = da4326.rio.clip([mapping(aoi)], crs=OUTPUT_CRS, drop=True, all_touched=True)
-    return clipped
+    def _finalise(arr: np.ndarray) -> xr.DataArray:
+        da = xr.DataArray(arr, dims=("y", "x"), coords={"y": ys, "x": xs})
+        da = da.rio.write_crs(f"EPSG:{epsg}")
+        da = da.rio.write_nodata(np.nan)
+        da4326 = da.rio.reproject(OUTPUT_CRS, resampling=Resampling.nearest, nodata=np.nan)
+        return da4326.rio.clip([mapping(aoi)], crs=OUTPUT_CRS, drop=True, all_touched=True)
+
+    return {name: _finalise(arr) for name, arr in composites.items()}
+
+
+def _validate_reducer_name(reducer: str) -> None:
+    """Raise `ValueError` now if `reducer` is not a name `reduce_stack` accepts."""
+    if reducer == "max" or reducer in _PERCENTILE_REDUCERS:
+        return
+    if reducer.startswith("consensus_"):
+        _parse_consensus_fraction(reducer)
+        return
+    raise ValueError(
+        f"unrecognised reducer {reducer!r}; expected one of "
+        "max | median | p75 | p85 | p90 | consensus_N"
+    )
+
+
+def _reduce_stack_blockwise(stack: np.ndarray, reducer: str) -> np.ndarray:
+    """`reduce_stack` applied in row blocks so peak RAM stays bounded.
+
+    Identical output to `reduce_stack(stack, reducer)` — the blocking only
+    controls how many scene rows are materialised at once.
+    """
+    import numpy as np
+
+    _n_scene, height, width = stack.shape
+    out = np.empty((height, width), dtype=np.float32)
+    for y0 in range(0, height, _REDUCE_BLOCK_ROWS):
+        y1 = min(y0 + _REDUCE_BLOCK_ROWS, height)
+        # np.asarray pulls just this block off the memmap into RAM.
+        block = np.asarray(stack[:, y0:y1, :], dtype=np.float32)
+        out[y0:y1, :] = reduce_stack(block, reducer)
+    return out
 
 
 def write_stac_item(
@@ -592,8 +913,8 @@ def write_stac_item(
             href=str(cog_path.resolve()),
             title="Burn-scar inference probability (Prithvi-Burn-Scar class-1 softmax)",
             description=(
-                "Max-composite over the trailing S2 L2A window; relative model "
-                "score in [0, 1], nodata -9999. Not a calibrated probability, "
+                f"{run.reducer}-composite over the trailing S2 L2A window; relative "
+                "model score in [0, 1], nodata -9999. Not a calibrated probability, "
                 "not a fire forecast."
             ),
             media_type="image/tiff; application=geotiff; profile=cloud-optimized",
@@ -632,8 +953,8 @@ def write_burn_scar_cog(da: xr.DataArray, path: Path, provenance: BurnScarRun) -
         "HF_REVISION_SHA": provenance.hf_revision_sha,
         "VALUE_DESCRIPTION": (
             "burn-scar inference probability (Prithvi-Burn-Scar class-1 softmax, "
-            "max-composited over the trailing S2 L2A window); relative model "
-            "score, not a calibrated probability and not a fire forecast"
+            f"{provenance.reducer}-composited over the trailing S2 L2A window); relative "
+            "model score, not a calibrated probability and not a fire forecast"
         ),
     }
     out.rio.to_raster(path, driver="COG", compress="deflate", tags=tags)

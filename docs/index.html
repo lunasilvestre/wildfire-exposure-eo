@@ -70,9 +70,12 @@
       </div>
       <div class="layer-row">
         <label><input type="checkbox" id="toggle-burnscar"> Burn-scar inference <span class="tag input">input</span></label>
-        <p class="caption">Prithvi-EO-2.0 burn-scar <em>inference probability</em> (max-composite,
-          Jun 2025–Jun 2026 Sentinel-2 window): detection of already-burned areas — not a calibrated
-          probability, not a fire forecast. Streamed from Cloudflare R2 (~49 MB COG; loads on toggle).</p>
+        <p class="caption">Prithvi-EO-2.0 burn-scar <em>inference score</em> (de-grid p85 composite,
+          Jun 2025–Jun 2026 Sentinel-2 window): detection of already-burned areas. As a recent-scar
+          detector against ICNF 2023–2025 burns it reaches F1 0.64 (precision 0.81 at the 0.5 threshold).
+          Shown with value-driven opacity — transparent below 0.3, ramping to full at 1.0 — so genuine
+          scars stand out; the underlying COG is a continuous relative score, <em>not</em> a calibrated
+          probability and <em>not</em> a fire forecast. Streamed from Cloudflare R2 (~46 MB COG; loads on toggle).</p>
       </div>
       <div class="layer-row">
         <label><input type="checkbox" id="toggle-burns"> ICNF burn perimeters <span class="tag input">input</span></label>
@@ -96,9 +99,9 @@
         <div class="ramp-labels"><span id="ramp-rank-low">rank n (least exposed)</span><span>rank 1 (most exposed)</span></div>
       </div>
       <div id="legend-burnscar" hidden>
-        <h3>Burn-scar inference probability</h3>
+        <h3>Burn-scar inference score</h3>
         <canvas id="ramp-ylorrd" width="220" height="12"></canvas>
-        <div class="ramp-labels"><span>0</span><span>1 (relative model score)</span></div>
+        <div class="ramp-labels"><span>0.3 (display floor)</span><span>1 (relative model score)</span></div>
       </div>
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>

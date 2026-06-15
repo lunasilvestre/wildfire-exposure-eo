@@ -425,6 +425,11 @@ def infer_burn_scar(
         max_cloud_cover=bs_config.inference.s2_max_cloud_cover,
         window_end=end,
     )
+    items = burn_scar_mod.filter_to_season(
+        items,
+        season_start_month=bs_config.inference.season_start_month,
+        season_end_month=bs_config.inference.season_end_month,
+    )
     if not items:
         console.print("[red]no S2 items in the trailing window — nothing to infer[/]")
         raise typer.Exit(code=1)
@@ -435,8 +440,10 @@ def infer_burn_scar(
         geometry,
         s2_assets=bs_config.inference.s2_assets,
         scl_mask_classes=bs_config.inference.scl_mask_classes,
+        reducer=bs_config.inference.reducer,
         tile_size=bs_config.inference.tile_size,
         tile_stride=bs_config.inference.tile_stride,
+        tile_origin_jitter=bs_config.inference.tile_origin_jitter,
     )
 
     from importlib.metadata import version as pkg_version
@@ -459,6 +466,12 @@ def infer_burn_scar(
         s2_max_cloud_cover=bs_config.inference.s2_max_cloud_cover,
         s2_item_ids=tuple(it.id for it in items),
         scl_mask_classes=bs_config.inference.scl_mask_classes,
+        reducer=bs_config.inference.reducer,
+        season_start_month=bs_config.inference.season_start_month,
+        season_end_month=bs_config.inference.season_end_month,
+        tile_origin_jitter=bs_config.inference.tile_origin_jitter,
+        tile_size=bs_config.inference.tile_size,
+        tile_stride=bs_config.inference.tile_stride,
         binarisation_threshold=bs_config.inference.binarisation_threshold,
         output_crs=burn_scar_mod.OUTPUT_CRS,
         resampling=burn_scar_mod.RESAMPLING,

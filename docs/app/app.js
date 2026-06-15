@@ -106,8 +106,8 @@ function fillDownloads(style) {
     [`${RAW}/stac/fuel-layer/fuel-layer-${fuelRun}/fuel_class_${fuelRun}.tif`,
       "Fuel-class COG (EPSG:32629, authoritative)", "1.0 MB"],
     [a.burn_scar.href.replace("burn_scar_3857_", "burn_scar_"),
-      "Burn-scar inference-probability COG (EPSG:4326, authoritative)", "38 MB"],
-    [a.burn_scar.href, "Burn-scar COG, EPSG:3857 display copy", "49 MB"],
+      "Burn-scar inference-score COG (EPSG:4326, authoritative)", "36 MB"],
+    [a.burn_scar.href, "Burn-scar COG, EPSG:3857 display copy", "46 MB"],
     [a.icnf_burns.href, "ICNF burn perimeters 1990–2025 — GeoJSON (EPSG:4326)", "8 MB"],
   ];
   document.getElementById("downloads-list").innerHTML = items
@@ -252,14 +252,23 @@ async function main() {
     }
   });
 
+  /* Burn-scar display: value-driven alpha. The COG stays a continuous
+   * inference-score raster in [0, 1]; we only change how it is painted.
+   * Scores below BURN_ALPHA_FLOOR are fully transparent (kills the low-score
+   * "wash"); above it the YlOrRd hue is kept and opacity ramps linearly to
+   * full at 1.0, so genuine scars stand out. Keep this rule in sync with
+   * scripts/17_burn_scar_optimization_figures.py (ALPHA_FLOOR). The score is a
+   * relative model output, never a calibrated probability or a forecast. */
+  const BURN_ALPHA_FLOOR = 0.3;
   const burnScarUrl = style.artifacts.burn_scar.href;
   MaplibreCOGProtocol.setColorFunction(burnScarUrl, (pixel, color, metadata) => {
     const p = pixel[0];
-    if (p === metadata.noData || !(p >= 0)) {
+    if (p === metadata.noData || !(p >= BURN_ALPHA_FLOOR)) {
       color.set([0, 0, 0, 0]);
     } else {
       const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
-      color.set([...style.ylorrd_lut[idx], 255]);
+      const alpha = Math.round(255 * Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)));
+      color.set([...style.ylorrd_lut[idx], alpha]);
     }
   });
 
