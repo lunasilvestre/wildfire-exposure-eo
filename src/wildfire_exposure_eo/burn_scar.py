@@ -2,8 +2,10 @@
 
 Runs the pretrained `Prithvi-EO-2.0-300M-BurnScars` checkpoint (inference
 only, frozen weights) over the trailing window of Sentinel-2 L2A scenes and
-composites a single per-pixel max raster of the model's class-1 softmax
-score, written as a COG with full provenance.
+composites a single per-pixel raster of the model's class-1 softmax score
+under the configured reducer (`reduce_stack`: max | median | p75 | p85 | p90 |
+consensus_N — WU-10), written as a COG with full provenance. `max` is
+bit-identical to the original np.fmax composite.
 
 Terminology guard (CLAUDE.md): this detects burn *scars* — post-event
 spectral signatures of fires that already happened. The raster value is a
