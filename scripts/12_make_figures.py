@@ -469,6 +469,7 @@ def make_fig1(
     aoi_label: str,
     t0: str,
     fuel_path: Path | None = None,
+    burns: gpd.GeoDataFrame | None = None,
 ) -> None:
     """Headline map: critical-infrastructure assets coloured by exposure rank.
 
@@ -483,33 +484,40 @@ def make_fig1(
     # Soft geographic backdrop from existing repo data (AOI fill + fuel wash).
     _draw_context_base(ax, aoi, fuel_path)
 
-    # Sort by rank descending so high-rank (most exposed) plots on top.
-    gdf_sorted = gdf.sort_values("exposure_rank", ascending=False)
-    n = len(gdf_sorted)
-    decile_cut = max(1, n // 10)
+    # Recent-burn context: shade where it actually burned (ICNF truth years) so
+    # the exposed assets read against real fire history.
+    if burns is not None and not burns.empty:
+        recent = burns[burns["vintage_year"].isin(_TRUTH_YEARS)].to_crs("EPSG:4326")
+        if not recent.empty:
+            recent.plot(ax=ax, facecolor="#e8553f", edgecolor="none", alpha=0.16, zorder=1)
 
-    # Use centroids for all geometry types (lines/polygons → centroid).
-    # Geographic-CRS centroid warning is harmless for point-plot purposes.
+    # Declutter (variant C): the other ~90% of assets are a muted grey context;
+    # only the most-exposed decile carries the viridis rank, so it reads instantly
+    # against the recent-burn backdrop. Top-10 starred to anchor the eye.
+    n = len(gdf)
+    decile_cut = max(1, n // 10)
+    is_top = gdf["exposure_rank"] <= decile_cut
+    rest = gdf.loc[~is_top]
+    top = gdf.loc[is_top].sort_values("exposure_rank", ascending=False)
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        cx = gdf_sorted.geometry.centroid.x.to_numpy()
-        cy = gdf_sorted.geometry.centroid.y.to_numpy()
+        rx = rest.geometry.centroid.x.to_numpy()
+        ry = rest.geometry.centroid.y.to_numpy()
+        tx = top.geometry.centroid.x.to_numpy()
+        ty = top.geometry.centroid.y.to_numpy()
 
-    # Top decile drawn larger with a white halo so it pops off the basemap.
-    is_top = (gdf_sorted["exposure_rank"] <= decile_cut).to_numpy()
-    sizes: list[float] = [34.0 if t else 11.0 for t in is_top]
-    edges: list[str] = ["white" if t else "#33333355" for t in is_top]
-    lws: list[float] = [0.7 if t else 0.2 for t in is_top]
-
+    ax.scatter(rx, ry, c="#9aa0a6", s=5, alpha=0.45, linewidths=0, zorder=2)
     sc = ax.scatter(
-        cx,
-        cy,
-        c=gdf_sorted["rank_norm"],
+        tx,
+        ty,
+        c=top["rank_norm"],
         cmap="viridis",
-        s=sizes,
-        linewidths=lws,
-        edgecolors=edges,
-        alpha=0.9,
+        vmin=0.0,
+        vmax=1.0,
+        s=34,
+        linewidths=0.4,
+        edgecolors="white",
         zorder=3,
     )
     cbar = fig.colorbar(sc, ax=ax, fraction=0.035, pad=0.01)
@@ -520,8 +528,7 @@ def make_fig1(
     cbar.set_ticks([0.0, 1.0])
     cbar.set_ticklabels(["least", "most"])
 
-    # Star the top-10 to anchor the eye, then describe the decile in the legend.
-    top10 = gdf_sorted.head(10)
+    top10 = gdf.sort_values("exposure_rank").head(10)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         _tx = top10.geometry.centroid.x
@@ -531,7 +538,7 @@ def make_fig1(
         _ty,
         facecolors="none",
         edgecolors="#d7191c",
-        s=110,
+        s=130,
         marker="*",
         linewidths=1.1,
         zorder=4,
@@ -541,11 +548,26 @@ def make_fig1(
         [],
         [],
         s=34,
-        c="#440154",
+        c="#5b8def",
         edgecolors="white",
-        linewidths=0.7,
+        linewidths=0.5,
         label=f"Top decile (top {decile_cut} of {n:,})",
     )
+    ax.scatter([], [], s=6, c="#9aa0a6", label="other assets")
+    if (
+        burns is not None
+        and not burns.empty
+        and not burns[burns["vintage_year"].isin(_TRUTH_YEARS)].empty
+    ):
+        ax.scatter(
+            [],
+            [],
+            marker="s",
+            s=80,
+            c="#e8553f",
+            alpha=0.5,
+            label=f"recent burns (ICNF {_TRUTH_YEARS[0]}–{_TRUTH_YEARS[-1]})",
+        )
     leg = ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
     leg.set_zorder(7)
 
@@ -574,8 +596,9 @@ def make_fig1(
     ax.text(
         0.5,
         1.012,
-        f"{len(gdf):,} OSM assets ranked by a transparent open-data exposure score "
-        f"(inputs ≤ {t0}). Rank is relative within the AOI — not a fire probability.",
+        f"{len(gdf):,} OSM assets by relative exposure rank, shown against recent ICNF "
+        f"{_TRUTH_YEARS[0]}–{_TRUTH_YEARS[-1]} burns (inputs ≤ {t0}). "
+        f"Rank is relative within the AOI — not a fire probability.",
         ha="center",
         va="bottom",
         transform=ax.transAxes,
@@ -1307,6 +1330,7 @@ def main() -> None:
         aoi_label=aoi_label,
         t0=t0,
         fuel_path=fuel_path,
+        burns=burns,
     )
     make_fig2(fuel_path, crosswalk, _FIGS_DIR / f"fig2_fuel_layer{suffix}.png", aoi=aoi)
     reducer_label = str(burn_sidecar.get("reducer", "de-grid p85"))
