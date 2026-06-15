@@ -40,7 +40,8 @@ import numpy as np
 import rasterio
 import rioxarray  # noqa: F401  — required for .rio accessor
 import yaml
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import BoundaryNorm, ListedColormap, Normalize
+from matplotlib.patheffects import withStroke
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.warp import calculate_default_transform, reproject
@@ -64,9 +65,38 @@ _SCORE_YAML = _ROOT / "config" / "exposure_score.yaml"
 _AOI_PILOT = _ROOT / "data" / "aoi" / "pilot.geojson"
 _AOI_SMOKE = _ROOT / "data" / "aoi" / "smoke.geojson"
 
+_DIAG_DIR = _ROOT / "outputs" / "diagnostics"
+
 _FIGSIZE = (10, 7)
 _SEED = 42
 rng = np.random.default_rng(_SEED)
+
+# Canonical de-grid p85 burn-scar composite (WU-10) — the published recent-scar
+# detector. Pinned explicitly because the lexical-latest glob would otherwise
+# pick the pre-de-grid `burn_scar_wu10multi_p85_*` run; this is the adopted COG
+# (run 20260615T192025Z, tile_origin_jitter=true). Its provenance sidecar carries
+# a different stem, so it is resolved separately in load_burn_scar_pilot().
+_BURN_SCAR_DEGRID_COG = "burn_scar_20260615T192025Z.tif"
+_BURN_SCAR_DEGRID_SIDECAR = "burn_scar_wu10degrid_p85_20260615T192025Z.json"
+
+# Site display rule for the burn-scar layer (mirrors docs/app/app.js and
+# scripts/17): transparent below ALPHA_FLOOR, then opacity ramps as
+# BASE + (1-BASE) * t**GAMMA with t = (p - floor) / (1 - floor). Keep in sync.
+_ALPHA_FLOOR = 0.25
+_ALPHA_BASE = 0.30
+_ALPHA_GAMMA = 0.6
+
+# Recent multi-year ICNF vintages used as the burn-scar detection truth.
+_TRUTH_YEARS = (2023, 2024, 2025)
+
+# Municipality seats of the pilot AOI (Aveiro, PT-01) — public town-centre
+# coordinates, ordered as they sit in the AOI (NW → S). Used only to label the
+# three named municipalities on the headline map; not an analysis input.
+_MUNICIPALITIES: tuple[tuple[str, float, float], ...] = (
+    ("Oliveira de Azeméis", -8.4773, 40.8404),
+    ("Albergaria-a-Velha", -8.4814, 40.6919),
+    ("Sever do Vouga", -8.3686, 40.7300),
+)
 
 # --------------------------------------------------------------------------- #
 # Attribution footer (every figure)
@@ -138,6 +168,42 @@ def load_fuel_cog_path(*, smoke: bool) -> Path:
 def load_burn_scar_cog_path(*, smoke: bool) -> Path:
     """Path to the latest burn-scar COG (pilot or smoke)."""
     return _latest("burn_scar", _COG_DIR, ".tif", smoke=smoke)
+
+
+def load_burn_scar_pilot() -> tuple[Path, dict]:  # type: ignore[type-arg]
+    """Resolve the canonical de-grid p85 burn-scar COG and its provenance sidecar.
+
+    Returns ``(cog_path, sidecar_dict)``. Pinned to the adopted WU-10 run; the
+    COG and its sidecar carry different stems, so we resolve the sidecar by name
+    rather than ``cog_path.with_suffix('.json')``. Falls back to the lexical
+    latest only if the pinned COG is absent (keeps the script runnable on a
+    partial checkout).
+    """
+    cog = _COG_DIR / _BURN_SCAR_DEGRID_COG
+    sidecar = _COG_DIR / _BURN_SCAR_DEGRID_SIDECAR
+    if cog.exists() and sidecar.exists():
+        return cog, json.loads(sidecar.read_text())
+    cog = load_burn_scar_cog_path(smoke=False)
+    return cog, json.loads(cog.with_suffix(".json").read_text())
+
+
+def load_multiyear_detection(*, smoke: bool) -> dict:  # type: ignore[type-arg]
+    """Load the latest WU-10 multi-year burn-scar detection metrics JSON.
+
+    Produced by ``scripts/16_burn_scar_multiyear_validate.py`` — the recent-scar
+    detection validation (no leakage gate; that gate binds the forecasting score,
+    not detection). Returns the parsed payload; raises if none is present.
+    """
+    pat = "16_multiyear_detection_smoke.json" if smoke else "16_multiyear_detection_[0-9]*.json"
+    cands = sorted(_DIAG_DIR.glob(pat))
+    if not smoke:
+        cands = [c for c in cands if "_smoke" not in c.name]
+    if not cands:
+        raise FileNotFoundError(
+            f"No artefact matching {pat!r} in {_DIAG_DIR}. "
+            "Run scripts/16_burn_scar_multiyear_validate.py first."
+        )
+    return json.loads(cands[-1].read_text())
 
 
 def load_burns(*, smoke: bool) -> gpd.GeoDataFrame:
@@ -278,89 +344,243 @@ def _add_attribution(ax: matplotlib.axes.Axes) -> None:
     )
 
 
+def _add_north_arrow(ax: matplotlib.axes.Axes) -> None:
+    """Small north arrow at the upper-left of the axes (axes-fraction coords)."""
+    x, y = 0.045, 0.88
+    ax.annotate(
+        "N",
+        xy=(x, y),
+        xytext=(x, y - 0.075),
+        xycoords="axes fraction",
+        textcoords="axes fraction",
+        ha="center",
+        va="center",
+        fontsize=9,
+        fontweight="bold",
+        color="#222222",
+        arrowprops={"arrowstyle": "-|>", "lw": 1.6, "color": "#222222"},
+        path_effects=[withStroke(linewidth=2.5, foreground="white")],
+    )
+
+
+def _label_municipalities(ax: matplotlib.axes.Axes, bounds: tuple[float, ...]) -> None:
+    """Label the three AOI municipalities at their public town-centre seats.
+
+    Only labels seats that fall inside the current axes extent so smoke-AOI
+    variants (a 1 km tile) are not cluttered with off-frame labels.
+    """
+    minx, miny, maxx, maxy = bounds
+    for name, lon, lat in _MUNICIPALITIES:
+        if not (minx <= lon <= maxx and miny <= lat <= maxy):
+            continue
+        ax.plot(
+            lon,
+            lat,
+            marker="o",
+            markersize=4,
+            markerfacecolor="white",
+            markeredgecolor="#222222",
+            markeredgewidth=0.8,
+            zorder=6,
+        )
+        ax.annotate(
+            name,
+            xy=(lon, lat),
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=7.5,
+            fontweight="bold",
+            color="#1a1a1a",
+            zorder=6,
+            path_effects=[withStroke(linewidth=2.2, foreground="white")],
+        )
+
+
+def _value_driven_rgba(data: np.ndarray, cmap_name: str = "YlOrRd") -> np.ndarray:
+    """Burn-scar colours with the site's value-driven alpha (transparent < floor).
+
+    Mirrors docs/app/app.js and scripts/17: hue from *cmap_name* over [0, 1];
+    alpha 0 below ``_ALPHA_FLOOR``, then ``_ALPHA_BASE + (1-_ALPHA_BASE)*t**GAMMA``
+    with ``t = (p - floor)/(1 - floor)``. NaN → fully transparent.
+    """
+    cmap = plt.get_cmap(cmap_name)
+    norm = Normalize(vmin=0.0, vmax=1.0)
+    rgba = cmap(norm(np.nan_to_num(data, nan=0.0)))
+    span = max(1.0 - _ALPHA_FLOOR, 1e-6)
+    t = np.clip((data - _ALPHA_FLOOR) / span, 0.0, 1.0) ** _ALPHA_GAMMA
+    alpha = _ALPHA_BASE + (1.0 - _ALPHA_BASE) * t
+    alpha[(data < _ALPHA_FLOOR) | ~np.isfinite(data)] = 0.0
+    rgba[..., 3] = alpha
+    return rgba
+
+
+def _draw_context_base(
+    ax: matplotlib.axes.Axes,
+    aoi: gpd.GeoDataFrame,
+    fuel_path: Path | None,
+) -> None:
+    """Soft geographic backdrop from the repo's own layers (no slippy tiles).
+
+    Fills the AOI with a faint land tone and, when a fuel COG is available,
+    paints fuelled (vegetated) land as a muted green wash so the map reads as a
+    landscape rather than dots on white. Non-fuel / nodata stays neutral. All
+    explicit EPSG:4326.
+    """
+    aoi_4326 = aoi.to_crs("EPSG:4326")
+    aoi_4326.plot(ax=ax, facecolor="#f3f1ea", edgecolor="none", zorder=0)
+    if fuel_path is not None:
+        loaded: tuple[np.ndarray, np.ndarray, np.ndarray, float] | None
+        try:
+            loaded = raster_to_epsg4326(fuel_path)
+        except Exception:
+            loaded = None
+        if loaded is not None:
+            data, lons, lats, _ = loaded
+            # Fuelled land (any non-zero fuel code) → faint green; else transparent.
+            veg = np.isfinite(data) & (data > 0)
+            shade = np.full((*data.shape, 4), 0.0, dtype=float)
+            shade[veg] = (0.62, 0.71, 0.55, 0.35)  # muted sage, low opacity
+            extent = (
+                float(lons.min()),
+                float(lons.max()),
+                float(lats.min()),
+                float(lats.max()),
+            )
+            ax.imshow(
+                shade,
+                extent=extent,
+                origin="upper",
+                interpolation="nearest",
+                zorder=1,
+            )
+    aoi_4326.boundary.plot(ax=ax, color="#444444", linewidth=1.0, linestyle="--", zorder=5)
+
+
 # --------------------------------------------------------------------------- #
 # Figure 1 — exposure map (assets coloured by rank)
 # --------------------------------------------------------------------------- #
 
 
 def make_fig1(
-    gdf: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame, out: Path, *, aoi_label: str, t0: str
+    gdf: gpd.GeoDataFrame,
+    aoi: gpd.GeoDataFrame,
+    out: Path,
+    *,
+    aoi_label: str,
+    t0: str,
+    fuel_path: Path | None = None,
 ) -> None:
-    """Assets coloured by exposure rank (viridis, 1 = highest exposure).
+    """Headline map: critical-infrastructure assets coloured by exposure rank.
 
-    *aoi_label* and *t0* come from the loaded artefacts (metrics JSON window),
-    never hardcoded — the smoke and pilot variants carry different values.
+    Geographic context is built from the repo's own layers (no slippy-map
+    tiles): the AOI is filled and outlined, fuelled land is a muted green wash
+    from the fuel COG, and the three pilot municipalities are labelled at their
+    public town-centre seats. The most-exposed decile is emphasised. *aoi_label*
+    and *t0* come from the loaded artefacts, never hardcoded.
     """
     fig, ax = plt.subplots(figsize=_FIGSIZE)
 
-    # Background: fuel severity as light gray reference layer (already local)
-    # (intentionally omitted — no S2 composite available without network fetch;
-    # geographic context comes from asset positions and AOI outline)
+    # Soft geographic backdrop from existing repo data (AOI fill + fuel wash).
+    _draw_context_base(ax, aoi, fuel_path)
 
-    # AOI outline
-    aoi.to_crs("EPSG:4326").boundary.plot(ax=ax, color="#444444", linewidth=0.8, linestyle="--")
-
-    # Sort by rank descending so high-rank (most exposed) plots on top
+    # Sort by rank descending so high-rank (most exposed) plots on top.
     gdf_sorted = gdf.sort_values("exposure_rank", ascending=False)
+    n = len(gdf_sorted)
+    decile_cut = max(1, n // 10)
 
     # Use centroids for all geometry types (lines/polygons → centroid).
-    # Geographic CRS centroid warning is harmless for point-plot purposes.
+    # Geographic-CRS centroid warning is harmless for point-plot purposes.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        centroids = gdf_sorted.geometry.centroid
+        cx = gdf_sorted.geometry.centroid.x.to_numpy()
+        cy = gdf_sorted.geometry.centroid.y.to_numpy()
+
+    # Top decile drawn larger with a white halo so it pops off the basemap.
+    is_top = (gdf_sorted["exposure_rank"] <= decile_cut).to_numpy()
+    sizes: list[float] = [34.0 if t else 11.0 for t in is_top]
+    edges: list[str] = ["white" if t else "#33333355" for t in is_top]
+    lws: list[float] = [0.7 if t else 0.2 for t in is_top]
 
     sc = ax.scatter(
-        centroids.x,
-        centroids.y,
+        cx,
+        cy,
         c=gdf_sorted["rank_norm"],
         cmap="viridis",
-        s=12,
-        linewidths=0.2,
-        edgecolors="#333333",
-        alpha=0.85,
+        s=sizes,
+        linewidths=lws,
+        edgecolors=edges,
+        alpha=0.9,
         zorder=3,
     )
-    cbar = fig.colorbar(sc, ax=ax, fraction=0.03, pad=0.01)
-    cbar.set_label("exposure rank (relative, AOI-normalised)\n1 = highest · 0 = lowest", fontsize=8)
+    cbar = fig.colorbar(sc, ax=ax, fraction=0.035, pad=0.01)
+    cbar.set_label(
+        "wildfire exposure rank (relative, within AOI)\nmost exposed (rank 1) → least exposed",
+        fontsize=8,
+    )
+    cbar.set_ticks([0.0, 1.0])
+    cbar.set_ticklabels(["least", "most"])
 
-    # Mark top-10 most exposed assets
+    # Star the top-10 to anchor the eye, then describe the decile in the legend.
     top10 = gdf_sorted.head(10)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        _cx = top10.geometry.centroid.x
-        _cy = top10.geometry.centroid.y
+        _tx = top10.geometry.centroid.x
+        _ty = top10.geometry.centroid.y
     ax.scatter(
-        _cx,
-        _cy,
-        c="red",
-        s=30,
+        _tx,
+        _ty,
+        facecolors="none",
+        edgecolors="#d7191c",
+        s=110,
         marker="*",
+        linewidths=1.1,
         zorder=4,
         label="Top-10 most exposed",
     )
-    ax.legend(loc="upper right", fontsize=7)
+    ax.scatter(
+        [],
+        [],
+        s=34,
+        c="#440154",
+        edgecolors="white",
+        linewidths=0.7,
+        label=f"Top decile (top {decile_cut} of {n:,})",
+    )
+    leg = ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
+    leg.set_zorder(7)
 
-    minx, miny, maxx, maxy = gdf_sorted.total_bounds
-    ax.set_xlim(minx - 0.02, maxx + 0.02)
-    ax.set_ylim(miny - 0.02, maxy + 0.02)
+    # Frame on the AOI (where the context base, fuel wash and municipality
+    # labels live) padded slightly — this is the AOI-relative analysis frame.
+    # A few line-asset centroids fall just outside; the AOI is the honest extent.
+    abx = aoi.to_crs("EPSG:4326").total_bounds
+    minx, miny, maxx, maxy = abx
+    padx = (maxx - minx) * 0.04
+    pady = (maxy - miny) * 0.04
+    ax.set_xlim(minx - padx, maxx + padx)
+    ax.set_ylim(miny - pady, maxy + pady)
+    ax.set_aspect("auto")
+    _label_municipalities(ax, (minx, miny, maxx, maxy))
     _add_scale_bar(ax, (miny + maxy) / 2, km=5.0)
+    _add_north_arrow(ax)
 
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
-        f"Critical infrastructure — wildfire exposure rank ({aoi_label}, T₀ = {t0})",
-        fontsize=10,
-        pad=18,  # leave room for the caveat line at y=1.01
+        f"Where is critical infrastructure most exposed to wildfire? ({aoi_label})",
+        fontsize=12,
+        fontweight="bold",
+        pad=20,  # leave room for the subtitle line at y=1.01
     )
     ax.text(
         0.5,
-        1.01,
-        "Rank is relative and AOI-normalised; it is not a fire-probability estimate.",
+        1.012,
+        f"{len(gdf):,} OSM assets ranked by a transparent open-data exposure score "
+        f"(inputs ≤ {t0}). Rank is relative within the AOI — not a fire probability.",
         ha="center",
         va="bottom",
         transform=ax.transAxes,
-        fontsize=7,
-        color="#666666",
+        fontsize=7.5,
+        color="#555555",
     )
     _add_attribution(ax)
     fig.tight_layout()
@@ -374,7 +594,13 @@ def make_fig1(
 # --------------------------------------------------------------------------- #
 
 
-def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  # type: ignore[type-arg]
+def make_fig2(
+    fuel_path: Path,
+    crosswalk: dict[int, dict],  # type: ignore[type-arg]
+    out: Path,
+    *,
+    aoi: gpd.GeoDataFrame | None = None,
+) -> None:
     """Fuel classes with NFFL class names in the legend."""
     data, lons, lats, _ = raster_to_epsg4326(fuel_path)
 
@@ -400,7 +626,15 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
     norm = BoundaryNorm(bounds, cmap.N)
 
     fig, ax = plt.subplots(figsize=_FIGSIZE)
-    ax.pcolormesh(lons, lats, display, cmap=cmap, norm=norm, shading="auto")
+    ax.pcolormesh(lons, lats, display, cmap=cmap, norm=norm, shading="auto", zorder=1)
+
+    if aoi is not None:
+        aoi.to_crs("EPSG:4326").boundary.plot(
+            ax=ax, color="#222222", linewidth=1.0, linestyle="--", zorder=3
+        )
+        _label_municipalities(ax, (lons.min(), lats.min(), lons.max(), lats.max()))
+        _add_scale_bar(ax, float((lats.min() + lats.max()) / 2), km=5.0)
+        _add_north_arrow(ax)
 
     # Legend patches
     patches = [mpatches.Patch(color="#cccccc", label="Non-fuel (0)")]
@@ -409,12 +643,14 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
         label = f"NFFL {code}: {entry.get('nffl_name', '?')} ({entry.get('internal_class', '?')})"
         patches.append(mpatches.Patch(color=cmap_base(code_to_idx[code] - 1), label=label))
 
-    ax.legend(handles=patches, loc="upper right", fontsize=6, framealpha=0.85)
+    leg = ax.legend(handles=patches, loc="upper right", fontsize=6, framealpha=0.9)
+    leg.set_zorder(5)
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
         "Fuel-class layer (EFFIS NFFL-13 + DGT COSc crosswalk)",
-        fontsize=10,
+        fontsize=12,
+        fontweight="bold",
         pad=18,  # leave room for the caveat line at y=1.01
     )
     ax.text(
@@ -424,8 +660,8 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
         ha="center",
         va="bottom",
         transform=ax.transAxes,
-        fontsize=7,
-        color="#666666",
+        fontsize=7.5,
+        color="#555555",
     )
     _add_attribution(ax)
     fig.tight_layout()
@@ -439,67 +675,96 @@ def make_fig2(fuel_path: Path, crosswalk: dict[int, dict], out: Path) -> None:  
 # --------------------------------------------------------------------------- #
 
 
-def make_fig3(burn_path: Path, out: Path) -> None:
-    """Burn-scar max-composite (inference probability) with 0.5 threshold contour.
+def make_fig3(
+    burn_path: Path,
+    sidecar: dict,  # type: ignore[type-arg]
+    aoi: gpd.GeoDataFrame,
+    burns: gpd.GeoDataFrame,
+    out: Path,
+    *,
+    reducer_label: str = "de-grid p85",
+) -> None:
+    """De-grid p85 burn-scar composite, rendered with the site display rule.
 
-    Scene count and window come from the COG's provenance sidecar JSON
-    (same stem, ``.json``) — never hardcoded, so smoke and pilot variants
-    carry their own true values.
+    The analysis COG stays a continuous relative-score raster; only the
+    rendering changes (value-driven alpha: transparent below the floor, opacity
+    ramping to full). The ICNF 2023-2025 recent-burn perimeters are overlaid as
+    the detection truth. Scene count / window come from the COG provenance
+    sidecar (never hardcoded). All explicit EPSG:4326.
     """
-    sidecar = json.loads(burn_path.with_suffix(".json").read_text())
-    n_scenes = len(sidecar["s2_item_ids"])
-    window_start = sidecar["window_start"]
-    window_end = sidecar["window_end"]
+    n_scenes = len(sidecar.get("s2_item_ids", []))
+    window_start = sidecar.get("window_start", "?")
+    window_end = sidecar.get("window_end", "?")
 
     data, lons, lats, _ = raster_to_epsg4326(burn_path)
-
-    # Downsample to cap the pixel count (keeps file size under 2 MB).
-    step = max(1, data.shape[0] // 600)
+    # Downsample to cap the pixel count (keeps file size modest).
+    step = max(1, data.shape[0] // 700)
     data = data[::step, ::step]
     lons = lons[::step, ::step]
     lats = lats[::step, ::step]
 
     fig, ax = plt.subplots(figsize=_FIGSIZE)
-    im = ax.pcolormesh(
-        lons,
-        lats,
-        data,
-        cmap="YlOrRd",
-        vmin=0.0,
-        vmax=1.0,
-        shading="auto",
-    )
-    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.01)
-    cbar.set_label("Prithvi burn-scar inference probability (per-pixel, max composite)", fontsize=8)
 
-    # 0.5 threshold contour — suppress UserWarning for all-NaN slices
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        try:
-            ax.contour(lons, lats, data, levels=[0.5], colors=["blue"], linewidths=0.8)
-            ax.plot([], [], color="blue", linewidth=0.8, label="p = 0.50 threshold")
-            ax.legend(loc="upper right", fontsize=7)
-        except Exception:
-            pass
+    # Soft context: AOI fill + outline (no fuel wash here — the scar layer needs
+    # an uncluttered, light backdrop so genuine scars read against it).
+    aoi_4326 = aoi.to_crs("EPSG:4326")
+    aoi_4326.plot(ax=ax, facecolor="#f3f1ea", edgecolor="none", zorder=0)
+
+    # Value-driven alpha rendering (mirrors the site / scripts/17).
+    rgba = _value_driven_rgba(data)
+    extent = (float(lons.min()), float(lons.max()), float(lats.min()), float(lats.max()))
+    ax.imshow(rgba, extent=extent, origin="upper", interpolation="nearest", zorder=2)
+
+    aoi_4326.boundary.plot(ax=ax, color="#444444", linewidth=1.0, linestyle="--", zorder=3)
+
+    # ICNF recent-burn truth (2023-2025) overlaid as outlines.
+    truth = burns[burns["vintage_year"].isin(_TRUTH_YEARS)].to_crs("EPSG:4326")
+    if not truth.empty:
+        truth.boundary.plot(
+            ax=ax,
+            color="#1f4fd8",
+            linewidth=0.9,
+            zorder=4,
+            label=(
+                f"ICNF burns {_TRUTH_YEARS[0]}–{_TRUTH_YEARS[-1]} (truth, {len(truth)} polygons)"
+            ),
+        )
+        ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+
+    # Colorbar reflects the YlOrRd hue (alpha is handled by the display rule).
+    sm = plt.cm.ScalarMappable(cmap=plt.get_cmap("YlOrRd"), norm=Normalize(vmin=0.0, vmax=1.0))
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.035, pad=0.01)
+    cbar.set_label(
+        f"burn-scar inference score (relative; shown ≥ {_ALPHA_FLOOR:g} only)",
+        fontsize=8,
+    )
+
+    _label_municipalities(ax, (extent[0], extent[2], extent[1], extent[3]))
+    ax.set_xlim(extent[0], extent[1])
+    ax.set_ylim(extent[2], extent[3])
+    ax.set_aspect("auto")
+    _add_scale_bar(ax, (extent[2] + extent[3]) / 2, km=5.0)
+    _add_north_arrow(ax)
 
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
-        "Prithvi-EO-2.0 burn-scar inference composite\n"
-        f"(trailing window {window_start} → {window_end})",
-        fontsize=10,
-        pad=28,  # leave room for the wrapped caveat at y=1.01
+        "Recent burn scars detected by Prithvi-EO-2.0 (Sentinel-2)",
+        fontsize=12,
+        fontweight="bold",
+        pad=22,
     )
     ax.text(
         0.5,
-        1.01,
-        f"Max-composite over {n_scenes} Sentinel-2 scenes; values represent max single-scene "
-        "inference probability, not frequency. Use as a relative rank input, not a threshold.",
+        1.012,
+        f"{reducer_label} composite over {n_scenes} scenes "
+        f"({window_start} → {window_end}); the detector fires inside the recent ICNF "
+        "burns. Burn scars of fires that already happened — not ignition prediction.",
         ha="center",
         va="bottom",
         transform=ax.transAxes,
-        fontsize=7,
-        color="#666666",
+        fontsize=7.5,
+        color="#555555",
         wrap=True,
     )
     _add_attribution(ax)
@@ -522,6 +787,7 @@ def make_fig4(
     out: Path,
     *,
     t0: str,
+    fuel_path: Path | None = None,
 ) -> None:
     """Exposure rank (dimmed) with ICNF validation-year burn perimeters on top.
 
@@ -529,7 +795,7 @@ def make_fig4(
     """
     fig, ax = plt.subplots(figsize=_FIGSIZE)
 
-    aoi.to_crs("EPSG:4326").boundary.plot(ax=ax, color="#444444", linewidth=0.8, linestyle="--")
+    _draw_context_base(ax, aoi, fuel_path)
 
     # Assets as dimmed scatter
     with warnings.catch_warnings():
@@ -541,7 +807,7 @@ def make_fig4(
         c=gdf["rank_norm"],
         cmap="viridis",
         s=8,
-        alpha=0.4,
+        alpha=0.45,
         linewidths=0,
         zorder=2,
     )
@@ -575,16 +841,25 @@ def make_fig4(
             color="gray",
         )
 
-    ax.legend(loc="upper right", fontsize=7)
-    minx, miny, maxx, maxy = gdf.total_bounds
-    ax.set_xlim(minx - 0.02, maxx + 0.02)
-    ax.set_ylim(miny - 0.02, maxy + 0.02)
+    leg = ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
+    leg.set_zorder(7)
+    # Frame on the AOI (the analysis frame, where the context base lives).
+    minx, miny, maxx, maxy = aoi.to_crs("EPSG:4326").total_bounds
+    padx = (maxx - minx) * 0.04
+    pady = (maxy - miny) * 0.04
+    ax.set_xlim(minx - padx, maxx + padx)
+    ax.set_ylim(miny - pady, maxy + pady)
+    ax.set_aspect("auto")
+    _label_municipalities(ax, (minx, miny, maxx, maxy))
+    _add_scale_bar(ax, (miny + maxy) / 2, km=5.0)
+    _add_north_arrow(ax)
     ax.set_xlabel("Longitude (°E)", fontsize=8)
     ax.set_ylabel("Latitude (°N)", fontsize=8)
     ax.set_title(
         f"Exposure rank vs ICNF burn perimeters {val_year} "
         f"(assets dimmed; red outline = validated burn)",
-        fontsize=10,
+        fontsize=12,
+        fontweight="bold",
         pad=18,  # leave room for the caveat line at y=1.01
     )
     ax.text(
@@ -610,89 +885,194 @@ def make_fig4(
 # --------------------------------------------------------------------------- #
 
 
-def make_fig5(metrics: dict, out: Path) -> None:  # type: ignore[type-arg]
-    """Cumulative lift curves (full config vs ablation) from WU-7 metrics JSON."""
-    fig, ax = plt.subplots(figsize=(8, 5))
+def _pick_detection_window(detection: dict, label: str) -> dict | None:  # type: ignore[type-arg]
+    """Return the detection window dict matching *label* (e.g. '2023-2025')."""
+    for w in detection.get("windows", []):
+        if w.get("label") == label:
+            return w
+    return None
 
-    full = metrics["full"]
-    ablation = metrics["ablation"]
+
+def _draw_lift_panel(ax: matplotlib.axes.Axes, metrics: dict) -> None:  # type: ignore[type-arg]
+    """Small companion panel: cumulative lift of the forecasting exposure rank."""
+    full = metrics.get("full", {})
+    ablation = metrics.get("ablation", {})
     val_years = metrics.get("validation_years", [])
-
     if full.get("degenerate") or "lift_table" not in full:
-        # Degenerate case (smoke tile: no burned assets) — show informative placeholder
-        n = full.get("n", 0)
         ax.text(
             0.5,
             0.5,
-            f"Degenerate case: {full.get('n_burned', 0)} burned assets in this AOI\n"
-            f"(n = {n}, base rate = 0.0).\n"
-            "Lift curve produced from pilot parquet; see docs/validation_report.md.",
+            "Lift panel needs the pilot\nvalidation metrics (degenerate here).",
             ha="center",
             va="center",
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=8,
             color="gray",
         )
-        ax.set_title(
-            "Lift curve (smoke AOI — degenerate; use pilot for real evaluation)",
-            fontsize=10,
-        )
-        _add_attribution(ax)
-        fig.tight_layout()
-        fig.savefig(out, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  saved {out.name} (degenerate placeholder)")
+        ax.set_title("Forecasting screen — cumulative lift", fontsize=9)
         return
 
     deciles = [d["decile"] for d in full["lift_table"]]
     full_lift = [d["cumulative_lift"] for d in full["lift_table"]]
     abl_lift = [d["cumulative_lift"] for d in ablation["lift_table"]]
-
-    ax.plot(
-        deciles, full_lift, "o-", color="#1f77b4", linewidth=1.8, label="Full config (6 features)"
-    )
-    ax.plot(
-        deciles,
-        abl_lift,
-        "s--",
-        color="#ff7f0e",
-        linewidth=1.8,
-        label="Ablation (burn-history features removed)",
-    )
-    ax.axhline(1.0, color="gray", linewidth=0.8, linestyle=":", label="Baseline (random rank)")
-
-    ax.set_xlabel("Decile (top → bottom of exposure rank)", fontsize=9)
-    ax.set_ylabel("Cumulative lift over base rate", fontsize=9)
+    ax.plot(deciles, full_lift, "o-", color="#1f77b4", linewidth=1.6, ms=4, label="Full (6 feats)")
+    ax.plot(deciles, abl_lift, "s--", color="#ff7f0e", linewidth=1.4, ms=4, label="Ablation")
+    ax.axhline(1.0, color="gray", linewidth=0.8, linestyle=":", label="Random")
+    ax.set_xlabel("Exposure-rank decile (top → bottom)", fontsize=8)
+    ax.set_ylabel("Cumulative lift over base rate", fontsize=8)
+    ax.set_xticks(deciles)
+    ax.tick_params(labelsize=7)
     year_label = str(val_years[0]) if val_years else "?"
     ax.set_title(
-        f"Cumulative lift: exposure rank vs subsequent ICNF burns "
-        f"({year_label} perimeters, "
-        f"n = {full['n']:,} assets, {full['n_burned']} burned)",
-        fontsize=10,
+        f"Forecasting screen — cumulative lift\n"
+        f"(exposure rank vs subsequent {year_label} burns; "
+        f"{full['n_burned']} of {full['n']:,} assets burned)",
+        fontsize=9,
     )
-    ax.set_xticks(deciles)
-    ax.set_xticklabels([f"{d}" for d in deciles], fontsize=8)
-    ax.legend(fontsize=8)
-
-    n_burned = full["n_burned"]
-    # One-asset lift granularity in a decile: (1/decile_n) / (n_burned/n) —
-    # computed from the metrics JSON, never hardcoded.
-    decile_n = full["lift_table"][0]["n_assets"]
-    granularity = full["n"] / (decile_n * n_burned)
+    ax.legend(fontsize=7, loc="upper right")
     ax.text(
         0.5,
-        0.03,
-        f"With only {n_burned} burned assets, a single asset moving deciles changes "
-        f"lift by {granularity:.2f}×.\nThis run does not resolve which features carry the signal. "
-        "Read docs/validation_report.md.",
+        0.02,
+        f"Only {full['n_burned']} burned assets — does not resolve which features\n"
+        "carry the signal. See docs/validation_report.md.",
         ha="center",
         va="bottom",
         transform=ax.transAxes,
-        fontsize=7,
-        color="#666666",
+        fontsize=6.5,
+        color="#777777",
+    )
+
+
+def make_fig5(metrics: dict, detection: dict, out: Path) -> None:  # type: ignore[type-arg]
+    """Validation figure — burn-scar detection skill + forecasting-screen lift.
+
+    The primary panel tells the WU-10 story: the de-grid burn-scar layer is a
+    sound recent-scar *detector*. It plots precision and recall against the
+    score threshold (multi-year ICNF 2023-2025 truth), marks the best-F1
+    operating point, and reads off precision at the feature's binarisation
+    thresholds. A companion panel keeps the forecasting-screen cumulative lift.
+    Both stories come from committed JSON (cited in the caption); no probability
+    claim is made — detection thresholds a relative score, lift ranks assets.
+    """
+    window = _pick_detection_window(detection, "2023-2025")
+    if window is None:
+        # Fall back to whatever single window is present (smoke path: 2025-only).
+        wins = detection.get("windows", [])
+        window = wins[0] if wins else None
+
+    if window is None or not window.get("sweep"):
+        # No usable detection sweep — emit the lift-only panel (informative).
+        fig, ax = plt.subplots(figsize=(8, 5))
+        _draw_lift_panel(ax, metrics)
+        ax.text(
+            0.5,
+            1.02,
+            "Detection sweep unavailable for this AOI; showing forecasting lift only.",
+            ha="center",
+            va="bottom",
+            transform=ax.transAxes,
+            fontsize=8,
+            color="gray",
+        )
+        _add_attribution(ax)
+        fig.tight_layout()
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  saved {out.name} (lift-only fallback)")
+        return
+
+    sweep = sorted(window["sweep"], key=lambda s: s["threshold"])
+    thr = np.array([s["threshold"] for s in sweep])
+    prec = np.array([s["precision"] for s in sweep])
+    rec = np.array([s["recall"] for s in sweep])
+    f1 = np.array([s["f1"] for s in sweep])
+
+    best_thr = float(window["best_f1_threshold"])
+    best_f1 = float(window["best_f1"])
+    best_p = float(window["best_f1_precision"])
+    best_r = float(window["best_f1_recall"])
+    coverage = float(window["coverage"])
+    label = window.get("label", "?")
+
+    # Precision at the feature's binarisation thresholds (read off the sweep).
+    def _prec_at(t: float) -> float:
+        i = int(np.argmin(np.abs(thr - t)))
+        return float(prec[i])
+
+    fig = plt.figure(figsize=(13, 5.6))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.45, 1.0], wspace=0.28)
+    ax = fig.add_subplot(gs[0, 0])
+    ax_lift = fig.add_subplot(gs[0, 1])
+
+    # --- Primary panel: precision / recall / F1 vs threshold ---
+    ax.plot(thr, prec, "-", color="#1b7837", linewidth=2.0, marker="o", ms=3.5, label="Precision")
+    ax.plot(thr, rec, "-", color="#2166ac", linewidth=2.0, marker="s", ms=3.5, label="Recall")
+    ax.plot(thr, f1, "--", color="#762a83", linewidth=1.6, label="F1")
+    ax.axhline(
+        coverage,
+        color="gray",
+        linewidth=0.9,
+        linestyle=":",
+        label=f"Burned base rate ({coverage * 100:.1f}%)",
+    )
+
+    # Best-F1 operating point.
+    ax.axvline(best_thr, color="#d7191c", linewidth=1.0, linestyle="-", alpha=0.6)
+    ax.scatter(
+        [best_thr],
+        [best_f1],
+        s=90,
+        facecolors="none",
+        edgecolors="#d7191c",
+        linewidths=1.8,
+        zorder=5,
+    )
+    ax.annotate(
+        f"best F1 = {best_f1:.2f} @ thr {best_thr:.2f}\n"
+        f"(precision {best_p:.2f}, recall {best_r:.2f})",
+        xy=(best_thr, best_f1),
+        xytext=(best_thr + 0.06, best_f1 + 0.10),
+        fontsize=7.5,
+        color="#d7191c",
+        fontweight="bold",
+        arrowprops={"arrowstyle": "->", "color": "#d7191c", "lw": 1.0},
+        path_effects=[withStroke(linewidth=2.2, foreground="white")],
+    )
+
+    ax.set_xlabel("Burn-scar inference score threshold", fontsize=9)
+    ax.set_ylabel("Precision / recall / F1", fontsize=9)
+    ax.set_ylim(0.0, 1.02)
+    ax.set_xlim(float(thr.min()), float(thr.max()))
+    ax.set_title(
+        f"Burn-scar layer is a sound recent-scar detector\n"
+        f"(vs ICNF {label} truth — {coverage * 100:.0f}% of the AOI; "
+        f"precision {_prec_at(0.5):.2f} @0.5, {_prec_at(0.7):.2f} @0.7)",
+        fontsize=10,
+        fontweight="bold",
+    )
+    ax.legend(fontsize=7.5, loc="center right", framealpha=0.9)
+    ax.text(
+        0.02,
+        0.02,
+        "Detection thresholds a relative score against burns that already happened —\n"
+        "no probability claim, no forecast. Burn scars detected, not ignition predicted.",
+        ha="left",
+        va="bottom",
+        transform=ax.transAxes,
+        fontsize=6.5,
+        color="#777777",
+    )
+
+    # --- Companion panel: forecasting cumulative lift ---
+    _draw_lift_panel(ax_lift, metrics)
+
+    fig.suptitle(
+        "Validation — two questions, two truths: detection skill and a forecasting screen",
+        fontsize=11.5,
+        fontweight="bold",
+        y=1.0,
     )
     _add_attribution(ax)
-    fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  saved {out.name}")
@@ -896,11 +1276,19 @@ def main() -> None:
     print(f"Loading artefacts (smoke={smoke}) …")
     gdf = load_exposure(smoke=smoke)
     fuel_path = load_fuel_cog_path(smoke=smoke)
-    burn_path = load_burn_scar_cog_path(smoke=smoke)
     burns = load_burns(smoke=smoke)
     metrics = load_metrics(smoke=smoke)
     aoi = load_aoi(smoke=smoke)
     crosswalk = load_crosswalk()
+    detection = load_multiyear_detection(smoke=smoke)
+
+    # Burn-scar source: pinned canonical de-grid p85 COG for the pilot; lexical
+    # latest for the smoke variant.
+    if smoke:
+        burn_path = load_burn_scar_cog_path(smoke=True)
+        burn_sidecar = json.loads(burn_path.with_suffix(".json").read_text())
+    else:
+        burn_path, burn_sidecar = load_burn_scar_pilot()
 
     val_years = metrics.get("validation_years", [])
     val_year: int = int(val_years[0]) if val_years else int(burns["vintage_year"].max())
@@ -912,11 +1300,36 @@ def main() -> None:
 
     print("Generating figures …")
 
-    make_fig1(gdf, aoi, _FIGS_DIR / f"fig1_exposure_map{suffix}.png", aoi_label=aoi_label, t0=t0)
-    make_fig2(fuel_path, crosswalk, _FIGS_DIR / f"fig2_fuel_layer{suffix}.png")
-    make_fig3(burn_path, _FIGS_DIR / f"fig3_burn_scar{suffix}.png")
-    make_fig4(gdf, burns, aoi, val_year, _FIGS_DIR / f"fig4_icnf_overlay{suffix}.png", t0=t0)
-    make_fig5(metrics, _FIGS_DIR / f"fig5_lift_curve{suffix}.png")
+    make_fig1(
+        gdf,
+        aoi,
+        _FIGS_DIR / f"fig1_exposure_map{suffix}.png",
+        aoi_label=aoi_label,
+        t0=t0,
+        fuel_path=fuel_path,
+    )
+    make_fig2(fuel_path, crosswalk, _FIGS_DIR / f"fig2_fuel_layer{suffix}.png", aoi=aoi)
+    reducer_label = str(burn_sidecar.get("reducer", "de-grid p85"))
+    if "p85" in reducer_label and "grid" not in reducer_label:
+        reducer_label = f"de-grid {reducer_label}"
+    make_fig3(
+        burn_path,
+        burn_sidecar,
+        aoi,
+        burns,
+        _FIGS_DIR / f"fig3_burn_scar{suffix}.png",
+        reducer_label=reducer_label,
+    )
+    make_fig4(
+        gdf,
+        burns,
+        aoi,
+        val_year,
+        _FIGS_DIR / f"fig4_icnf_overlay{suffix}.png",
+        t0=t0,
+        fuel_path=fuel_path,
+    )
+    make_fig5(metrics, detection, _FIGS_DIR / f"fig5_lift_curve{suffix}.png")
     # The HTML map gets the same smoke suffix as the PNGs — a smoke run must
     # never clobber the pilot map. The pilot map (~14 MB) exceeds the repo's
     # 2 MB committed-file cap and is NOT committed; the committed sample is

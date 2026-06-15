@@ -128,6 +128,64 @@ def test_load_exposure_parses_features(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 # --------------------------------------------------------------------------- #
+# load_multiyear_detection / _pick_detection_window
+# --------------------------------------------------------------------------- #
+
+
+def test_load_multiyear_detection_returns_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    older = {"run_id": "a", "windows": [{"label": "2023-2025"}]}
+    newer = {"run_id": "b", "windows": [{"label": "2023-2025"}]}
+    (tmp_path / "16_multiyear_detection_20260101T000000Z.json").write_text(json.dumps(older))
+    (tmp_path / "16_multiyear_detection_20260601T000000Z.json").write_text(json.dumps(newer))
+    monkeypatch.setattr(figures_mod, "_DIAG_DIR", tmp_path)
+    result = figures_mod.load_multiyear_detection(smoke=False)
+    assert result["run_id"] == "b"
+
+
+def test_load_multiyear_detection_pilot_excludes_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "16_multiyear_detection_20260601T000000Z.json").write_text(
+        json.dumps({"run_id": "pilot", "windows": []})
+    )
+    (tmp_path / "16_multiyear_detection_smoke.json").write_text(
+        json.dumps({"run_id": "smoke", "windows": []})
+    )
+    monkeypatch.setattr(figures_mod, "_DIAG_DIR", tmp_path)
+    assert figures_mod.load_multiyear_detection(smoke=False)["run_id"] == "pilot"
+    assert figures_mod.load_multiyear_detection(smoke=True)["run_id"] == "smoke"
+
+
+def test_load_multiyear_detection_missing_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(figures_mod, "_DIAG_DIR", tmp_path)
+    with pytest.raises(FileNotFoundError):
+        figures_mod.load_multiyear_detection(smoke=False)
+
+
+def test_pick_detection_window_matches_label() -> None:
+    detection = {"windows": [{"label": "2025"}, {"label": "2023-2025", "best_f1": 0.64}]}
+    win = figures_mod._pick_detection_window(detection, "2023-2025")
+    assert win is not None
+    assert win["best_f1"] == pytest.approx(0.64)
+    assert figures_mod._pick_detection_window(detection, "1999") is None
+
+
+def test_value_driven_rgba_alpha_floor() -> None:
+    import numpy as np
+
+    data = np.array([[0.0, figures_mod._ALPHA_FLOOR - 0.01], [0.5, 1.0]], dtype=float)
+    rgba = figures_mod._value_driven_rgba(data)
+    # Below the floor → fully transparent; at 1.0 → fully opaque.
+    assert rgba[0, 0, 3] == pytest.approx(0.0)
+    assert rgba[0, 1, 3] == pytest.approx(0.0)
+    assert rgba[1, 1, 3] == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------- #
 # _top3_features
 # --------------------------------------------------------------------------- #
 
