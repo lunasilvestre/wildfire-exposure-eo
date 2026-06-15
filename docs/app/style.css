@@ -69,6 +69,7 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 }
 .tag.output { background: #2a6f3c; color: #fff; }
 .tag.input { background: #e8e6df; color: #555; }
+.tag.ui, .layer-row label .tag:not(.output):not(.input) { background: #d9e6ef; color: #355; }
 
 .error { color: #b00020; font-size: 12px; }
 
@@ -110,6 +111,30 @@ footer { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 8px
 
 .maplibregl-popup-content { font-size: 12.5px; line-height: 1.4; }
 .maplibregl-popup-content h4 { margin: 0 0 4px; font-size: 13px; }
+
+/* Basemap switcher: two radios under one heading, distinct from the layer
+   checkboxes (lighter weight, inline). */
+#basemap-switcher label.radio { font-weight: 400; display: inline-block; margin-right: 10px; }
+
+/* Hover tooltip. position:fixed + clientX/Y (set in app.js) avoids scroll-offset
+   math; pointer-events:none keeps it from stealing map events. Deliberately
+   lighter than .maplibregl-popup-content so the hover label reads as a transient
+   summary, not a click popup. white-space:pre-line renders the "\n" line breaks
+   that showTip() inserts. */
+#hover-tip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 260px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  white-space: pre-line;
+}
 
 @media (max-width: 760px) {
   #layout { flex-direction: column; }
