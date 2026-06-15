@@ -171,8 +171,40 @@ async function main() {
   const aoiGj = await (await fetch(style.artifacts.aoi.href)).json();
   const bounds = bboxOfGeojson(aoiGj);
 
+  /* Optional hover tooltip (default off; gated by #toggle-hover). It is a single
+   * <div> appended to <body> — NOT to the map container — so position:fixed +
+   * clientX/Y keeps it free of scroll-offset math and never clipped by #map.
+   * Completely separate from the click Popup objects: hover shows a one-line
+   * summary on mousemove and hides on mouseleave; click popups are unchanged. */
+  let hoverEnabled = false;
+  const tip = document.createElement("div");
+  tip.id = "hover-tip";
+  tip.hidden = true;
+  document.body.appendChild(tip);
+
+  function showTip(mouseEvent, html) {
+    tip.innerHTML = html;
+    tip.hidden = false;
+    tip.style.left = mouseEvent.clientX + 14 + "px";
+    tip.style.top = mouseEvent.clientY - 8 + "px";
+  }
+  function hideTip() {
+    tip.hidden = true;
+  }
+
   maplibregl.addProtocol("cog", MaplibreCOGProtocol.cogProtocol);
 
+  /* Two basemaps, both key-less raster tile sources, registered up front so all
+   * overlays added in the load handler sit on top by construction. Esri World
+   * Imagery is publicly accessible (Living Atlas open layer) and used here under
+   * attribution for this non-commercial research demonstrator; note the Esri
+   * REST {z}/{y}/{x} order (y before x) — do not "fix" it to {z}/{x}/{y} or
+   * tiles 404. Google satellite tiles are deliberately NOT used: scraping the
+   * undocumented mt*.google.com endpoint without the Maps JS SDK + a billed key
+   * violates Google Maps Platform ToS. The basemap-osm / basemap-sat layers are
+   * swapped by visibility (never add/remove), so layer order is never disturbed.
+   * MapLibre's attribution control reads attribution from each visible source,
+   * so OSM vs Esri credit switches automatically with the basemap. */
   const map = new maplibregl.Map({
     container: "map",
     style: {
@@ -185,8 +217,18 @@ async function main() {
           maxzoom: 19,
           attribution: "© OpenStreetMap contributors",
         },
+        satellite: {
+          type: "raster",
+          tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        },
       },
-      layers: [{ id: "basemap", type: "raster", source: "osm" }],
+      layers: [
+        { id: "basemap-osm", type: "raster", source: "osm" },
+        { id: "basemap-sat", type: "raster", source: "satellite", layout: { visibility: "none" } },
+      ],
     },
     bounds: bounds,
     fitBoundsOptions: { padding: 24 },
@@ -199,6 +241,8 @@ async function main() {
    * HTTP range requests; colours applied per pixel — full fidelity). */
   const fuelUrl = style.artifacts.fuel_class.href;
   const fuelColor = new Map(style.fuel_legend.map((e) => [e.code, e.color]));
+  /* Code → human label, reused by the hover tooltip's raw fuel-pixel read. */
+  const fuelCodeToLabel = new Map(style.fuel_legend.map((e) => [e.code, e.label]));
   MaplibreCOGProtocol.setColorFunction(fuelUrl, (pixel, color, metadata) => {
     const code = pixel[0];
     if (code === metadata.noData || code === 255 || fuelColor.get(code) === undefined) {
@@ -279,8 +323,21 @@ async function main() {
       },
     });
 
+    /* One-line hover summary for an asset/exposure feature. The rank-coloured
+     * "exposure-*" layers are the output view, so they emphasise the rank; the
+     * neutral "assets-*" layers are the input view, so they show class + OSM id
+     * without the rank emphasis. Full detail stays on click via popupHtml. */
+    const assetHoverHtml = (props, withRank) => {
+      const head = `<strong>${props.asset_class}</strong>`;
+      if (withRank) {
+        return `${head}\nrank ${props.exposure_rank} of ${v.n_assets.toLocaleString("en")}`;
+      }
+      return `${head}\n${props.asset_id}`;
+    };
+
     for (const layerId of ["exposure-point", "exposure-fill", "exposure-line",
                            "assets-point", "assets-fill", "assets-line"]) {
+      const withRank = layerId.startsWith("exposure-");
       map.on("click", layerId, (e) => {
         new maplibregl.Popup({ maxWidth: "320px" })
           .setLngLat(e.lngLat)
@@ -288,8 +345,85 @@ async function main() {
           .addTo(map);
       });
       map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
+      map.on("mousemove", layerId, (e) => {
+        if (!hoverEnabled) return;
+        showTip(e.originalEvent, assetHoverHtml(e.features[0].properties, withRank));
+      });
+      map.on("mouseleave", layerId, () => {
+        map.getCanvas().style.cursor = "";
+        hideTip();
+      });
     }
+
+    /* AOI boundary: a single static polygon with no properties worth showing,
+     * so the hover label is a fixed string. */
+    map.on("mousemove", "aoi", (e) => {
+      if (!hoverEnabled) return;
+      showTip(e.originalEvent, "Pilot AOI (EPSG:4326, frozen)");
+    });
+    map.on("mouseleave", "aoi", hideTip);
+
+    /* Raster pixel reads on the bare canvas (raster layers do not emit
+     * feature events). MaplibreCOGProtocol.locationValues issues a COG range
+     * request per call, so a 120 ms trailing debounce keeps fast cursor motion
+     * from saturating the tile hosts (local fuel COG + R2-hosted burn-scar COG).
+     * Vector features take priority: if the cursor is over an asset/exposure or
+     * burn polygon, the vector mousemove handler owns the tooltip and we skip
+     * the raster read, so the label never flips between an asset and a pixel. */
+    let rasterHoverTimer = null;
+    const vectorHoverLayers = ["exposure-point", "exposure-fill", "exposure-line",
+                               "assets-point", "assets-fill", "assets-line", "aoi"];
+    map.on("mousemove", (e) => {
+      if (!hoverEnabled) return;
+      const fuelOn = map.getLayer("fuel") &&
+        map.getLayoutProperty("fuel", "visibility") === "visible";
+      const burnScarOn = burnScarAdded && map.getLayer("burnscar") &&
+        map.getLayoutProperty("burnscar", "visibility") === "visible";
+      if (!fuelOn && !burnScarOn) return;
+      const burnLayers = burnsAdded ? ["burns-fill"] : [];
+      const overVector = map.queryRenderedFeatures(e.point, {
+        layers: [...vectorHoverLayers, ...burnLayers].filter((id) => map.getLayer(id)),
+      });
+      if (overVector.length) return; // vector handler owns the tooltip
+      if (rasterHoverTimer) clearTimeout(rasterHoverTimer);
+      const { lat, lng } = e.lngLat;
+      const oe = e.originalEvent;
+      const zoom = map.getZoom();
+      rasterHoverTimer = setTimeout(async () => {
+        try {
+          /* Burn-scar takes precedence when both rasters are on (it is the
+           * detection layer of interest). Terminology guard (non-negotiable
+           * #6): an inference/detection score, never a calibrated probability. */
+          if (burnScarOn) {
+            const [score] = await MaplibreCOGProtocol.locationValues(
+              burnScarUrl, { latitude: lat, longitude: lng }, zoom,
+            );
+            if (score >= 0) {
+              showTip(oe, `Burn-scar inference score: ${score.toFixed(3)}\n` +
+                `(relative model score, not a calibrated probability)`);
+              return;
+            }
+          }
+          if (fuelOn) {
+            const [val] = await MaplibreCOGProtocol.locationValues(
+              fuelUrl, { latitude: lat, longitude: lng }, zoom,
+            );
+            if (!isNaN(val)) {
+              const code = Math.round(val);
+              const label = fuelCodeToLabel.get(code) ?? `code ${code}`;
+              showTip(oe, `Fuel class: ${label}`);
+              return;
+            }
+          }
+          hideTip();
+        } catch {
+          /* A COG range read can fail (tile not yet cached, transient network);
+           * degrade gracefully — just leave the tooltip hidden rather than
+           * surfacing a transient error in the layer-error box. */
+          hideTip();
+        }
+      }, 120);
+    });
   });
 
   /* R2-hosted layers (Cloudflare) load lazily on first toggle — large files
@@ -327,6 +461,16 @@ async function main() {
                  `${Number(p.area_ha).toFixed(1)} ha`)
         .addTo(map);
     });
+    /* Hover listeners live here, not in map.on("load"): the burns-* layers are
+     * lazy and do not exist until the first toggle. burns-fill (the filled
+     * polygon) captures the hit area shared with burns-2025. */
+    map.on("mousemove", "burns-fill", (e) => {
+      if (!hoverEnabled) return;
+      const p = e.features[0].properties;
+      showTip(e.originalEvent,
+        `ICNF burn perimeter\n${p.vintage_year}  ·  ${Number(p.area_ha).toFixed(1)} ha`);
+    });
+    map.on("mouseleave", "burns-fill", hideTip);
     burnsAdded = true;
   }
 
@@ -363,6 +507,24 @@ async function main() {
         showError(`Layer failed to load: ${err.message}. If the Cloudflare R2 ` +
                   `host is unreachable, this layer has no data source.`);
       }
+    });
+  }
+
+  /* Hover labels are wired separately (not in the toggles object) because they
+   * gate a flag rather than a layer's visibility. Default off. */
+  document.getElementById("toggle-hover").addEventListener("change", (e) => {
+    hoverEnabled = e.target.checked;
+    if (!hoverEnabled) hideTip();
+  });
+
+  /* Basemap switcher: swap visibility of the two always-registered raster
+   * layers. Both live below every overlay, so order is never disturbed and the
+   * attribution control updates automatically with the visible source. */
+  for (const radio of document.querySelectorAll('input[name="basemap"]')) {
+    radio.addEventListener("change", (e) => {
+      const sat = e.target.value === "satellite";
+      map.setLayoutProperty("basemap-osm", "visibility", sat ? "none" : "visible");
+      map.setLayoutProperty("basemap-sat", "visibility", sat ? "visible" : "none");
     });
   }
 }
