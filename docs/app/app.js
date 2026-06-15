@@ -255,11 +255,16 @@ async function main() {
   /* Burn-scar display: value-driven alpha. The COG stays a continuous
    * inference-score raster in [0, 1]; we only change how it is painted.
    * Scores below BURN_ALPHA_FLOOR are fully transparent (kills the low-score
-   * "wash"); above it the YlOrRd hue is kept and opacity ramps linearly to
-   * full at 1.0, so genuine scars stand out. Keep this rule in sync with
-   * scripts/17_burn_scar_optimization_figures.py (ALPHA_FLOOR). The score is a
-   * relative model output, never a calibrated probability or a forecast. */
-  const BURN_ALPHA_FLOOR = 0.3;
+   * "wash"); at/above it the YlOrRd hue is kept and opacity =
+   * BASE + (1-BASE)*t^GAMMA with t = (p-floor)/(1-floor). The BASE floor-opacity
+   * and GAMMA<1 lift the 0.25-0.5 band so the full recent-scar extent shows
+   * (~78% of the ICNF 2023-25 burns), not just the saturated cores. Keep in sync
+   * with scripts/17_burn_scar_optimization_figures.py (ALPHA_FLOOR/BASE/GAMMA).
+   * The score is a relative model output, never a calibrated probability or a
+   * forecast. */
+  const BURN_ALPHA_FLOOR = 0.25;
+  const BURN_ALPHA_BASE = 0.3;
+  const BURN_ALPHA_GAMMA = 0.6;
   const burnScarUrl = style.artifacts.burn_scar.href;
   MaplibreCOGProtocol.setColorFunction(burnScarUrl, (pixel, color, metadata) => {
     const p = pixel[0];
@@ -267,7 +272,8 @@ async function main() {
       color.set([0, 0, 0, 0]);
     } else {
       const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
-      const alpha = Math.round(255 * Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)));
+      const t = Math.pow(Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)), BURN_ALPHA_GAMMA);
+      const alpha = Math.round(255 * (BURN_ALPHA_BASE + (1 - BURN_ALPHA_BASE) * t));
       color.set([...style.ylorrd_lut[idx], alpha]);
     }
   });

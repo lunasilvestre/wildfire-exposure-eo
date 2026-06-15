@@ -52,9 +52,12 @@ _FIGS_DIR = _ROOT / "docs" / "figures"
 _AOI_PILOT = _ROOT / "data" / "aoi" / "pilot.geojson"
 
 SEED = 42
-#: Site display rule (mirrors docs/app/app.js): transparent below this, then a
-#: linear opacity ramp to full at 1.0. Keep in sync with app.js.
-ALPHA_FLOOR = 0.3
+#: Site display rule (mirrors docs/app/app.js): transparent below ALPHA_FLOOR,
+#: then opacity = BASE + (1-BASE)*t**GAMMA with t=(p-floor)/(1-floor). The BASE
+#: floor-opacity + GAMMA<1 lift the 0.25-0.5 band. Keep in sync with app.js.
+ALPHA_FLOOR = 0.25
+ALPHA_BASE = 0.3
+ALPHA_GAMMA = 0.6
 #: Recent multi-year vintages used as the detection truth overlay.
 TRUTH_YEARS = [2023, 2024, 2025]
 
@@ -89,15 +92,17 @@ def _value_driven_rgba(data: np.ndarray) -> np.ndarray:
     """YlOrRd colours with the site's value-driven alpha (transparent < floor).
 
     Returns an (H, W, 4) RGBA array: hue from YlOrRd over [0, 1]; alpha 0 below
-    ALPHA_FLOOR, then a linear ramp 0 -> 1 over [ALPHA_FLOOR, 1.0]. NaN -> fully
-    transparent. This is the same rule docs/app/app.js applies client-side.
+    ALPHA_FLOOR, then BASE + (1-BASE)*t**GAMMA with t=(p-floor)/(1-floor) over
+    [ALPHA_FLOOR, 1.0] (base floor-opacity + gamma<1 lift the low band). NaN ->
+    fully transparent. This is the same rule docs/app/app.js applies client-side.
     """
     cmap = plt.get_cmap("YlOrRd")
     norm = Normalize(vmin=0.0, vmax=1.0)
     rgba = cmap(norm(np.nan_to_num(data, nan=0.0)))
     span = max(1.0 - ALPHA_FLOOR, 1e-6)
-    alpha = np.clip((data - ALPHA_FLOOR) / span, 0.0, 1.0)
-    alpha[~np.isfinite(data)] = 0.0
+    t = np.clip((data - ALPHA_FLOOR) / span, 0.0, 1.0) ** ALPHA_GAMMA
+    alpha = ALPHA_BASE + (1.0 - ALPHA_BASE) * t
+    alpha[(data < ALPHA_FLOOR) | ~np.isfinite(data)] = 0.0
     rgba[..., 3] = alpha
     return rgba
 
