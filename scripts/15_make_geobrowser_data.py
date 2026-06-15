@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -92,15 +93,35 @@ _EXPORT_PROPS = [
 ]
 
 
+#: Canonical published-artefact run-id: an ISO-ish UTC stamp YYYYMMDDTHHMMSSZ.
+#: Working/diagnostic composites carry an extra descriptive token between the
+#: prefix and the run-id (e.g. ``burn_scar_wu10multi_p85_<run_id>.tif``); those
+#: must never be auto-selected for the published site.
+_RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
+
+
 def _latest(prefix: str, folder: Path, suffix: str, *, smoke: bool) -> Path:
-    """Return the newest matching artefact in *folder* (timestamps sort lexically)."""
+    """Return the newest *canonical* artefact in *folder* (timestamps sort lexically).
+
+    Canonical = the filename is exactly ``{prefix}[_smoke]_{run_id}{suffix}`` with
+    a bare run-id (no extra descriptive token). This excludes working/diagnostic
+    composites such as ``burn_scar_wu10degrid_p85_<run_id>.tif`` that share the
+    prefix but must not be published.
+    """
     pat = f"{prefix}_smoke_*{suffix}" if smoke else f"{prefix}_*{suffix}"
-    cands = sorted(folder.glob(pat))
-    if not smoke:
-        cands = [c for c in cands if "_smoke_" not in c.name]
+    middle = f"{prefix}_smoke_" if smoke else f"{prefix}_"
+    cands = []
+    for c in sorted(folder.glob(pat)):
+        if not smoke and "_smoke_" in c.name:
+            continue
+        token = c.name[len(middle) : -len(suffix)] if suffix else c.name[len(middle) :]
+        if _RUN_ID_RE.match(token):
+            cands.append(c)
     if not cands:
         raise FileNotFoundError(
-            f"No artefact matching {pat!r} in {folder}. Run the relevant WU pipeline step first."
+            f"No canonical artefact matching {pat!r} (bare run-id) in {folder}. "
+            "Run the relevant WU pipeline step first, or rename the candidate to "
+            f"{prefix}_<run_id>{suffix}."
         )
     return cands[-1]
 

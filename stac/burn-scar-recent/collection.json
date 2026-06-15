@@ -12,7 +12,7 @@
     },
     {
       "rel": "item",
-      "href": "./burn-scar-20260610T072820Z/burn-scar-20260610T072820Z.json",
+      "href": "./burn-scar-20260615T192025Z/burn-scar-20260615T192025Z.json",
       "type": "application/geo+json"
     },
     {
@@ -38,7 +38,7 @@
       "interval": [
         [
           "2025-06-09T00:00:00Z",
-          "2026-06-10T07:28:20.582670Z"
+          "2026-06-15T19:20:25.249381Z"
         ]
       ]
     }
