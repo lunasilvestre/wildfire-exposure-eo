@@ -31,6 +31,14 @@ reserve, not working capital.
 6. **Never bleed silently into extra-usage credits.** If the gate is
    unavailable (ccusage missing) AND the session is unattended, mention the
    blind spot in the session log so the human can check `/usage` manually.
+7. **Recurring check on heavy/marathon runs.** Event-driven gates (rules 1, 5)
+   catch phase boundaries but miss drift *between* them while long workflows
+   burn tokens. At the start of any marathon/heavy run, arm a recurring
+   ~30-min usage check via `ScheduleWakeup` and re-arm it each tick; every
+   tick run `scripts/dev/check_usage.sh` and, if session% nears the floor (or
+   weekly nears `CLOSEOUT_WEEKLY_PCT_MAX`), stop launching new heavy/parallel
+   work before it spills into paid usage credits — money outside the
+   subscription. (Nelson, 2026-06-15.)
 
 ## Data sources
 
