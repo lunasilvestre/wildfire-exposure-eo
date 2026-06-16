@@ -89,12 +89,12 @@ class TestValidationAOI:
 
     def test_loads_as_feature_collection(self, slug: str) -> None:
         data = self._data(slug)
-        assert (
-            data["type"] == "FeatureCollection"
-        ), f"{slug}: top-level type must be FeatureCollection"
-        assert (
-            "features" in data and len(data["features"]) == 1
-        ), f"{slug}: must have exactly one feature"
+        assert data["type"] == "FeatureCollection", (
+            f"{slug}: top-level type must be FeatureCollection"
+        )
+        assert "features" in data and len(data["features"]) == 1, (
+            f"{slug}: must have exactly one feature"
+        )
 
     def test_crs_explicit_and_crs84(self, slug: str) -> None:
         data = self._data(slug)
@@ -102,9 +102,9 @@ class TestValidationAOI:
         crs = data["crs"]
         assert crs.get("type") == "name", f"{slug}: crs.type must be 'name'"
         props = crs.get("properties", {})
-        assert (
-            props.get("name") == _CRS84_NAME
-        ), f"{slug}: crs.properties.name must be '{_CRS84_NAME}'"
+        assert props.get("name") == _CRS84_NAME, (
+            f"{slug}: crs.properties.name must be '{_CRS84_NAME}'"
+        )
 
     def test_geometry_is_polygon(self, slug: str) -> None:
         data = self._data(slug)
@@ -139,9 +139,9 @@ class TestValidationAOI:
         data = self._data(slug)
         coords = data["features"][0]["geometry"]["coordinates"]
         area_km2 = _bbox_km2(coords)
-        assert (
-            area_km2 > pilot_km2
-        ), f"{slug}: AOI area {area_km2:.0f} km² must be larger than pilot {pilot_km2:.0f} km²"
+        assert area_km2 > pilot_km2, (
+            f"{slug}: AOI area {area_km2:.0f} km² must be larger than pilot {pilot_km2:.0f} km²"
+        )
 
     def test_required_properties_present(self, slug: str) -> None:
         data = self._data(slug)
@@ -168,26 +168,26 @@ class TestValidationAOI:
         west, south, east, north = bbox
         # Allow small floating-point tolerance
         tol = 1e-6
-        assert (
-            abs(west - min(lons)) < tol
-        ), f"{slug}: bbox_wgs84[W]={west} != geometry west={min(lons)}"
-        assert (
-            abs(south - min(lats)) < tol
-        ), f"{slug}: bbox_wgs84[S]={south} != geometry south={min(lats)}"
-        assert (
-            abs(east - max(lons)) < tol
-        ), f"{slug}: bbox_wgs84[E]={east} != geometry east={max(lons)}"
-        assert (
-            abs(north - max(lats)) < tol
-        ), f"{slug}: bbox_wgs84[N]={north} != geometry north={max(lats)}"
+        assert abs(west - min(lons)) < tol, (
+            f"{slug}: bbox_wgs84[W]={west} != geometry west={min(lons)}"
+        )
+        assert abs(south - min(lats)) < tol, (
+            f"{slug}: bbox_wgs84[S]={south} != geometry south={min(lats)}"
+        )
+        assert abs(east - max(lons)) < tol, (
+            f"{slug}: bbox_wgs84[E]={east} != geometry east={max(lons)}"
+        )
+        assert abs(north - max(lats)) < tol, (
+            f"{slug}: bbox_wgs84[N]={north} != geometry north={max(lats)}"
+        )
 
     def test_anchor_fire_source_cites_icnf_or_effis(self, slug: str) -> None:
         data = self._data(slug)
         props = data["features"][0]["properties"]
         source = props.get("anchor_fire_source", "")
-        assert (
-            "ICNF" in source or "EFFIS" in source
-        ), f"{slug}: anchor_fire_source must cite ICNF or EFFIS explicitly; got: {source!r}"
+        assert "ICNF" in source or "EFFIS" in source, (
+            f"{slug}: anchor_fire_source must cite ICNF or EFFIS explicitly; got: {source!r}"
+        )
 
     def test_smoke_tile_exists(self, slug: str) -> None:
         smoke_path = _AOI_DIR / f"smoke_{slug}.geojson"
