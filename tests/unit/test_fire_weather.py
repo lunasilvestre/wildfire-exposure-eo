@@ -476,9 +476,10 @@ def test_asset_features_accepts_ewds_components() -> None:
         assert hasattr(feats, name)
 
 
-def test_ewds_features_not_in_score_weight_block() -> None:
-    # AVAILABLE-but-UNWEIGHTED: EWDS components are in FEATURE_NAMES but must not
-    # appear in the exposure-score weight block (no score change).
+def test_ewds_features_available_and_only_composite_weighted() -> None:
+    # All seven EWDS names are AVAILABLE (declared in FEATURE_NAMES). At 0.3.0 the
+    # COMPOSITE `fwi_fwi_current` carries a weight; the SIX components stay
+    # AVAILABLE-but-UNWEIGHTED (the composite already integrates them).
     import yaml
 
     from wildfire_exposure_eo.schemas.scored_asset import (
@@ -489,7 +490,9 @@ def test_ewds_features_not_in_score_weight_block() -> None:
     for name in EWDS_FWI_FEATURE_NAMES:
         assert name in FEATURE_NAMES
     weights = yaml.safe_load(Path("config/exposure_score.yaml").read_text())["weights"]
-    assert set(EWDS_FWI_FEATURE_NAMES).isdisjoint(weights)
+    assert weights.get("fwi_fwi_current") == 0.10  # composite FWI weighted at 0.3.0
+    components = set(EWDS_FWI_FEATURE_NAMES) - {"fwi_fwi_current"}
+    assert components.isdisjoint(weights)  # six components stay unweighted
 
 
 def test_provenance_accepts_ewds_fields() -> None:
