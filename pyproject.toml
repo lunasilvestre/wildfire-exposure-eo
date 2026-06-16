@@ -66,6 +66,13 @@ dependencies = [
     # mandatory in deps so a clean install includes it.
     "terratorch>=1.2",
 
+    # Fire-weather — CEMS Early Warning Data Store (EWDS) current-season FWI.
+    # Nelson chose the Copernicus EWDS path for current-season FWI: cdsapi is
+    # the official client for the EWDS `cems-fire-historical-v1` reanalysis;
+    # netcdf4 is the engine xarray uses to read the FWI-system netCDF download.
+    "cdsapi>=0.7.6",
+    "netcdf4>=1.7.2",
+
     # Validation, schemas
     "pydantic>=2.9",
     "jsonschema>=4.23",

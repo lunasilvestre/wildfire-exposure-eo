@@ -48,10 +48,31 @@ TOPOLOGY_FEATURE_NAMES: tuple[str, ...] = (
     "network_exposure_propagated",
 )
 
-#: All known per-asset feature names (score inputs + topology). ``compose_exposure``
-#: only weights names that also appear in the config ``weights`` block, so adding
-#: topology here makes it AVAILABLE without changing the score.
-FEATURE_NAMES: tuple[str, ...] = SCORE_FEATURE_NAMES + TOPOLOGY_FEATURE_NAMES
+#: Current-season FWI-system components from the CEMS EWDS reanalysis
+#: (``cems-fire-historical-v1``, daily-updated, ~2-day lag). AVAILABLE /
+#: reported-secondary: computed and carried per asset, but NOT in the normalized
+#: weight block of ``config/exposure_score.yaml`` (that integration is a separate
+#: calibration step). The full Canadian FWI *system* — FWI plus its five
+#: components — plus the U.S. NFDRS burning index. Each is an observed reanalysis
+#: danger *index*, a relative input, never a probability or forecast (#6).
+#: ``None`` for any asset/run the EWDS surface does not cover (never imputed).
+EWDS_FWI_FEATURE_NAMES: tuple[str, ...] = (
+    "fwi_fwi_current",
+    "fwi_bui_current",
+    "fwi_dc_current",
+    "fwi_dmc_current",
+    "fwi_ffmc_current",
+    "fwi_isi_current",
+    "fwi_bi_current",
+)
+
+#: All known per-asset feature names (score inputs + topology + EWDS FWI).
+#: ``compose_exposure`` only weights names that also appear in the config
+#: ``weights`` block, so adding these here makes them AVAILABLE without changing
+#: the score.
+FEATURE_NAMES: tuple[str, ...] = (
+    SCORE_FEATURE_NAMES + TOPOLOGY_FEATURE_NAMES + EWDS_FWI_FEATURE_NAMES
+)
 
 
 class AssetFeatures(BaseModel):
@@ -99,6 +120,29 @@ class AssetFeatures(BaseModel):
     #: exposure rank (α·self + (1-α)·mean(neighbours)). A *relative* within-AOI
     #: screening rank like its inputs — never a calibrated probability or forecast.
     network_exposure_propagated: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    # --- Current-season FWI-system components (CEMS EWDS, AVAILABLE / unweighted).
+    # Zonal mean of the observed daily reanalysis (~2-day lag) over the asset
+    # buffer. NOT in the normalized score-weight block (separate calibration).
+    # Each is a relative danger *index* input, never a probability or forecast
+    # (#6). ``None`` when the EWDS surface is absent for the run (never imputed).
+    # Indices are unbounded above but physically modest; bound generously. The
+    # drought code (``dc``) climbs highest under sustained drought, so it carries
+    # the widest bound.
+    #: Zonal mean of the Canadian Forest Fire Weather Index (current season).
+    fwi_fwi_current: float | None = Field(default=None, ge=0.0, le=1000.0)
+    #: Zonal mean of the FWI Build-Up Index (current season).
+    fwi_bui_current: float | None = Field(default=None, ge=0.0, le=1000.0)
+    #: Zonal mean of the FWI Drought Code (current season; widest physical range).
+    fwi_dc_current: float | None = Field(default=None, ge=0.0, le=2000.0)
+    #: Zonal mean of the FWI Duff Moisture Code (current season).
+    fwi_dmc_current: float | None = Field(default=None, ge=0.0, le=1000.0)
+    #: Zonal mean of the FWI Fine Fuel Moisture Code (current season; ~0..101).
+    fwi_ffmc_current: float | None = Field(default=None, ge=0.0, le=101.0)
+    #: Zonal mean of the FWI Initial Spread Index (current season).
+    fwi_isi_current: float | None = Field(default=None, ge=0.0, le=1000.0)
+    #: Zonal mean of the U.S. NFDRS Burning Index (current season).
+    fwi_bi_current: float | None = Field(default=None, ge=0.0, le=1000.0)
 
 
 class ScoredAssetProvenance(BaseModel):
@@ -149,6 +193,25 @@ class ScoredAssetProvenance(BaseModel):
     fire_weather_sample_dates: tuple[str, ...] = Field(default_factory=tuple)
     #: ``True`` when the season fell outside the GWIS archive (feature absent).
     fire_weather_out_of_archive: bool | None = Field(default=None)
+
+    # --- Current-season EWDS FWI-system source. All ``None`` when the EWDS
+    # source was not used for this run (no ewds-fwi config, or out-of-range).
+    #: EWDS dataset product id (``cems-fire-historical-v1``).
+    fwi_product_id: str | None = Field(default=None)
+    #: EWDS dataset DOI (``10.24381/cds.0e89c522``).
+    fwi_doi: str | None = Field(default=None)
+    #: ``config/fire_weather.yaml`` version that pinned the EWDS source.
+    fwi_config_version: str | None = Field(default=None)
+    #: EWDS dataset-type (``intermediate_dataset`` for the current season).
+    fwi_dataset_type: str | None = Field(default=None)
+    #: EWDS system version (underscore form, e.g. ``4_1``).
+    fwi_system_version: str | None = Field(default=None)
+    #: Requested calendar date for the EWDS FWI pull (ISO).
+    fwi_requested_date: str | None = Field(default=None)
+    #: Observed netCDF ``valid_time`` date (~2-day lag from real time, ISO).
+    fwi_valid_date: str | None = Field(default=None)
+    #: EWDS request-name -> netCDF-var-name map for the components fetched.
+    fwi_variable_map: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("burn_scar_cog_sha")
     @classmethod

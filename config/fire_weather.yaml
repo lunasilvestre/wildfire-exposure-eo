@@ -16,12 +16,17 @@
 # ───────────────────────────────────────────────────────────────────
 
 # Changelog
+#   0.2.0 (2026-06-16): ADD an `ewds_fwi` source block — the CEMS EWDS
+#     `cems-fire-historical-v1` daily-updated reanalysis carrying the FULL
+#     Canadian FWI system (FWI + 5 components) + U.S. NFDRS burning index as
+#     AVAILABLE-but-UNWEIGHTED current-season features. The GWIS source above
+#     is UNCHANGED. No exposure-score weight change (separate calibration).
 #   0.1.0 (2026-06-16, WU-17): GWIS NASA GPM-IMERG FWI via the public,
 #     no-auth GWIS WMS. Phase-0 audit verdict: GREEN for windows whose
 #     season falls within the layer's real archive (≈2014-05 .. 2020-12);
 #     2021+ returns an all-zero raster (no data) and the feature is absent
 #     for that run (never imputed). See docs/data_sources.md §GWIS FWI.
-version: "0.1.0"
+version: "0.2.0"
 
 source:
   # WMS service exposing daily FWI rasters. No authentication; the geodata
@@ -68,4 +73,63 @@ feature:
   # per month over Jun-Oct = 10 daily FWI rasters per season-year.
   sample_days: [1, 15]
   # Buffer zonal statistic applied to the season-reduced FWI surface.
+  zonal_stat: "mean"
+
+# ───────────────────────────────────────────────────────────────────
+# EWDS current-season FWI source (CEMS Early Warning Data Store)
+# ───────────────────────────────────────────────────────────────────
+# A SECOND, INDEPENDENT fire-weather source alongside the GWIS backtest above.
+# Where GWIS carries a ~2014..2020 reanalysis archive, the CEMS EWDS
+# `cems-fire-historical-v1` reanalysis is updated daily and covers the current
+# season (intermediate_dataset spans ~2022..present, ~2-day lag). We ingest the
+# FULL Canadian Fire Weather Index *system* (FWI + its five components) plus the
+# U.S. NFDRS burning index, all as AVAILABLE-but-UNWEIGHTED relative inputs —
+# none of these touch config/exposure_score.yaml. They are observed reanalysis
+# danger *indices*, never a forecast or probability of fire (non-negotiable #6).
+#
+# Source identity verified live on 2026-06-16 by scripts/22_ewds_fwi_audit.py
+# (CLAUDE.md non-negotiable #1): the API base, dataset, valid request combo,
+# and the request-name -> netcdf-var-name map were read from a real download
+# over the pilot AOI. Authentication is via the user's Copernicus EWDS key
+# (parsed from ~/.cdsapirc or the CDSAPI_KEY env var — NEVER committed).
+#
+# Parsed and validated as `wildfire_exposure_eo.fire_weather.EwdsFwiConfig`.
+ewds_fwi:
+  # CEMS Early Warning Data Store — NOT the CDS. The user's ~/.cdsapirc url is
+  # the CDS; the client MUST override it to this public endpoint at call time.
+  api_base: "https://ewds.climate.copernicus.eu/api"
+  # cdsapi process id for the ready-made Canadian FWI-system reanalysis.
+  dataset: "cems-fire-historical-v1"
+  # reanalysis (vs ensemble_members). Read from the constraints endpoint.
+  product_type: "reanalysis"
+  # intermediate_dataset covers ~2022..present (current season); the
+  # consolidated_dataset covers 1940+ but lags further behind — we want fresh.
+  dataset_type: "intermediate_dataset"
+  # System version MUST use the underscore form; "4.1"/"5.0" return HTTP 400.
+  system_version: "4_1"
+  # 0.25° regular grid (coarse — a single pilot-AOI cell may be sub-pixel).
+  grid: "0.25/0.25"
+  # NetCDF download; the variable names inside DIFFER from the request names
+  # (mapped per-variable below, verified from a real download).
+  data_format: "netcdf"
+  crs: "EPSG:4326"
+  # Provider / dataset identity for provenance + attribution.
+  product_id: "cems-fire-historical-v1"
+  provider: "CEMS / Copernicus Early Warning Data Store (EWDS)"
+  doi: "10.24381/cds.0e89c522"
+  license: "CC-BY-4.0"
+  attribution: "Source: CEMS Early Warning Data Store — Copernicus / ECMWF (CC-BY-4.0)"
+  # FULL Canadian FWI-system set + U.S. NFDRS burning index. Each entry maps the
+  # CEMS *request* variable name to (a) the netcdf variable name it arrives as
+  # and (b) the per-asset feature column name written into the parquet. The
+  # netcdf names were read live on 2026-06-16 (scripts/22_ewds_fwi_audit.py).
+  variables:
+    fire_weather_index:        { netcdf: "fwinx",   feature: "fwi_fwi_current" }
+    build_up_index:            { netcdf: "fbupinx", feature: "fwi_bui_current" }
+    drought_code:              { netcdf: "drtcode", feature: "fwi_dc_current" }
+    duff_moisture_code:        { netcdf: "dufmcode", feature: "fwi_dmc_current" }
+    fine_fuel_moisture_code:   { netcdf: "ffmcode", feature: "fwi_ffmc_current" }
+    initial_fire_spread_index: { netcdf: "infsinx", feature: "fwi_isi_current" }
+    burning_index:             { netcdf: "buinfdr", feature: "fwi_bi_current" }
+  # Buffer zonal statistic applied to each per-component surface.
   zonal_stat: "mean"
