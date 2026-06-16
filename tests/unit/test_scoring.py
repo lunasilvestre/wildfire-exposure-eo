@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from wildfire_exposure_eo.schemas.scored_asset import FEATURE_NAMES
+from wildfire_exposure_eo.schemas.scored_asset import SCORE_FEATURE_NAMES
 from wildfire_exposure_eo.scoring import ExposureConfig, compose_exposure, load_exposure_config
 
 CONFIG_PATH = Path("config/exposure_score.yaml")
@@ -104,7 +104,9 @@ def test_missing_feature_renormalises_without_imputation() -> None:
     out = compose_exposure(df, cfg)
     present = out.loc["a3", "features_present"]
     assert "recent_burn_share_12mo" not in present
-    assert set(present) == set(FEATURE_NAMES) - {"recent_burn_share_12mo"}
+    # The test frame carries only the score-input features (topology features are
+    # AVAILABLE but absent here), so present == score inputs minus the dropped one.
+    assert set(present) == set(SCORE_FEATURE_NAMES) - {"recent_burn_share_12mo"}
 
     # Hand-recompute a3: weighted mean of its percentile ranks over the 5
     # present features, renormalised by their weights (no zero imputation).
