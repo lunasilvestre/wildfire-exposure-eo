@@ -41,14 +41,14 @@ def _frame() -> pd.DataFrame:
 
 def test_real_config_weights_sum_to_one() -> None:
     cfg = _config()
-    assert cfg.version == "0.3.0"
+    assert cfg.version == "0.3.1"
     assert abs(sum(cfg.weights.values()) - 1.0) < 1e-9
     assert "fwi_p95_recent_season" not in cfg.weights  # dropped at 0.2.0
-    # 0.3.0 restores the fire-weather dimension as the EWDS current-season FWI
-    # COMPOSITE only; the six FWI components stay AVAILABLE-but-UNWEIGHTED.
-    assert cfg.weights["fwi_fwi_current"] == 0.10
-    for component in ("fwi_bui_current", "fwi_dc_current", "fwi_dmc_current"):
-        assert component not in cfg.weights
+    # 0.3.1 UNWEIGHTS fire weather: Wave-2 validation showed backdated FWI does not
+    # improve burn discrimination, so the full EWDS FWI system stays
+    # AVAILABLE-but-UNWEIGHTED (operational overlay, not the validated score).
+    for fwi_feat in ("fwi_fwi_current", "fwi_bui_current", "fwi_dc_current", "fwi_dmc_current"):
+        assert fwi_feat not in cfg.weights
 
 
 def test_config_rejects_weights_not_summing_to_one() -> None:

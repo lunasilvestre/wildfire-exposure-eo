@@ -15,6 +15,16 @@
 # ───────────────────────────────────────────────────────────────────
 
 # Changelog
+#   0.3.1 (2026-06-16): UNWEIGHT the fire-weather dimension. Wave-2 multi-AOI
+#     validation (5 AOIs, N burned 5 -> 3307; scripts/24_wave2_validate.py,
+#     docs/validation_report.md) showed the BACKDATED FWI weight did NOT improve
+#     burn discrimination (pooled Spearman delta ~-0.013; a coarse 0.25-degree FWI
+#     surface is dominated by historical_burn_share), and topology was neutral.
+#     Per the validate-then-weight rule, fwi_fwi_current returns to weight 0 and the
+#     six remaining weights renormalise back to the 0.2.0 values (sum 1.0). The full
+#     EWDS FWI system + topology stay AVAILABLE-but-UNWEIGHTED and drive the
+#     OPERATIONAL overlay (validated structural rank x current fire weather), NOT
+#     the validated score. Approved by Nelson 2026-06-16.
 #   0.3.0 (2026-06-16): RESTORE the fire-weather dimension dropped in 0.2.0,
 #     now sourced from the verified CEMS EWDS `cems-fire-historical-v1`
 #     current-season FWI (DOI 10.24381/cds.0e89c522; see config/fire_weather.yaml
@@ -38,34 +48,35 @@
 #     proportionally (each old weight ÷ 0.90) so they still sum to exactly 1.0.
 #     FWI returns as future work behind a verified IPMA/Copernicus fetcher.
 #   0.1.0: initial seven-feature linear screen.
-version: "0.3.0"
+version: "0.3.1"
 formula: "linear_combination"
 normalization: "percentile_rank_within_aoi"
 
 weights:
   # Fuel character (Stage 1 model output)
-  fuel_class_severity_weight: 0.30           # crosswalk-derived per-class severity
+  fuel_class_severity_weight: 0.3333333333   # crosswalk-derived per-class severity (0.30 ÷ 0.90)
 
   # Vegetation structure (canopy height)
-  canopy_height_p90_m: 0.20                  # ETH GCH 10m, p90 inside buffer
+  canopy_height_p90_m: 0.2222222222          # ETH GCH 10m, p90 inside buffer (0.20 ÷ 0.90)
 
   # Topographic forcing
-  slope_max_deg: 0.10                        # Cop-DEM GLO-30, max slope inside buffer
+  slope_max_deg: 0.1111111111                # Cop-DEM GLO-30, max slope inside buffer (0.10 ÷ 0.90)
 
   # Burn history (decadal pattern; ICNF Áreas Ardidas, ~1-year publication lag)
-  historical_burn_share: 0.15
+  historical_burn_share: 0.1666666667        # (0.15 ÷ 0.90)
 
   # Current-season burn signal (Prithvi-Burn-Scar inference on S2, last 12 months)
-  recent_burn_share_12mo: 0.10
+  recent_burn_share_12mo: 0.1111111111       # (0.10 ÷ 0.90)
 
   # Recent spectral change (Sentinel-2 spring-vs-late-summer NBR delta)
-  nbr_delta_recent: 0.05
+  nbr_delta_recent: 0.0555555556             # (0.05 ÷ 0.90)
 
-  # Fire weather (RESTORED 0.3.0): CEMS EWDS current-season Canadian Fire Weather
-  # Index composite. COMPOSITE ONLY — the six FWI components stay unweighted (the
-  # composite already integrates them). An observed reanalysis danger *index*,
-  # one normalised input to a relative rank — never a probability or forecast.
-  fwi_fwi_current: 0.10
+  # Fire weather + topology: AVAILABLE-but-UNWEIGHTED (0.3.1). The EWDS
+  # current-season FWI system (fwi_fwi_current + 6 components) and the topology
+  # features are computed + reported but carry NO score weight — Wave-2 validation
+  # showed backdated FWI does not improve burn discrimination and topology is
+  # neutral on sparse rural OSM. They power the OPERATIONAL overlay (validated
+  # structural rank x current fire weather), not the validated structural score.
 
 # ───────────────────────────────────────────────────────────────────
 # Feature normalisation

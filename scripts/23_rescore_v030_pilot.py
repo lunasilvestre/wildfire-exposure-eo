@@ -1,4 +1,11 @@
-"""Operational v0.3.0 pilot re-score with current-season EWDS FWI (prompt: WU v0.3.0).
+"""Operational pilot re-score: validated structural rank + current EWDS FWI overlay.
+
+NOTE (v0.3.1): per Wave-2 validation (scripts/24, docs/validation_report.md), FWI is
+UNWEIGHTED — the exposure score is the validated structural rank; the EWDS FWI system is
+carried as REPORTED overlay columns, NOT weighted. The v0.3.0 prose below describes the
+prior (weighted) design and is retained for context; the script now requires config 0.3.1.
+
+Original (v0.3.0) design notes follow.
 
 The v0.3.0 calibration (config/exposure_score.yaml, Nelson 2026-06-16) RESTORES
 the fire-weather dimension dropped at 0.2.0, now sourced from the verified CEMS
@@ -237,8 +244,8 @@ def main() -> int:
 
     # --- recompose with the v0.3.0 weights ---------------------------------
     config = load_exposure_config(args.exposure_config)
-    if config.version != "0.3.0":
-        raise ValueError(f"expected exposure config 0.3.0, got {config.version}")
+    if config.version != "0.3.1":
+        raise ValueError(f"expected exposure config 0.3.1, got {config.version}")
     composed = compose_exposure(features_df, config)
 
     # --- provenance: model_version 0.3.0, fresh run_id, current commit, FWI date ---
