@@ -1,8 +1,12 @@
 # Roadmap — what exists, what remains
 
 > Companion to [`prompts/00_CLOSEOUT_PLAN.md`](../prompts/00_CLOSEOUT_PLAN.md)
-> (the executable direction). This document is the human-readable picture.
-> Status date: 2026-06-09, post-WU-0 (CI green on `main`).
+> (the original close-out direction) and
+> [`docs/operationalization.md`](operationalization.md)
+> (the live six-pillar program — **this is the current executable plan**).
+> Status date: 2026-06-16, post-WU-10 burn-scar publish (main is current).
+> The "Where it's going" section below records the original WU-0..WU-8
+> sequence; the ongoing program is in `docs/operationalization.md`.
 
 ## The narrative, in three sentences
 
@@ -19,42 +23,47 @@ for their own district.
 
 ## What exists today
 
+As of 2026-06-16 (`main`), the full WU-0..WU-10 pipeline is shipped and
+CI-gated:
+
 ```mermaid
 flowchart LR
     subgraph done["Shipped (CI-gated, on main)"]
-        A["audit\n9/9 sources GREEN"] --> B["resolve-stac\nS2/S1/DEM/WorldCover\nmanifests, deterministic"]
-        B --> C["schemas/\nPydantic v2, frozen"]
-        C --> D["46 tests\nunit + integration"]
+        A["WU-0 ✅\naudit, STAC resolver,\nschemas, 46→212+ tests"] --> B
+        B["WU-1 ✅\nPrithvi burn-scar\nCOG (p85 de-grid)"] --> C
+        C["WU-2..4 ✅\nOSM assets,\nstatic rasters, ICNF burns"] --> D
+        D["WU-5..6 ✅\nfuel layer,\nper-asset score"] --> E
+        E["WU-7..8 ✅\nvalidation report,\nfigures + HTML map"] --> F
+        F["WU-9..10 ✅\ngeobrowser (Pages),\nR2 geodata, burn-scar remediation"]
     end
-    D --> E["CI green on main\n3 jobs, June 9"]
 ```
 
-Plus the non-code substrate: frozen AOI (`data/aoi/pilot.geojson`, Sever do
-Vouga ~30×30 km), infrastructure taxonomy (13 classes), fuel crosswalk
-(EFFIS/COS → Scott & Burgan), verified fetch scripts for every source, and
-prompts 01–05 + 09 as executable work-unit specs.
+Frozen AOI (`data/aoi/pilot.geojson`, Sever do Vouga ~30×30 km), 3,045 scored
+assets, `config/exposure_score.yaml` v0.2.0, live geobrowser at GitHub Pages
+backed by Cloudflare R2 (`wildfire.cheias.pt`). Per-asset provenance,
+validation report, and the four gates are all green.
 
-## Where it's going (WU sequence)
+## Where it's going (the six-pillar program)
 
-```mermaid
-flowchart TD
-    WU0["WU-0 ✅ repo live, CI green"] --> WU1["WU-1 ⚡ Prithvi burn-scar COG\npretrained, atlas RTX 3090"]
-    WU1 --> WU2["WU-2 OSM asset extract"]
-    WU1 --> WU3["WU-3 static rasters\nEFFIS · COS · canopy · DEM"]
-    WU1 --> WU4["WU-4 ICNF burns 1975–2025"]
-    WU3 --> WU5["WU-5 fuel layer\nreclass, no ML"]
-    WU2 --> WU6["WU-6 per-asset features\n→ exposure RANK"]
-    WU5 --> WU6
-    WU4 --> WU6
-    WU1 -.recent_burn_share_12mo.-> WU6
-    WU6 --> WU7["WU-7 validation\nlift / Spearman vs ICNF"]
-    WU4 --> WU7
-    WU7 --> WU8["WU-8 maps + story\nranked assets on S2 imagery"]
-```
+The original WU-0..WU-8 sequence above is **complete**. The ongoing program is
+described in [`docs/operationalization.md`](operationalization.md) — read that
+document for the live dependency graph, execution order, and per-pillar
+definition-of-done. Summary of what the six pillars address:
 
-(Repo edits are strictly sequential — the DAG above shows *data*
-dependencies, not session parallelism. See the concurrency rule in the
-close-out plan.)
+| Pillar | Prompt | What it adds |
+|---|---|---|
+| 0 — Seasonal / FWI | `prompts/17` | Live fire-weather feature; backs the "this season" claim |
+| 1 — Network / topology | `prompts/19` | Graph-aware exposure (the headline differentiator) |
+| 2 — Widen validation | `prompts/18` | 4 more AOIs → N(burned) into the dozens |
+| 3 — Operationalization | `prompts/20` | Planner-facing brief with absolute thresholds |
+| 4 — FireScope benchmark | `prompts/21` | Head-to-head vs the public SOTA raster |
+| 6 — Housekeeping | `prompts/22` | This doc + `limitations.md` + `scaling.md` + close FLAG A |
+
+The network/topology pillar (Pillar 1) was originally labelled "P2 — later,
+higher effort" in `docs/strategy.md` §7. It has been promoted to a Wave-1
+parallel WU in the operationalization program because it is the headline
+differentiator and a long-lead engineering item. See `docs/strategy.md` §7
+item 7 for the reconciliation note.
 
 ## The final artifact set
 
@@ -73,4 +82,4 @@ fine-tuning or training of any model, no private operator data, no
 production claims. Future-work notes may mention foundation-model upgrades
 (e.g. TerraMind) in one paragraph — they are not on any path here.
 
-<!-- maintained alongside prompts/00_CLOSEOUT_PLAN.md; update both or neither -->
+<!-- maintained alongside docs/operationalization.md and docs/strategy.md; update all three when the program changes -->
