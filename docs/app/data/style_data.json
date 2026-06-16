@@ -2682,5 +2682,60 @@
    "role": "display",
    "description": "ICNF Áreas Ardidas perimeters (1990–2025 vintages inside the AOI)"
   }
+ },
+ "fwi_overlay": {
+  "valid_date": "2026-06-11",
+  "lag_note": "~2-day lag",
+  "attribution": "Source: CEMS Early Warning Data Store — Copernicus / ECMWF (CC-BY-4.0)",
+  "components": [
+   {
+    "component": "fwi",
+    "label": "Fire Weather Index (FWI)",
+    "href": "https://wildfire.cheias.pt/fwi_fwi_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 6.6677,
+    "value_max": 51.3572
+   },
+   {
+    "component": "ffmc",
+    "label": "Fine Fuel Moisture Code (FFMC)",
+    "href": "https://wildfire.cheias.pt/fwi_ffmc_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 80.4512,
+    "value_max": 96.7837
+   },
+   {
+    "component": "dmc",
+    "label": "Duff Moisture Code (DMC)",
+    "href": "https://wildfire.cheias.pt/fwi_dmc_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 17.0664,
+    "value_max": 247.5742
+   },
+   {
+    "component": "dc",
+    "label": "Drought Code (DC)",
+    "href": "https://wildfire.cheias.pt/fwi_dc_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 171.8263,
+    "value_max": 513.381
+   },
+   {
+    "component": "isi",
+    "label": "Initial Spread Index (ISI)",
+    "href": "https://wildfire.cheias.pt/fwi_isi_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 1.9088,
+    "value_max": 17.0584
+   },
+   {
+    "component": "bui",
+    "label": "Build-Up Index (BUI)",
+    "href": "https://wildfire.cheias.pt/fwi_bui_3857_2026-06-11.tif",
+    "crs": "EPSG:3857",
+    "value_min": 27.4979,
+    "value_max": 246.8377
+   }
+  ]
  }
 }

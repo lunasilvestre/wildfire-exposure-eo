@@ -524,3 +524,42 @@ def test_provenance_accepts_ewds_fields() -> None:
     assert prov.fwi_product_id == "cems-fire-historical-v1"
     assert prov.fwi_valid_date == "2026-06-10"
     assert prov.fwi_variable_map["fire_weather_index"] == "fwinx"
+
+
+# ---------------------------------------------------------------------------
+# EWDS FWI display-COG export (geobrowser overlay)
+# ---------------------------------------------------------------------------
+def test_fwi_component_value_range_known_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = fw.load_ewds_fwi_config(CONFIG_PATH)
+    _patch_fetch(monkeypatch, _fake_ewds_dataset(20.0))
+    surface = fw.build_ewds_fwi_surface(
+        box(-8.6, 40.6, -8.2, 40.9), date(2026, 6, 10), cfg, key="fake"
+    )
+    first = cfg.variables[0].feature_name
+    vmin, vmax = fw.fwi_component_value_range(surface, first)
+    # The fake surface fills the first var with a constant 20.0.
+    assert vmin == pytest.approx(20.0, abs=1e-3)
+    assert vmax == pytest.approx(20.0, abs=1e-3)
+
+
+def test_write_fwi_component_cog_is_3857_cog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import rasterio
+
+    cfg = fw.load_ewds_fwi_config(CONFIG_PATH)
+    _patch_fetch(monkeypatch, _fake_ewds_dataset(25.0))
+    surface = fw.build_ewds_fwi_surface(
+        box(-8.6, 40.6, -8.2, 40.9), date(2026, 6, 10), cfg, key="fake"
+    )
+    first = cfg.variables[0].feature_name
+    dst = tmp_path / "fwi_fwi_3857_2026-06-10.tif"
+    fw.write_fwi_component_cog(surface, first, dst)
+    assert dst.exists()
+    with rasterio.open(dst) as ds:
+        # Explicit display CRS (non-negotiable #2): reprojected 4326 -> 3857.
+        assert ds.crs is not None
+        assert ds.crs.to_epsg() == 3857
+        assert ds.tags(ns="IMAGE_STRUCTURE").get("LAYOUT") == "COG"
+        # nodata preserved as NaN so out-of-grid pixels paint transparent.
+        assert ds.nodata is None or np.isnan(ds.nodata)

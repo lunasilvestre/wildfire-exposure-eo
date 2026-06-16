@@ -23,6 +23,8 @@ from wildfire_exposure_eo.schemas.fuel_layer import (
 from wildfire_exposure_eo.schemas.geobrowser import (
     ExposureFeatureProperties,
     FuelLegendEntry,
+    FwiOverlay,
+    FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
     ValidationHeadline,
@@ -61,6 +63,8 @@ __all__ = [
     "FetchRecord",
     "FuelLayerProvenance",
     "FuelLegendEntry",
+    "FwiOverlay",
+    "FwiOverlayComponent",
     "GeobrowserArtifact",
     "GeobrowserStyleData",
     "GridSpec",
