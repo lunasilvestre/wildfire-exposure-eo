@@ -13,6 +13,15 @@ Keep entries terse. The git log carries the detail; this log carries the narrati
 
 ---
 
+## 2026-06-16 — 22_housekeeping_reconcile.md (WU-22, isolated worktree wu22-housekeeping-reconcile)
+- Commits: (see branch wu22-housekeeping-reconcile)
+- Gates passed: ruff ✓ format ✓ pyright ✓ (0 errors) pytest ✓ (248 passed, 6 skipped-slow) stac-validator (n/a — no STAC touched) smoke (n/a — docs/prompts only)
+- Phase 1: `docs/limitations.md` written — 6 limitations (L1 thin validation, L2 no live FWI, L3 AOI-relative, L4 fuel scale, L5 domain shift/detection framing, L6 rank-not-probability). Every numeric claim reproducible from `scripts/11_validate.py` at `4877c5d…` or `scripts/16_burn_scar_multiyear_validate.py`; no new numbers invented.
+- Phase 2: `docs/scaling.md` written — asset-volume (PostGIS path documented), cross-AOI comparability (national ref-dist requirement), R2 hosting (recipe and CORS status), GPU vs CPU inference notes, honest "not done" framing throughout; no production claims.
+- Phase 3: `docs/strategy.md` copied from main (was untracked in worktree) and annotated at §7 item 7 with the network-pillar promotion note. `docs/roadmap.md` repointed: status-date updated (2026-06-16, post-WU-10), "What exists today" diagram replaced with the full WU-0..WU-10 shipped set, "Where it's going" replaced with the six-pillar table pointing at `docs/operationalization.md`; the network-pillar contradiction removed. No doc now claims the network pillar is both "future P2" and "a shipped Wave-1 WU".
+- Phase 4: `prompts/_HIL.md` FLAG A closed (option a) — re-verified against `stac/burn-scar-recent/burn-scar-20260615T192025Z/` and `docs/app/data/style_data.json` (run-id `20260615T192025Z` confirmed live); `recent_burn_share_12mo` nulled in backdated window, so exposure parquet independent of new COG — close with no follow-on required for current report integrity. Forward-looking re-score noted as non-blocking follow-on. FLAG B restated open+deferred, evidence base cited.
+- Deviations: none. go_nogo = n/a (docs/prompts only scope, no code changed).
+
 ## 2026-06-12 — 15_geobrowser.md (WU-9, Fable build — HIL: Release creation needs human execution)
 - Commits: d01cebf (scripts + schemas + tests), 27ef3fe (STAC publish), 23e9ed9 (site), 0db5a68 (README), 28819ab (clean-tree style_data), bd08a17 (formatter ping-pong fix), + this entry + `prompts/_HIL.md`.
 - Gates passed: ruff ✓ format ✓ pyright ✓ (0 errors) pytest ✓ (incl. +9 unit/schema, +4 integration guards) stac-validator ✓ (validate --recursive: 8 valid / 0 invalid — note the installed CLI needs the `validate` subcommand, CLAUDE.md shows the older form) validate-schema ✓ (3045 rows on the committed parquet) smoke ✓ (`15_make_geobrowser_data.py --smoke` before pilot; pilot regen byte-identical from clean tree).
