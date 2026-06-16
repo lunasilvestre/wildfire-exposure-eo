@@ -382,3 +382,377 @@ def fire_weather_provenance(
         "fire_weather_out_of_archive": surface.is_null,
         "fire_weather_attribution": config.attribution,
     }
+
+
+# ===========================================================================
+# EWDS current-season FWI source (CEMS Early Warning Data Store)
+# ===========================================================================
+# A SECOND, INDEPENDENT fire-weather source alongside the GWIS backtest above.
+# Where GWIS carries a ~2014..2020 reanalysis archive, the CEMS EWDS
+# `cems-fire-historical-v1` reanalysis is updated daily and reaches the current
+# season (~2-day lag). We ingest the FULL Canadian FWI *system* (FWI + its five
+# components) plus the U.S. NFDRS burning index as AVAILABLE-but-UNWEIGHTED
+# relative inputs. These are observed reanalysis danger *indices* — one
+# normalised input each to a relative within-AOI screening rank, never a
+# probability or a forecast of ignition (CLAUDE.md non-negotiable #6).
+#
+# Determinism (#4): a single-day pull is a fixed function of ``(valid_date,
+# config)``; there is no RNG, but the entry points accept and thread ``seed``
+# for contract uniformity. CRS (#2): the netCDF arrives in EPSG:4326 — the CRS
+# is asserted explicitly and the 0..360 longitude convention is normalised to
+# -180..180 before the grid is tagged. Credentials (security): the EWDS key is
+# read from ``CDSAPI_KEY`` or parsed from ``~/.cdsapirc``; it is NEVER logged.
+# The public EWDS api-base lives in config and overrides the ``~/.cdsapirc``
+# url (which points at the CDS, not the EWDS).
+
+
+@dataclass(frozen=True)
+class EwdsFwiVariable:
+    """One requested FWI variable: CEMS request name, netCDF var, feature column."""
+
+    request_name: str
+    netcdf_var: str
+    feature_name: str
+
+
+@dataclass(frozen=True)
+class EwdsFwiConfig:
+    """Parsed ``ewds_fwi:`` block of ``config/fire_weather.yaml`` (validated)."""
+
+    version: str
+    api_base: str
+    dataset: str
+    product_type: str
+    dataset_type: str
+    system_version: str
+    grid: str
+    data_format: str
+    crs: str
+    product_id: str
+    provider: str
+    doi: str
+    license: str
+    attribution: str
+    variables: tuple[EwdsFwiVariable, ...]
+    zonal_stat: str
+
+    def __post_init__(self) -> None:
+        if not self.variables:
+            raise ValueError("ewds_fwi.variables must be non-empty")
+        # The dotted system-version forms return HTTP 400; the underscore form is
+        # the only one the EWDS process accepts (verified live 2026-06-16).
+        if "." in self.system_version:
+            raise ValueError(
+                f"system_version {self.system_version!r} uses a dotted form; EWDS requires the "
+                "underscore form (e.g. '4_1') — dotted forms return HTTP 400"
+            )
+        if self.data_format != "netcdf":
+            raise ValueError(f"unsupported data_format {self.data_format!r} (only 'netcdf')")
+        feats = [v.feature_name for v in self.variables]
+        if len(set(feats)) != len(feats):
+            raise ValueError(f"duplicate feature names in ewds_fwi.variables: {feats}")
+        ncs = [v.netcdf_var for v in self.variables]
+        if len(set(ncs)) != len(ncs):
+            raise ValueError(f"duplicate netcdf vars in ewds_fwi.variables: {ncs}")
+
+    @property
+    def feature_names(self) -> tuple[str, ...]:
+        """Per-component feature column names, in config order."""
+        return tuple(v.feature_name for v in self.variables)
+
+
+def load_ewds_fwi_config(path: Path) -> EwdsFwiConfig:
+    """Load + validate the ``ewds_fwi:`` block of ``config/fire_weather.yaml``."""
+    import yaml
+
+    payload = yaml.safe_load(path.read_text())
+    src = payload["ewds_fwi"]
+    variables = tuple(
+        EwdsFwiVariable(
+            request_name=str(req_name),
+            netcdf_var=str(spec["netcdf"]),
+            feature_name=str(spec["feature"]),
+        )
+        for req_name, spec in src["variables"].items()
+    )
+    return EwdsFwiConfig(
+        version=str(payload["version"]),
+        api_base=str(src["api_base"]),
+        dataset=str(src["dataset"]),
+        product_type=str(src["product_type"]),
+        dataset_type=str(src["dataset_type"]),
+        system_version=str(src["system_version"]),
+        grid=str(src["grid"]),
+        data_format=str(src["data_format"]),
+        crs=str(src["crs"]),
+        product_id=str(src["product_id"]),
+        provider=str(src["provider"]),
+        doi=str(src["doi"]),
+        license=str(src["license"]),
+        attribution=str(src["attribution"]),
+        variables=variables,
+        zonal_stat=str(src["zonal_stat"]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials — env first, then ~/.cdsapirc; the key is never logged/returned
+# in any provenance dict (security: secrets stay local).
+# ---------------------------------------------------------------------------
+def load_ewds_key(rc_path: Path | None = None) -> str:
+    """Resolve the Copernicus EWDS API key: ``CDSAPI_KEY`` env, else ``~/.cdsapirc``.
+
+    Only the *key* is taken from ``~/.cdsapirc``; its ``url:`` points at the CDS
+    and is deliberately ignored — the EWDS api-base lives in config and is
+    public. The returned key is a secret: callers must never log it.
+    """
+    import os
+
+    env = os.environ.get("CDSAPI_KEY")
+    if env:
+        return env.strip()
+    rc = rc_path if rc_path is not None else Path.home() / ".cdsapirc"
+    if not rc.exists():
+        raise ValueError(
+            "no EWDS credentials: set CDSAPI_KEY or provide ~/.cdsapirc with a 'key:' line "
+            "(get a Copernicus EWDS key at https://ewds.climate.copernicus.eu/)"
+        )
+    for line in rc.read_text().splitlines():
+        if line.strip().startswith("key:"):
+            return line.split(":", 1)[1].strip()
+    raise ValueError(f"{rc} has no 'key:' line")
+
+
+# ---------------------------------------------------------------------------
+# Single-day fetch of ALL requested FWI components (one netCDF, explicit CRS,
+# longitude normalised 0..360 -> -180..180).
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class EwdsFwiSurface:
+    """One day's per-component FWI surfaces plus the netCDF valid date.
+
+    ``components`` maps each feature name to a CRS-tagged ``(y, x)`` DataArray in
+    ``EPSG:4326`` (longitude already normalised to -180..180). ``valid_date`` is
+    the netCDF ``valid_time`` (the observed reanalysis day, ~2 days behind real
+    time). ``is_null`` flags an out-of-range request whose surfaces are all NaN
+    or all-zero — the feature is then absent for the run (never imputed).
+    """
+
+    components: dict[str, xr.DataArray]
+    valid_date: date
+    requested_date: date
+    is_null: bool
+
+
+def _normalize_longitude(da: xr.DataArray) -> xr.DataArray:
+    """Map a DataArray's longitude from the 0..360 convention to -180..180.
+
+    EWDS netCDF returns longitude in 0..360 (351.4 == -8.6). We shift any value
+    >180 by -360 and re-sort ascending so the grid is monotonic in -180..180.
+    The transform is a pure relabel of the x-coordinate; values are untouched.
+    """
+    lon_name = "x" if "x" in da.coords else "longitude"
+    lon = da[lon_name].values
+    shifted = np.where(lon > 180.0, lon - 360.0, lon)
+    da = da.assign_coords({lon_name: shifted})
+    return da.sortby(lon_name)
+
+
+def _fetch_ewds_fwi_day(
+    config: EwdsFwiConfig,
+    bbox_4326: tuple[float, float, float, float],
+    when: date,
+    *,
+    key: str,
+    client: Any | None = None,
+) -> tuple[dict[str, xr.DataArray], date]:
+    """Pull all configured FWI components for ``when`` as CRS-tagged DataArrays.
+
+    ``bbox_4326`` is ``(minlon, minlat, maxlon, maxlat)``; the EWDS ``area`` is
+    ``[N, W, S, E]``. One netCDF carries every requested variable; each is read
+    out under its real netCDF name (the request names differ — mapped in
+    config), CRS-asserted to EPSG:4326, and longitude-normalised. Returns the
+    per-feature DataArrays and the netCDF ``valid_time`` date.
+    """
+    import tempfile
+
+    import cdsapi
+    import rioxarray  # noqa: F401  (registers the .rio accessor used below)
+    import xarray as xr
+
+    minlon, minlat, maxlon, maxlat = bbox_4326
+    area = [round(maxlat, 3), round(minlon, 3), round(minlat, 3), round(maxlon, 3)]
+    request: dict[str, Any] = {
+        "product_type": [config.product_type],
+        "dataset_type": config.dataset_type,
+        "system_version": [config.system_version],
+        "year": [f"{when.year:04d}"],
+        "month": [f"{when.month:02d}"],
+        "day": [f"{when.day:02d}"],
+        "grid": config.grid,
+        "variable": [v.request_name for v in config.variables],
+        "data_format": config.data_format,
+        "area": area,
+    }
+    cli: Any = client
+    if cli is None:
+        # The ~/.cdsapirc url is the CDS; override to the public EWDS api-base.
+        cli = cdsapi.Client(
+            url=config.api_base, key=key, quiet=True, progress=False, wait_until_complete=True
+        )
+    logger.info(
+        "[fire_weather/ewds] %s: requesting %d FWI components from %s (%s, %s)",
+        when.isoformat(),
+        len(config.variables),
+        config.api_base,
+        config.dataset,
+        config.dataset_type,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "ewds_fwi.nc"
+        cli.retrieve(config.dataset, request, str(target))
+        ds = cast("xr.Dataset", xr.open_dataset(target, engine="netcdf4")).load()
+
+    # valid_time is the observed reanalysis day (~2-day lag); take the first.
+    valid = _coerce_valid_date(ds)
+
+    components: dict[str, xr.DataArray] = {}
+    for var in config.variables:
+        if var.netcdf_var not in ds.variables:
+            raise ValueError(
+                f"EWDS netCDF missing variable {var.netcdf_var!r} for request "
+                f"{var.request_name!r} (got {sorted(str(v) for v in ds.data_vars)})"
+            )
+        da = cast("xr.DataArray", ds[var.netcdf_var])
+        # Collapse the singleton time dim deterministically (first valid day).
+        for tdim in ("valid_time", "time"):
+            if tdim in da.dims:
+                da = da.isel({tdim: 0}, drop=True)
+        da = da.rename({"latitude": "y", "longitude": "x"})
+        da = _normalize_longitude(da)
+        da = da.rio.write_crs(config.crs)
+        if da.rio.crs is None or da.rio.crs.to_epsg() != int(config.crs.split(":")[1]):
+            raise ValueError(
+                f"EWDS FWI surface CRS {da.rio.crs} != configured {config.crs} — refusing "
+                "implicit reprojection (CLAUDE.md non-negotiable #2)"
+            )
+        components[var.feature_name] = da.astype("float32").rio.write_nodata(np.nan)
+    return components, valid
+
+
+def _coerce_valid_date(ds: xr.Dataset) -> date:
+    """Read the netCDF ``valid_time``/``time`` coordinate as a single ``date``."""
+    import pandas as pd
+
+    for name in ("valid_time", "time"):
+        if name in ds.coords or name in ds.variables:
+            raw = ds[name].values
+            first = np.asarray(raw).ravel()[0]
+            return cast("date", pd.Timestamp(first).date())
+    raise ValueError(
+        f"EWDS netCDF has no valid_time/time coordinate (got {sorted(str(c) for c in ds.coords)})"
+    )
+
+
+def build_ewds_fwi_surface(
+    aoi: BaseGeometry,
+    when: date,
+    config: EwdsFwiConfig,
+    *,
+    key: str | None = None,
+    client: Any | None = None,
+    seed: int = DEFAULT_SEED,
+) -> EwdsFwiSurface:
+    """Fetch all configured FWI components for ``when`` over ``aoi``.
+
+    A single EWDS netCDF download carries every requested component; each is
+    returned as a CRS-tagged (EPSG:4326), longitude-normalised surface keyed by
+    feature name. If every component surface is all-NaN or all-zero (an
+    out-of-range request) the result is flagged ``is_null`` and the caller drops
+    the features for the whole run — never imputed. ``seed`` is accepted for
+    contract uniformity; a single-day pull is deterministic without RNG.
+    """
+    _ = seed  # no RNG; threaded for contract uniformity (non-negotiable #4)
+    resolved_key = key if key is not None else load_ewds_key()
+    minx, miny, maxx, maxy = aoi.bounds
+    bbox_4326 = (float(minx), float(miny), float(maxx), float(maxy))
+    components, valid = _fetch_ewds_fwi_day(
+        config, bbox_4326, when, key=resolved_key, client=client
+    )
+    is_null = all(
+        bool(
+            np.all(~np.isfinite(da.values))
+            or np.all(np.abs(np.nan_to_num(da.values)) < _NULL_FWI_EPS)
+        )
+        for da in components.values()
+    )
+    return EwdsFwiSurface(
+        components=components, valid_date=valid, requested_date=when, is_null=is_null
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-asset, per-component zonal aggregator (reuses features._zonal).
+# ---------------------------------------------------------------------------
+def ewds_fwi_components(
+    buffers: gpd.GeoDataFrame,
+    surface: EwdsFwiSurface,
+    config: EwdsFwiConfig,
+) -> dict[str, pd.Series] | None:
+    """Zonal ``config.zonal_stat`` of each FWI component surface over the buffers.
+
+    Returns a dict ``{feature_name: pd.Series[asset_id]}`` (one entry per
+    configured component), or ``None`` when the surfaces are out-of-range null —
+    in which case the features are absent for the whole run and never imputed
+    (mirrors :func:`fire_danger_seasonal`). ``buffers`` are in ``ASSET_CRS``
+    (EPSG:32629) and reprojected to the surface CRS exactly once inside
+    ``_zonal`` (non-negotiable #2).
+    """
+    if surface.is_null:
+        logger.info(
+            "[fire_weather/ewds] surfaces are all-null for requested %s — features absent",
+            surface.requested_date,
+        )
+        return None
+    if buffers.crs is None or buffers.crs.to_epsg() != int(ASSET_CRS.split(":")[1]):
+        raise ValueError(
+            f"buffers CRS is {buffers.crs} — expected {ASSET_CRS} (call features.buffer_assets)"
+        )
+    out: dict[str, pd.Series] = {}
+    for var in config.variables:
+        da = surface.components[var.feature_name]
+        series = _zonal(da, buffers, config.zonal_stat)
+        series.name = var.feature_name
+        out[var.feature_name] = series
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Provenance helper (records dataset DOI, system version, valid date; no key).
+# ---------------------------------------------------------------------------
+def ewds_fwi_provenance(
+    config: EwdsFwiConfig,
+    surface: EwdsFwiSurface,
+) -> dict[str, Any]:
+    """Provenance dict for the EWDS FWI components (carried into the run manifest).
+
+    Records the dataset product id, DOI, dataset-type, system-version, the
+    requested and netCDF ``valid_time`` dates, and the request->netcdf variable
+    map — enough to reproduce the pull from ``code_commit_sha`` (non-negotiable
+    #3). The API key is NEVER included. ``fwi_valid_date`` is the observed
+    reanalysis day (~2-day lag), distinct from the requested date.
+    """
+    return {
+        "fwi_product_id": config.product_id,
+        "fwi_provider": config.provider,
+        "fwi_doi": config.doi,
+        "fwi_license": config.license,
+        "fwi_config_version": config.version,
+        "fwi_dataset_type": config.dataset_type,
+        "fwi_system_version": config.system_version,
+        "fwi_requested_date": surface.requested_date.isoformat(),
+        "fwi_valid_date": surface.valid_date.isoformat(),
+        "fwi_variable_map": {v.request_name: v.netcdf_var for v in config.variables},
+        "fwi_feature_names": list(config.feature_names),
+        "fwi_attribution": config.attribution,
+    }

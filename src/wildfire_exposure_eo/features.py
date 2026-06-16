@@ -558,6 +558,8 @@ def run_scoring(
     slope_da: xr.DataArray | None = None,
     nbr_delta_da: xr.DataArray | None = None,
     fire_weather_config_path: Path | None = None,
+    ewds_fwi_config_path: Path | None = None,
+    ewds_fwi_date: date | None = None,
     client: Client | None = None,
     seed: int = 42,
 ) -> ScoreResult:
@@ -576,6 +578,16 @@ def run_scoring(
     ``config/exposure_score.yaml`` (a separate, serialized edit); until then it
     is carried for inspection/provenance without changing any rank. The feature
     is absent (never imputed) when the season falls outside the GWIS archive.
+
+    ``ewds_fwi_config_path``: when given, the CEMS EWDS current-season FWI
+    *system* (FWI + its five components + the U.S. NFDRS burning index) is
+    pulled for ``ewds_fwi_date`` (defaults to ``window_end``) and each component
+    is added as an *available* feature column. Like ``fire_danger_seasonal``
+    these are AVAILABLE-but-UNWEIGHTED: carried for inspection/provenance,
+    influencing no rank until a weight is assigned in
+    ``config/exposure_score.yaml`` (a separate calibration step). Absent (never
+    imputed) when the EWDS surface is out-of-range. Requires a Copernicus EWDS
+    key (``CDSAPI_KEY`` env or ``~/.cdsapirc``).
     """
     import time
 
@@ -651,6 +663,26 @@ def run_scoring(
         if fw_series is not None:
             series["fire_danger_seasonal"] = fw_series
         fw_provenance = fire_weather_provenance(fw_config, surface, season_year)
+
+    # Current-season EWDS FWI system: the FULL Canadian FWI system + components,
+    # AVAILABLE-but-UNWEIGHTED (no exposure-score weight change). Absent (never
+    # imputed) when the EWDS surface is out-of-range. Requires a Copernicus key.
+    ewds_provenance: dict[str, Any] = {}
+    if ewds_fwi_config_path is not None:
+        from wildfire_exposure_eo.fire_weather import (
+            build_ewds_fwi_surface,
+            ewds_fwi_components,
+            ewds_fwi_provenance,
+            load_ewds_fwi_config,
+        )
+
+        ewds_config = load_ewds_fwi_config(ewds_fwi_config_path)
+        when_ewds = ewds_fwi_date if ewds_fwi_date is not None else window_end
+        ewds_surface = build_ewds_fwi_surface(aoi_geom, when_ewds, ewds_config, seed=seed)
+        ewds_series = ewds_fwi_components(buffers, ewds_surface, ewds_config)
+        if ewds_series is not None:
+            series.update(ewds_series)
+        ewds_provenance = ewds_fwi_provenance(ewds_config, ewds_surface)
     zonal_seconds = time.perf_counter() - t_zonal
 
     features_df = pd.DataFrame(index=asset_index)
@@ -683,6 +715,14 @@ def run_scoring(
         fire_weather_season_year=fw_provenance.get("fire_weather_season_year"),
         fire_weather_sample_dates=tuple(fw_provenance.get("fire_weather_sample_dates", ())),
         fire_weather_out_of_archive=fw_provenance.get("fire_weather_out_of_archive"),
+        fwi_product_id=ewds_provenance.get("fwi_product_id"),
+        fwi_doi=ewds_provenance.get("fwi_doi"),
+        fwi_config_version=ewds_provenance.get("fwi_config_version"),
+        fwi_dataset_type=ewds_provenance.get("fwi_dataset_type"),
+        fwi_system_version=ewds_provenance.get("fwi_system_version"),
+        fwi_requested_date=ewds_provenance.get("fwi_requested_date"),
+        fwi_valid_date=ewds_provenance.get("fwi_valid_date"),
+        fwi_variable_map=dict(ewds_provenance.get("fwi_variable_map", {})),
     )
 
     sample_row = _write_outputs(
