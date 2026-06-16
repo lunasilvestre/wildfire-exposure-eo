@@ -1,0 +1,45 @@
+{
+  "type": "FeatureCollection",
+  "name": "wildfire-exposure-eo validation AOI — Serra de Monchique (Algarve WUI)",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Serra de Monchique / Silves (2018 Algarve WUI fire)",
+        "iso3166_2": "PT-08",
+        "description": "Validation AOI centered on the August 2018 Serra de Monchique fire (Algarve), which burned approximately 27,200 ha and threatened the town of Monchique — the primary wildland-urban interface case study in southern Portugal. Copernicus EMS activation EMSR303 provides independent perimeter reference. This AOI is authored new (not promoted from an alt file); the bbox is a best-effort working value derived from the operationalization.md DRAFT (docs/operationalization.md §5b: '[-8.72, 37.18, -8.38, 37.45]') and expanded slightly south and west to be clearly larger than the pilot (~1774 km2 vs pilot ~902 km2). Different climate zone (Mediterranean Algarve) and WUI character from the other three AOIs.\n\n# TODO(provenance): Verify final bbox against EMSR303 delineation (https://emergency.copernicus.eu/mapping/list-of-components/EMSR303) and ICNF Áreas Ardidas 2018 annual release before freezing. Current coordinates are best-effort estimates anchored on Serra de Monchique (37.32°N, 8.54°W) and the documented fire extent. Do NOT treat as final without EMSR303 or ICNF boundary verification. Source for draft bbox: docs/operationalization.md §5b (2026-06-16).",
+        "rationale": "The WUI axis missing from the other three AOIs: a fire that explicitly threatened a populated urban centre (Monchique town, ~5,000 residents). Different climate zone (Mediterranean Algarve) exercises the score on a completely different fire-weather driver and fuel mix (thermophilous shrub, eucalyptus, cork-oak). The 2018 season was the second largest burned area in Algarve since records began. This AOI completes the four-AOI stress-test matrix: historical scar scale (Pedrógão), protected-area/high-mountain (Estrela + Gerês), WUI/urban-threat (Monchique).",
+        "source": "Bbox derived from docs/operationalization.md §5b DRAFT working value, expanded to be larger than pilot. Fire event source: ICNF Áreas Ardidas 2018 (https://www.icnf.pt/florestas/gfr/gfrint/ifiarf); Copernicus EMS EMSR303 (https://emergency.copernicus.eu/mapping/list-of-components/EMSR303). Both accessed 2026-06-16. NOTE: bbox coordinates are unverified against EMSR303 or ICNF 2018 perimeters — see TODO(provenance) above.",
+        "bbox_wgs84": [-8.75, 37.10, -8.30, 37.50],
+        "approx_size_km": "~40 x ~45 (~1774 km2, best-effort — see TODO(provenance))",
+        "primary_district": "Faro (PT-08)",
+        "secondary_districts": ["Beja (PT-02)"],
+        "anchor_fire_year": 2018,
+        "anchor_fire_ha_approx": 27200,
+        "anchor_fire_source": "ICNF Áreas Ardidas 2018 — Serra de Monchique; ~27,200 ha per ICNF annual report. Source: https://www.icnf.pt/florestas/gfr/gfrint/ifiarf (accessed 2026-06-16). NOTE: figure cited from ICNF only (non-negotiable #(c) — do not average with EFFIS which uses a different methodology).",
+        "copernicus_ems": "EMSR303 — independent perimeter reference; verify against https://emergency.copernicus.eu/mapping/list-of-components/EMSR303",
+        "icnf_coverage": "strong — ICNF 2018 perimeters are finalised and in the canonical annual release",
+        "osm_density": "moderate — Monchique town and Silves city provide infrastructure; verify before relying on asset counts",
+        "validation_notes": "BBOX IS DRAFT — see TODO(provenance). Must be verified against EMSR303 extent and ICNF 2018 Áreas Ardidas before Phase B. The smoke tile (smoke_monchique.geojson) is centred on Monchique town (~37.322°N, 8.540°W) as the highest-density infrastructure sub-tile, also unverified against actual ICNF burn intersection. Phase A gate (b) — ICNF intersection — must be confirmed once the bbox is finalised.",
+        "wu": "WU-18 (prompts/18_widen_validation.md) Phase A",
+        "status": "DRAFT — bbox unverified against EMSR303 / ICNF 2018; see TODO(provenance)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.75, 37.10],
+            [-8.30, 37.10],
+            [-8.30, 37.50],
+            [-8.75, 37.50],
+            [-8.75, 37.10]
+          ]
+        ]
+      }
+    }
+  ]
+}
