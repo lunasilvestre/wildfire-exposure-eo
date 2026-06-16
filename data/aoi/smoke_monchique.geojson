@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "name": "smoke tile for monchique validation AOI",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "smoke tile — Serra de Monchique / Monchique town (~37.322°N, 8.540°W)",
+        "iso3166_2": "PT-08",
+        "description": "~1 km × 1 km smoke tile centred on Monchique town (37.322°N, 8.540°W), the highest-density infrastructure sub-tile inside the monchique validation AOI and the area most directly threatened by the 2018 WUI fire. Tile is a best-effort pick pending full scripts/pick_smoke_tile.py validation against OSM (power_tower≥1 AND building≥1 AND highway≥1 AND intersects ICNF burn).\n\n# TODO(provenance): Run scripts/pick_smoke_tile.py against monchique.geojson to confirm this tile qualifies (power_tower, building, highway counts + ICNF burn intersection). Replace picker_score with actual values once verified.",
+        "bbox_wgs84": [-8.5456, 37.3175, -8.5344, 37.3265],
+        "picker_score": {
+          "towers": null,
+          "buildings": null,
+          "highways": null,
+          "intersects_burn": null,
+          "qualifies": null,
+          "feature_total": null,
+          "note": "UNVERIFIED — run scripts/pick_smoke_tile.py against monchique.geojson to populate"
+        },
+        "wu": "WU-18 (prompts/18_widen_validation.md) Phase A",
+        "status": "DRAFT — tile centred on Monchique town; picker_score unverified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.5456, 37.3175],
+            [-8.5344, 37.3175],
+            [-8.5344, 37.3265],
+            [-8.5456, 37.3265],
+            [-8.5456, 37.3175]
+          ]
+        ]
+      }
+    }
+  ]
+}

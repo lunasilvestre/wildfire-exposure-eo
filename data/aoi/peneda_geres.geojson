@@ -1,0 +1,47 @@
+{
+  "type": "FeatureCollection",
+  "name": "wildfire-exposure-eo validation AOI — Peneda-Gerês",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Peneda-Gerês National Park (Viana do Castelo / Braga flank)",
+        "iso3166_2": "PT-16",
+        "description": "Validation AOI centered on the July–August 2025 Peneda-Gerês fire — started 26 July 2025 inside the PNPG (Parque Nacional da Peneda-Gerês, the only Portuguese national park), the single largest event of the worst Portuguese fire season since 2017 (>200,000 ha nationally, ~2.3% of national territory). ICNF figures are PRELIMINARY for this event (publication lag expected — see provenance note). Promoted from alt_peneda_geres.geojson (2026-06-16) for WU-18 widened validation; bbox expanded west, south, and east (vs alt file's [-8.452, 41.715, -8.087, 41.985]) to make AOI clearly larger than the pilot (~1345 km2 vs pilot ~902 km2). Source: ICNF Áreas Ardidas (https://www.icnf.pt/florestas/gfr/gfrint/ifiarf, accessed 2026-06-16); Copernicus EMS activation (pending verification — check EMSR database for 2025 PNPG activation).",
+        "rationale": "Deliberate distribution-shift probe: granite/shrub Norte-mountain regime, the one Portuguese national park, very recent (2025). Tests whether the exposure score transfers off the Atlantic-Centro eucalyptus template. Different fire-weather drivers (northwest circulation vs southwest Atlantic). Rede Natura 2000 area complicates the WUI interface differently from the pilot. Bbox expanded (vs alt file) west to capture Arcos de Valdevez municipality, south to include Ponte da Barca (key infrastructure hub), and east to include the Gerês/Braga-side infrastructure — improving both OSM density and ICNF burn label intersection.",
+        "source": "Promoted from data/aoi/alt_peneda_geres.geojson with bbox expansion. Original alt bbox: [-8.452, 41.715, -8.087, 41.985]. Expansion rationale: capture Arcos de Valdevez (west), Ponte da Barca (south), and eastern Gerês limit toward Braga to increase AOI size above pilot and improve OSM critical-infra density. Fire event: ICNF 2025 season preliminary figures.",
+        "bbox_wgs84": [-8.52, 41.68, -8.05, 41.99],
+        "approx_size_km": "~39 x ~35 (~1345 km2)",
+        "primary_district": "Viana do Castelo (PT-16)",
+        "secondary_districts": ["Braga (PT-03)", "Vila Real (PT-17)"],
+        "anchor_fire_year": 2025,
+        "anchor_fire_ha_approx": 7500,
+        "anchor_fire_source": "ICNF Áreas Ardidas 2025 — PRELIMINARY; national season total >200,000 ha (https://www.icnf.pt/florestas/gfr/gfrint/ifiarf, accessed 2026-06-16). PNPG event perimeter ~5,800 ha in-park / ~7,500 ha total perimeter per preliminary ICNF figures. FLAG: verify final ICNF Áreas Ardidas 2025 release before freezing N(burned assets) for this AOI.",
+        "copernicus_ems": "activation pending verification — check Copernicus EMS for 2025 PNPG activation code",
+        "icnf_coverage": "preliminary — 2025 ICNF burned-area figures not yet in canonical annual release at AOI-freeze time; supplement with EFFIS rapid-mapping if needed",
+        "osm_density": "thinner than pilot — high-mountain/national-park terrain; Arcos de Valdevez and Ponte da Barca inclusion improves count",
+        "validation_notes": "ICNF figures for the 2025 Peneda-Gerês event are PRELIMINARY. Finalise before computing N(burned assets) for Phase B validation. Phase A gate (b) — ICNF intersection — must use the preliminary perimeter with an explicit caveat. OSM density check (gate d) is important: verify power_tower count inside bbox before relying on this AOI for asset counts.",
+        "promoted_from": "data/aoi/alt_peneda_geres.geojson",
+        "original_alt_bbox": [-8.452, 41.715, -8.087, 41.985],
+        "promoted_date": "2026-06-16",
+        "wu": "WU-18 (prompts/18_widen_validation.md) Phase A"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.52, 41.68],
+            [-8.05, 41.68],
+            [-8.05, 41.99],
+            [-8.52, 41.99],
+            [-8.52, 41.68]
+          ]
+        ]
+      }
+    }
+  ]
+}
