@@ -30,6 +30,8 @@ from wildfire_exposure_eo.schemas.geobrowser import (
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
 from wildfire_exposure_eo.schemas.scored_asset import (
     FEATURE_NAMES,
+    SCORE_FEATURE_NAMES,
+    TOPOLOGY_FEATURE_NAMES,
     AssetFeatures,
     ScoredAsset,
     ScoredAssetProvenance,
@@ -44,6 +46,8 @@ from wildfire_exposure_eo.schemas.static_raster_manifest import (
 __all__ = [
     "FEATURE_NAMES",
     "HF_MODEL_ID_PLACEHOLDER",
+    "SCORE_FEATURE_NAMES",
+    "TOPOLOGY_FEATURE_NAMES",
     "AssetFeatures",
     "BurnPerimeter",
     "BurnPerimeterProvenance",

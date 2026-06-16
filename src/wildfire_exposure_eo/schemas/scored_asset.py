@@ -25,9 +25,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-#: Canonical feature order — matches the keys in ``config/exposure_score.yaml``
-#: ``weights`` and the deterministic column order of the features parquet.
-FEATURE_NAMES: tuple[str, ...] = (
+#: Score-input feature order — matches the keys in ``config/exposure_score.yaml``
+#: ``weights`` and the deterministic column order of the features parquet. These
+#: are the features that may carry a normalized weight in the composite score.
+SCORE_FEATURE_NAMES: tuple[str, ...] = (
     "fuel_class_severity_weight",
     "canopy_height_p90_m",
     "slope_max_deg",
@@ -36,6 +37,21 @@ FEATURE_NAMES: tuple[str, ...] = (
     "nbr_delta_recent",
     "fire_danger_seasonal",
 )
+
+#: Topology-aware features (WU-19, pillar 1). AVAILABLE / reported-secondary: they
+#: are computed and carried per asset, but they are NOT in the normalized weight
+#: block of ``config/exposure_score.yaml`` — that integration is serialized later
+#: (WU-19 phase 3). ``None`` for any asset the graph does not cover (never imputed).
+TOPOLOGY_FEATURE_NAMES: tuple[str, ...] = (
+    "feeder_count",
+    "network_component_size",
+    "network_exposure_propagated",
+)
+
+#: All known per-asset feature names (score inputs + topology). ``compose_exposure``
+#: only weights names that also appear in the config ``weights`` block, so adding
+#: topology here makes it AVAILABLE without changing the score.
+FEATURE_NAMES: tuple[str, ...] = SCORE_FEATURE_NAMES + TOPOLOGY_FEATURE_NAMES
 
 
 class AssetFeatures(BaseModel):
@@ -67,6 +83,22 @@ class AssetFeatures(BaseModel):
     #: GWIS layer's real archive (all-zero raster → feature absent, not imputed).
     #: FWI is unbounded above but physically ≲ 200; bound generously.
     fire_danger_seasonal: float | None = Field(default=None, ge=0.0, le=1000.0)
+
+    # --- Topology-aware features (WU-19, pillar 1) — AVAILABLE / reported-secondary.
+    # Not in the normalized score-weight block (that integration is serialized
+    # later, WU-19 phase 3). ``None`` for any asset the network graph does not
+    # cover (e.g. non-power/water classes, or isolated nodes for the propagated
+    # feature when local exposure is absent). Never imputed.
+    #: Node degree under the inferred power/water topology (substation feeder count
+    #: / plant-reservoir link count). A structural relative feature, not a probability.
+    feeder_count: float | None = Field(default=None, ge=0.0)
+    #: Size of the connected component the node belongs to (1 = isolated). Larger =
+    #: embedded in a more extensive co-exposed sub-network. Structural, not a probability.
+    network_component_size: float | None = Field(default=None, ge=1.0)
+    #: Local exposure rank blended linearly with the mean of graph neighbours' local
+    #: exposure rank (α·self + (1-α)·mean(neighbours)). A *relative* within-AOI
+    #: screening rank like its inputs — never a calibrated probability or forecast.
+    network_exposure_propagated: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ScoredAssetProvenance(BaseModel):
