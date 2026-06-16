@@ -1,0 +1,71 @@
+# config/fire_weather.yaml
+# ───────────────────────────────────────────────────────────────────
+# Seasonal fire-weather (Canadian Fire Weather Index) feature source.
+#
+# Pillar 0 (prompt 17): restore an OPEN, PUBLIC, PROGRAMMATIC fire-weather
+# signal as one normalised input among the existing structural features.
+# This is exposure-RANK work, not forecasting: we ingest a danger *index*
+# (FWI) computed by a third party; we do NOT predict ignition or claim a
+# calibrated probability (CLAUDE.md non-negotiable #6).
+#
+# Source identity verified live on 2026-06-16 by scripts/17_fire_weather_audit.py
+# (CLAUDE.md non-negotiable #1 — no invented identifiers; the verdict JSON is
+# written to outputs/diagnostics/17_fire_weather_audit.json).
+#
+# Parsed and validated as `wildfire_exposure_eo.fire_weather.FireWeatherConfig`.
+# ───────────────────────────────────────────────────────────────────
+
+# Changelog
+#   0.1.0 (2026-06-16, WU-17): GWIS NASA GPM-IMERG FWI via the public,
+#     no-auth GWIS WMS. Phase-0 audit verdict: GREEN for windows whose
+#     season falls within the layer's real archive (≈2014-05 .. 2020-12);
+#     2021+ returns an all-zero raster (no data) and the feature is absent
+#     for that run (never imputed). See docs/data_sources.md §GWIS FWI.
+version: "0.1.0"
+
+source:
+  # WMS service exposing daily FWI rasters. No authentication; the geodata
+  # are released under the EU Data License (Fees=none, AccessConstraints=None
+  # in GetCapabilities, verified 2026-06-16).
+  service: "wms"
+  endpoint: "https://ies-ows.jrc.ec.europa.eu/gwis"
+  wms_version: "1.1.1"
+  # Layer carrying the Canadian Fire Weather Index derived from NASA's
+  # GPM-IMERG precipitation + GEOS-5 meteorology (GWIS reanalysis archive).
+  layer: "nasa.fwi_gpm.fwi"
+  # GetMap with this format returns a raw single-band int16 FWI raster
+  # (image/geotiff returns a STYLED RGB raster — do not use it for values).
+  raster_format: "image/tiff"
+  # Native CRS advertised by the layer in GetCapabilities (EPSG:4326).
+  crs: "EPSG:4326"
+  # Provider / dataset identity for provenance + attribution.
+  product_id: "GWIS/nasa.fwi_gpm.fwi"
+  provider: "JRC / Copernicus Global Wildfire Information System (GWIS)"
+  index: "canadian_fire_weather_index"
+  attribution: "Source: EFFIS/GWIS — JRC, European Commission (EU Data License)"
+  # Real-data archive bounds of the layer (probed 2026-06-16). The WMS time
+  # dimension advertises 2014-05-01/2099-12-31, but GetMap returns an
+  # all-zero raster outside the genuine archive — treated as "no data".
+  archive_start: "2014-05-01"
+  archive_end: "2020-12-31"
+
+feature:
+  # Column name written into the features parquet and referenced by the
+  # exposure-score weight block (the WEIGHT EDIT itself is serialized by the
+  # orchestrator in a later WU — this file only names + sources the feature).
+  name: "fire_danger_seasonal"
+  # Seasonal aggregation: take the peak (p95) daily FWI sampled across the
+  # principal fire season of the season-year, then zonal-mean over each asset
+  # buffer. p95 (not max) discards single-day spikes while keeping the upper
+  # tail, mirroring the burn-scar p85 reducer rationale.
+  season_reducer: "p95"
+  # Principal fire season for mainland Portugal (1-indexed, inclusive),
+  # aligned with config/burn_scar.yaml season_start_month/season_end_month.
+  season_start_month: 6
+  season_end_month: 10
+  # Daily samples taken on these days-of-month within each season month, to
+  # keep the WMS request count bounded and the run deterministic. Two samples
+  # per month over Jun-Oct = 10 daily FWI rasters per season-year.
+  sample_days: [1, 15]
+  # Buffer zonal statistic applied to the season-reduced FWI surface.
+  zonal_stat: "mean"

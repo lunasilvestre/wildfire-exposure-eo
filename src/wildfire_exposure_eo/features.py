@@ -557,7 +557,9 @@ def run_scoring(
     exposure_out: Path,
     slope_da: xr.DataArray | None = None,
     nbr_delta_da: xr.DataArray | None = None,
+    fire_weather_config_path: Path | None = None,
     client: Client | None = None,
+    seed: int = 42,
 ) -> ScoreResult:
     """End-to-end: features → composite rank → two GeoParquet artefacts.
 
@@ -566,6 +568,14 @@ def run_scoring(
     Every feature respects ``window_end`` (backdatable); the burn-scar COG is the
     one fixed-window input and yields a null ``recent_burn_share_12mo`` outside
     its window. Returns a :class:`ScoreResult` with a sample row and ms/asset.
+
+    ``fire_weather_config_path`` (WU-17, pillar 0): when given, the open GWIS
+    Canadian-FWI seasonal feature ``fire_danger_seasonal`` is computed for the
+    backdatable season-year of ``window_end`` and added as an *available*
+    feature column. It only influences the score once a weight is assigned in
+    ``config/exposure_score.yaml`` (a separate, serialized edit); until then it
+    is carried for inspection/provenance without changing any rank. The feature
+    is absent (never imputed) when the season falls outside the GWIS archive.
     """
     import time
 
@@ -621,6 +631,26 @@ def run_scoring(
     if recent is not None:
         series["recent_burn_share_12mo"] = recent
         burn_scar_sha = sha256_file(burn_scar_cog)
+
+    # Seasonal fire-weather (WU-17, pillar 0): an OPEN danger-index feature.
+    # Available but unweighted until the score-weight edit is serialized; null
+    # (absent, never imputed) when the season-year is outside the GWIS archive.
+    fw_provenance: dict[str, Any] = {}
+    if fire_weather_config_path is not None:
+        from wildfire_exposure_eo.fire_weather import (
+            build_seasonal_fwi_surface,
+            fire_danger_seasonal,
+            fire_weather_provenance,
+            load_fire_weather_config,
+        )
+
+        fw_config = load_fire_weather_config(fire_weather_config_path)
+        season_year = recent_season_year(window_end)
+        surface = build_seasonal_fwi_surface(aoi_geom, season_year, fw_config, seed=seed)
+        fw_series = fire_danger_seasonal(buffers, surface, fw_config)
+        if fw_series is not None:
+            series["fire_danger_seasonal"] = fw_series
+        fw_provenance = fire_weather_provenance(fw_config, surface, season_year)
     zonal_seconds = time.perf_counter() - t_zonal
 
     features_df = pd.DataFrame(index=asset_index)
@@ -648,6 +678,11 @@ def run_scoring(
         dem_item_ids=tuple(dem_item_ids),
         s2_item_ids=tuple(s2_item_ids),
         burn_share_threshold=cog_threshold,
+        fire_weather_product_id=fw_provenance.get("fire_weather_product_id"),
+        fire_weather_config_version=fw_provenance.get("fire_weather_config_version"),
+        fire_weather_season_year=fw_provenance.get("fire_weather_season_year"),
+        fire_weather_sample_dates=tuple(fw_provenance.get("fire_weather_sample_dates", ())),
+        fire_weather_out_of_archive=fw_provenance.get("fire_weather_out_of_archive"),
     )
 
     sample_row = _write_outputs(
