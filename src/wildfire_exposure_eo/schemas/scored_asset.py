@@ -34,6 +34,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     "historical_burn_share",
     "recent_burn_share_12mo",
     "nbr_delta_recent",
+    "fire_danger_seasonal",
 )
 
 
@@ -59,6 +60,13 @@ class AssetFeatures(BaseModel):
     #: buffer. Positive = NBR declined into late summer (drier / more stressed
     #: vegetation). NBR ∈ [-1, 1] so the delta ∈ [-2, 2].
     nbr_delta_recent: float | None = Field(default=None, ge=-2.0, le=2.0)
+    #: Zonal mean of the season-reduced (p95) Canadian Fire Weather Index over
+    #: the asset buffer (WU-17, GWIS NASA GPM-IMERG FWI). FWI is an OPEN danger
+    #: *index* — this is one normalised input to a relative rank, never a
+    #: probability or forecast. ``None`` when the season-year falls outside the
+    #: GWIS layer's real archive (all-zero raster → feature absent, not imputed).
+    #: FWI is unbounded above but physically ≲ 200; bound generously.
+    fire_danger_seasonal: float | None = Field(default=None, ge=0.0, le=1000.0)
 
 
 class ScoredAssetProvenance(BaseModel):
@@ -96,6 +104,19 @@ class ScoredAssetProvenance(BaseModel):
     s2_item_ids: tuple[str, ...] = Field(default_factory=tuple)
     #: Probability threshold used to binarise the burn-scar COG.
     burn_share_threshold: float = Field(..., gt=0.0, lt=1.0)
+
+    # --- Seasonal fire-weather (WU-17). All ``None`` when the feature was not
+    # computed for this run (no fire-weather config, or out-of-archive season).
+    #: GWIS FWI source product id (``GWIS/nasa.fwi_gpm.fwi``).
+    fire_weather_product_id: str | None = Field(default=None)
+    #: GWIS FWI ``config/fire_weather.yaml`` version.
+    fire_weather_config_version: str | None = Field(default=None)
+    #: Season-year whose fire season was sampled for the FWI surface.
+    fire_weather_season_year: int | None = Field(default=None)
+    #: Daily-FWI sample dates (ISO) actually fetched for the seasonal surface.
+    fire_weather_sample_dates: tuple[str, ...] = Field(default_factory=tuple)
+    #: ``True`` when the season fell outside the GWIS archive (feature absent).
+    fire_weather_out_of_archive: bool | None = Field(default=None)
 
     @field_validator("burn_scar_cog_sha")
     @classmethod

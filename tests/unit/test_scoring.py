@@ -104,7 +104,10 @@ def test_missing_feature_renormalises_without_imputation() -> None:
     out = compose_exposure(df, cfg)
     present = out.loc["a3", "features_present"]
     assert "recent_burn_share_12mo" not in present
-    assert set(present) == set(FEATURE_NAMES) - {"recent_burn_share_12mo"}
+    # Present = every FEATURE_NAMES column actually supplied in this frame, minus
+    # the one nulled for a3 (features absent from the frame are simply not listed).
+    supplied = {c for c in FEATURE_NAMES if c in df.columns}
+    assert set(present) == supplied - {"recent_burn_share_12mo"}
 
     # Hand-recompute a3: weighted mean of its percentile ranks over the 5
     # present features, renormalised by their weights (no zero imputation).
