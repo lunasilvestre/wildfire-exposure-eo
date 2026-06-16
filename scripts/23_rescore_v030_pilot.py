@@ -117,7 +117,9 @@ def main() -> int:
     parser.add_argument(
         "--fire-weather-config", type=Path, default=_ROOT / "config/fire_weather.yaml"
     )
-    parser.add_argument("--taxonomy", type=Path, default=_ROOT / "data/taxonomy/critical_infrastructure.yaml")
+    parser.add_argument(
+        "--taxonomy", type=Path, default=_ROOT / "data/taxonomy/critical_infrastructure.yaml"
+    )
     parser.add_argument(
         "--cached-run-id",
         type=str,
@@ -163,13 +165,16 @@ def main() -> int:
     if feats.crs is None or feats.crs.to_epsg() != 4326:
         raise ValueError(f"{args.cached_features}: expected EPSG:4326, got {feats.crs}")
     structural_cols = _structural_feature_cols(feats)
-    print(f"reusing {len(feats)} cached assets; structural features: {structural_cols}", file=sys.stderr)
+    print(
+        f"reusing {len(feats)} cached assets; structural features: {structural_cols}",
+        file=sys.stderr,
+    )
 
     # --- assert the cached source artefacts match by SHA-256 (non-negotiable #3) ---
     cached_prov = json.loads(
-        gpd.read_parquet(
-            args.cached_features.parent / f"exposure_{args.cached_run_id}.parquet"
-        )["provenance"].iloc[0]
+        gpd.read_parquet(args.cached_features.parent / f"exposure_{args.cached_run_id}.parquet")[
+            "provenance"
+        ].iloc[0]
     )
     for label, path, key in [
         ("osm", args.osm, "osm_parquet_sha"),
@@ -196,6 +201,7 @@ def main() -> int:
             .reset_index(drop=True)
         )
         print(f"[smoke] limiting to {len(assets)} assets", file=sys.stderr)
+    assert isinstance(assets, gpd.GeoDataFrame)  # narrow after the smoke sort/head chain
     buffers = buffer_assets(assets, taxonomy)
     meta = _asset_metadata(assets, taxonomy)
 
@@ -212,7 +218,9 @@ def main() -> int:
     surface = build_ewds_fwi_surface(aoi_geom, when, ewds_config, key=key, seed=DEFAULT_SEED)
     ewds_series = ewds_fwi_components(buffers, surface, ewds_config)
     if ewds_series is None:
-        raise RuntimeError(f"EWDS FWI surface is null for {when} — cannot re-score with current FWI")
+        raise RuntimeError(
+            f"EWDS FWI surface is null for {when} — cannot re-score with current FWI"
+        )
     ewds_prov = ewds_fwi_provenance(ewds_config, surface)
     print(f"fwi_valid_date: {surface.valid_date.isoformat()}", file=sys.stderr)
 
@@ -225,7 +233,7 @@ def main() -> int:
     for feat_name, series in ewds_series.items():
         features_df[feat_name] = series.reindex(asset_index).to_numpy()
     # Canonical column order.
-    features_df = features_df[[c for c in FEATURE_NAMES if c in features_df.columns]]
+    features_df = features_df.loc[:, [c for c in FEATURE_NAMES if c in features_df.columns]]
 
     # --- recompose with the v0.3.0 weights ---------------------------------
     config = load_exposure_config(args.exposure_config)
@@ -300,7 +308,7 @@ def _latest_available_date(aoi_geom: Any, config: Any, key: str) -> date:
     today = datetime.now(UTC).date()
     try:
         build_ewds_fwi_surface(aoi_geom, today, config, key=key, seed=DEFAULT_SEED)
-    except Exception as exc:  # noqa: BLE001 — parse the data-store message
+    except Exception as exc:  # parse the data-store message
         m = re.search(r"latest date available for this dataset is:\s*(\d{4}-\d{2}-\d{2})", str(exc))
         if m:
             return date.fromisoformat(m.group(1))
