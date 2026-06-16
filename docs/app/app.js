@@ -212,10 +212,21 @@ async function main() {
       sources: {
         osm: {
           type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          // OSM-data street tiles via CARTO's key-less CDN — NOT tile.openstreetmap.org.
+          // The page-level `no-referrer` meta (required so Cloudflare R2 hotlink
+          // protection serves the burn-scar/ICNF layers) strips the Referer, and
+          // OSM's tile policy blocks no-Referer browser requests at volume
+          // ("Access blocked / Referer required"). CARTO's basemap CDN serves
+          // without a Referer, so both basemaps stay no-Referer-tolerant.
+          tiles: [
+            "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            "https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          ],
           tileSize: 256,
-          maxzoom: 19,
-          attribution: "© OpenStreetMap contributors",
+          maxzoom: 20,
+          attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
         },
         satellite: {
           type: "raster",
