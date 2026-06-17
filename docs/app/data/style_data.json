@@ -1,6 +1,6 @@
 {
- "generated_by": "scripts/15_make_geobrowser_data.py at 951c219a64b4b00d761c04a1622865f04660e2f6",
- "code_commit_sha": "951c219a64b4b00d761c04a1622865f04660e2f6",
+ "generated_by": "scripts/15_make_geobrowser_data.py at 71681fe0508ce459728b9deb8232d8f80fa8c26b",
+ "code_commit_sha": "71681fe0508ce459728b9deb8232d8f80fa8c26b",
  "viridis_lut": [
   [
    68,
@@ -2631,7 +2631,7 @@
   }
  ],
  "validation": {
-  "run_id": "20260611T170549Z",
+  "run_id": "20260617T035233Z",
   "n_assets": 3045,
   "n_burned": 5,
   "base_rate": 0.0016420361247947454,
@@ -2648,9 +2648,9 @@
  },
  "artifacts": {
   "exposure_assets": {
-   "href": "app/data/exposure_assets_20260611T170549Z.geojson",
+   "href": "app/data/exposure_assets_20260617T035233Z.geojson",
    "crs": "EPSG:4326",
-   "run_id": "20260611T170549Z",
+   "run_id": "20260617T035233Z",
    "role": "display",
    "description": "Scored assets (subset of the ScoredAsset columns; authoritative GeoParquet with full per-row provenance is the STAC asset)"
   },
@@ -2680,13 +2680,13 @@
    "crs": "EPSG:4326",
    "run_id": "20260610T164453Z",
    "role": "display",
-   "description": "ICNF Áreas Ardidas perimeters (1990–2025 vintages inside the AOI)"
+   "description": "ICNF \u00c1reas Ardidas perimeters (1990\u20132025 vintages inside the AOI)"
   }
  },
  "fwi_overlay": {
   "valid_date": "2026-06-11",
   "lag_note": "~2-day lag",
-  "attribution": "Source: CEMS Early Warning Data Store — Copernicus / ECMWF (CC-BY-4.0)",
+  "attribution": "Source: CEMS Early Warning Data Store \u2014 Copernicus / ECMWF (CC-BY-4.0)",
   "components": [
    {
     "component": "fwi",

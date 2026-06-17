@@ -1,6 +1,6 @@
 {
 "type": "FeatureCollection",
-"name": "exposure_assets_20260611T170549Z",
+"name": "exposure_assets_20260617T035233Z",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
 "features": [
 { "type": "Feature", "properties": { "asset_id": "osm:node/12046246688", "osm_type": "node", "osm_id": 12046246688, "asset_class": "power.tower", "criticality_weight": 0.4, "exposure_score": 0.91165129640349618, "exposure_rank": 1 }, "geometry": { "type": "Point", "coordinates": [ -8.3911653, 40.8084806 ] } },
