@@ -74,6 +74,9 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 
 .fwi-select-label { display: block; margin: 4px 0 0 22px; font-size: 12px; color: var(--muted); }
 .fwi-select-label select { margin-left: 4px; font-size: 12px; }
+/* Nested per-AOI ICNF toggle inside the study-area row: indented to read as a
+   sub-option of the active validation study area. */
+.study-icnf-label { display: block; margin: 6px 0 0 22px; cursor: pointer; }
 
 .error { color: #b00020; font-size: 12px; }
 

@@ -1377,6 +1377,10 @@ async function main() {
   const studyAreas = style.study_areas || [];
   const studyAreaByName = new Map(studyAreas.map((s) => [s.name, s]));
   const studyAreaAdded = new Set();
+  /* Per-AOI ICNF burns layers are heavy R2 GeoJSON fetched lazily — only when
+   * the ICNF toggle is ON and the AOI is shown. This set tracks which AOIs have
+   * had their ICNF layers added so we never re-add or re-fetch. */
+  const studyIcnfAdded = new Set();
 
   function saExposureLayerIds(name) {
     return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
@@ -1387,6 +1391,68 @@ async function main() {
     return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
   }
   function saOutlineLayerId(name) { return `sa-${name}-outline`; }
+  function saIcnfLayerIds(name) { return [`sa-${name}-icnf-fill`, `sa-${name}-icnf-2025`]; }
+
+  /* Add one study area's ICNF Áreas Ardidas perimeters (EPSG:4326), streamed
+   * lazily from Cloudflare R2 (same no-Referer GET path as the pilot burns and
+   * the R2 exposure layers). Mirrors the pilot's addBurns(): a translucent fill
+   * for all vintages plus a heavier outline for the most recent (2025) vintage,
+   * with a click popup and hover tooltip. Inserted below the AOI outline so the
+   * outline and asset glyphs stay on top. Honest scope (#6): these are observed
+   * historical burned-area perimeters, never a probability or forecast. */
+  async function saAddIcnf(name) {
+    const sa = studyAreaByName.get(name);
+    if (!sa || !sa.icnf_href) return;
+    const resp = await fetch(sa.icnf_href);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} fetching ${sa.label} ICNF perimeters from Cloudflare R2`);
+    }
+    const gj = await resp.json();
+    map.addSource(`sa-${name}-icnf-src`, { type: "geojson", data: gj });
+    map.addLayer(
+      {
+        id: `sa-${name}-icnf-fill`, type: "fill", source: `sa-${name}-icnf-src`,
+        paint: { "fill-color": "#e31a1c", "fill-opacity": 0.25 },
+      },
+      saOutlineLayerId(name),
+    );
+    map.addLayer(
+      {
+        id: `sa-${name}-icnf-2025`, type: "line", source: `sa-${name}-icnf-src`,
+        filter: ["==", ["get", "vintage_year"], 2025],
+        paint: { "line-color": "#e31a1c", "line-width": 2 },
+      },
+      saOutlineLayerId(name),
+    );
+    map.on("click", `sa-${name}-icnf-fill`, (e) => {
+      const p = e.features[0].properties;
+      new maplibregl.Popup()
+        .setLngLat(e.lngLat)
+        .setHTML(`ICNF burn perimeter — ${sa.label}<br>vintage <strong>${p.vintage_year}</strong>, ` +
+                 `${Number(p.area_ha).toFixed(1)} ha`)
+        .addTo(map);
+    });
+    map.on("mousemove", `sa-${name}-icnf-fill`, (e) => {
+      if (!hoverEnabled) return;
+      const p = e.features[0].properties;
+      showTip(e.originalEvent,
+        `ICNF burn perimeter (${sa.label})\n${p.vintage_year}  ·  ${Number(p.area_ha).toFixed(1)} ha`);
+    });
+    map.on("mouseleave", `sa-${name}-icnf-fill`, hideTip);
+    studyIcnfAdded.add(name);
+  }
+
+  /* Show/hide one study area's ICNF layers, adding them lazily on first reveal.
+   * No-op for an AOI without a published ICNF overlay (icnf_href absent). */
+  async function saSetIcnfVisible(name, on) {
+    const sa = studyAreaByName.get(name);
+    if (!sa || !sa.icnf_href) return;
+    if (on && !studyIcnfAdded.has(name)) {
+      await saAddIcnf(name);
+      return;
+    }
+    if (studyIcnfAdded.has(name)) setVisibility(saIcnfLayerIds(name), on);
+  }
 
   function saPopupHtml(sa, props) {
     const osmUrl = `https://www.openstreetmap.org/${props.osm_type}/${props.osm_id}`;
@@ -1512,19 +1578,26 @@ async function main() {
    * time". */
   let activeStudyArea = null;
 
-  /* Hide every study area's exposure + outline layers (those already added). */
+  /* Hide every study area's exposure + outline + ICNF layers (those added). */
   function saHideAll() {
     for (const name of studyAreaAdded) {
       setVisibility([...saExposureLayerIds(name), saOutlineLayerId(name)], false);
     }
+    for (const name of studyIcnfAdded) {
+      setVisibility(saIcnfLayerIds(name), false);
+    }
   }
 
   /* Show ONLY the named study area (adding it lazily on first reveal) and hide
-   * all the others. Returns a promise (the R2-hosted monchique fetch is async). */
+   * all the others. The active AOI's ICNF perimeters follow the ICNF toggle:
+   * if it is on, reveal them with the AOI (lazy R2 fetch on first reveal).
+   * Returns a promise (the R2-hosted monchique + ICNF fetches are async). */
   async function saShowOnly(name) {
     saHideAll();
     activeStudyArea = name;
     await saSetVisible(name, true);
+    const icnfOn = document.getElementById("toggle-study-icnf");
+    if (icnfOn && icnfOn.checked) await saSetIcnfVisible(name, true);
   }
 
   /* Fly to a study area (or the pilot) and DRIVE map visibility: a study area is
@@ -1647,6 +1720,15 @@ async function main() {
       if (flySel) flySel.value = name;
       await saShowOnly(name);
     },
+    /* Per-AOI ICNF Áreas Ardidas perimeters for the SELECTED validation study
+     * area (synced with the AOI selector — shown with whichever AOI is active).
+     * On: reveal the active AOI's ICNF (lazy R2 fetch). Off: hide it. When no
+     * AOI is active (pilot view) the toggle simply arms the state so the next
+     * AOI shown brings its ICNF up. */
+    "toggle-study-icnf": async (on) => {
+      if (!activeStudyArea) return;
+      await saSetIcnfVisible(activeStudyArea, on);
+    },
   };
   for (const [id, fn] of Object.entries(toggles)) {
     document.getElementById(id).addEventListener("change", async (e) => {
@@ -1702,7 +1784,11 @@ async function main() {
       .map(
         (s) =>
           `<li><strong>${s.label}</strong> — ${s.n_assets.toLocaleString("en")} assets, ` +
-          `model v${s.model_version}${s.committed ? "" : " (streamed from R2)"}</li>`,
+          `model v${s.model_version}` +
+          (s.icnf_n_perimeters != null
+            ? ` · ${s.icnf_n_perimeters.toLocaleString("en")} ICNF perimeters`
+            : "") +
+          `${s.committed ? "" : " (streamed from R2)"}</li>`,
       )
       .join("");
     document.getElementById("study-areas-row").hidden = false;
