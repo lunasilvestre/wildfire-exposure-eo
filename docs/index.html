@@ -98,8 +98,8 @@
           Streamed from Cloudflare R2 (loads on toggle).</p>
       </div>
       <div class="layer-row" id="study-areas-row" hidden>
-        <label><input type="checkbox" id="toggle-study-areas"> Validation study areas <span class="tag output">output</span></label>
-        <label class="fwi-select-label">Fly to:
+        <label><input type="checkbox" id="toggle-study-areas"> Validation study area <span class="tag output">output</span></label>
+        <label class="fwi-select-label">Show AOI:
           <select id="aoi-fly"></select>
         </label>
         <p class="caption">Four additional Portuguese AOIs the rank was reproduced on
@@ -107,8 +107,10 @@
           <strong>independently</strong> with the same open-data pipeline and shown with the same
           viridis exposure-rank encoding. The exposure rank is <strong>AOI-relative</strong> — rank 1
           is the most exposed asset <em>within that AOI</em>, not comparable across AOIs. These are
-          <strong>model v0.3.0</strong> runs (the pilot is v0.3.1; labelled honestly per AOI). Pick an
-          AOI to fly there; the layer loads on demand (Monchique streams from Cloudflare R2).</p>
+          <strong>model v0.3.0</strong> runs (the pilot is v0.3.1; labelled honestly per AOI).
+          Pick an AOI from the selector to fly there and show it on the map — <strong>one study area
+          at a time</strong> (the others hide); pick <em>Pilot</em> to hide all of them. The layer
+          loads on demand (Monchique streams from Cloudflare R2).</p>
         <ul id="study-areas-list" class="caption"></ul>
       </div>
       <div class="layer-row" id="hover-toggle-row">
@@ -123,9 +125,18 @@
     <section id="legend-section">
       <h2>Legend</h2>
       <div id="legend-exposure">
-        <h3>Exposure rank</h3>
+        <h3>Exposure rank <span class="legend-axis">colour</span></h3>
         <canvas id="ramp-viridis" width="220" height="12"></canvas>
         <div class="ramp-labels"><span id="ramp-rank-low">rank n (least exposed)</span><span>rank 1 (most exposed)</span></div>
+        <p class="caption legend-note">Relative, AOI-normalised screening rank — not a probability.
+          Marker <strong>shape = asset class</strong>; marker <strong>colour = exposure rank</strong>
+          (the per-class glyph itself is viridis-tinted by its rank).</p>
+      </div>
+      <div id="legend-symbols">
+        <h3>Asset class <span class="legend-axis">shape</span></h3>
+        <ul id="symbol-legend-list"></ul>
+        <p class="caption legend-note">Hand-authored CC0 glyphs (this repository; no third-party icon
+          font). Lines/areas keep their geometry; points use the per-class glyph.</p>
       </div>
       <div id="legend-burnscar" hidden>
         <h3>Burn-scar inference score</h3>
@@ -152,6 +163,93 @@
       <p class="caption">Full tables, ablation and caveats:
         <a href="https://github.com/lunasilvestre/wildfire-exposure-eo/blob/main/docs/validation_report.md">validation report</a>.</p>
     </section>
+
+    <section id="analyser-pointer">
+      <h2>Asset analyser</h2>
+      <p class="caption analyser-intro">A filterable, sortable table of every scored
+        critical-infrastructure asset across the AOIs opens as a <strong>floating attribute
+        table</strong> over the map (classic GIS style): drag it by its header, dock it to a side,
+        collapse it, or resize it. <strong>Impact severity</strong> =
+        exposure&nbsp;score&nbsp;&times;&nbsp;importance — a transparent <em>relative within-AOI
+        triage rank</em> that floats the most-exposed important assets (e.g. high-voltage lines and
+        substations) to the top. Not a probability. Sort by it or filter, then click a row to fly the
+        map there; clicking an asset on the map scrolls the table to its row. <strong>Roads/highways
+        are not in the scored set</strong> — see the note in the table.</p>
+      <p class="caption"><button type="button" id="analyser-reopen" class="ghost-btn">Show the
+        attribute table</button> (also via the &#9783; button at the top of the map).</p>
+    </section>
+
+    <!-- Analyser controls/table/notes are MOVED below into the floating panel
+         (#analyser-float, after </main>). This section is only the pointer. -->
+    <template id="analyser-content">
+      <div id="analyser-controls">
+        <label>AOI
+          <select id="filter-aoi"><option value="">all (within-AOI ranks)</option></select>
+        </label>
+        <label>Type
+          <select id="filter-type"><option value="">all classes</option></select>
+        </label>
+        <label>Exposure rank
+          <select id="filter-rank">
+            <option value="">any</option>
+            <option value="top10">top 10%</option>
+            <option value="top25">top 25%</option>
+            <option value="top50">top 50%</option>
+            <option value="bottom50">bottom 50%</option>
+          </select>
+        </label>
+        <label>Impact severity
+          <select id="filter-impact">
+            <option value="">any</option>
+            <option value="high">high (&ge; 0.66)</option>
+            <option value="medium">medium (0.33&ndash;0.66)</option>
+            <option value="low">low (&lt; 0.33)</option>
+          </select>
+        </label>
+        <label>Burned footprint
+          <select id="filter-burned">
+            <option value="">any</option>
+            <option value="burned">overlaps ICNF historical burn</option>
+            <option value="unburned">no historical-burn overlap</option>
+          </select>
+        </label>
+        <label class="analyser-search">Search
+          <input type="text" id="filter-search" placeholder="class or OSM id" autocomplete="off">
+        </label>
+      </div>
+      <p class="caption" id="analyser-count">…</p>
+      <div id="analyser-table-wrap">
+        <table id="analyser-table">
+          <thead>
+            <tr>
+              <th data-sort="asset_class">Asset</th>
+              <th data-sort="asset_class">Type</th>
+              <th data-sort="aoi">AOI</th>
+              <th data-sort="exposure_rank">Rank</th>
+              <th data-sort="exposure_score" class="num">Score</th>
+              <th data-sort="criticality_weight" class="num">Import.</th>
+              <th data-sort="impact_severity" class="num" id="th-impact" aria-sort="descending">Impact&nbsp;sev. &#9660;</th>
+            </tr>
+          </thead>
+          <tbody id="analyser-tbody"></tbody>
+        </table>
+      </div>
+      <p class="caption" id="analyser-burned-note"></p>
+      <p class="caption" id="analyser-roads-note">
+        <strong>Roads finding (honest):</strong> the scored asset set is OSM power, telecom, water,
+        education, emergency and <em>railway</em> infrastructure — the road network
+        (<code>highway=*</code>) is <strong>not fetched and not scored</strong>, so motorways and
+        arteries carry no exposure or impact-severity here. <code>transport.railway</code> is rail
+        track, not roads. Scoring roads as a class — so a major exposed road artery would surface in
+        this table — is a separate scoring-pipeline / data-contract step (the road-network work,
+        issue&nbsp;#11), not silently folded in. This table represents the scored set as it stands.
+      </p>
+      <p class="caption">Columns map to the published GeoJSON properties + the criticality weights in
+        <a href="https://github.com/lunasilvestre/wildfire-exposure-eo/blob/main/data/taxonomy/critical_infrastructure.yaml"><code>data/taxonomy/critical_infrastructure.yaml</code></a>.
+        Impact severity is within-AOI (the exposure rank is AOI-relative; scores are not comparable
+        across AOIs). Study-area rows (model v0.3.0) load when you reveal the validation study areas
+        or pick that AOI; Monchique streams from R2.</p>
+    </template>
 
     <section id="scope-section">
       <h2>Scope boundaries</h2>
@@ -199,6 +297,29 @@
   </aside>
   <div id="map" role="application" aria-label="Map of exposure-ranked critical infrastructure"></div>
 </main>
+
+<!-- Floating / dockable attribute table (classic GIS), overlaid on the map.
+     Draggable by its header, snap-dockable left/right, collapsible, resizable,
+     show/hide. Vanilla JS/CSS (app.js) — NO UI dependency. The controls/table
+     body is cloned in from #analyser-content at startup so the element IDs the
+     analyser JS binds to resolve once and only once. -->
+<button type="button" id="table-show-btn" hidden aria-label="Show attribute table"
+        title="Show attribute table">&#9783;&nbsp;Attribute&nbsp;table</button>
+<section id="analyser-float" class="docked-right" aria-label="Asset attribute table" hidden>
+  <header id="analyser-float-header">
+    <span class="grip" aria-hidden="true">&#9783;</span>
+    <strong class="title">Attribute&nbsp;table</strong>
+    <span class="float-actions">
+      <button type="button" id="dock-left" title="Dock left" aria-label="Dock left">&#9612;&#9664;</button>
+      <button type="button" id="dock-float" title="Undock (float)" aria-label="Float">&#9633;</button>
+      <button type="button" id="dock-right" title="Dock right" aria-label="Dock right">&#9654;&#9616;</button>
+      <button type="button" id="table-collapse" title="Collapse / expand" aria-label="Collapse">&#9472;</button>
+      <button type="button" id="table-hide" title="Hide table" aria-label="Hide table">&#10005;</button>
+    </span>
+  </header>
+  <div id="analyser-float-body"></div>
+  <div id="analyser-resize" title="Resize" aria-hidden="true"></div>
+</section>
 
 <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"
         integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp"

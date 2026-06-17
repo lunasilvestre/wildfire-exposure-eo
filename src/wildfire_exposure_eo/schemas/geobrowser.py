@@ -41,6 +41,15 @@ class ExposureFeatureProperties(BaseModel):
     exposure_score: float = Field(..., ge=0.0, le=1.0)
     #: Integer position within the AOI; 1 = most exposed.
     exposure_rank: int = Field(..., ge=1)
+    #: Area share of the asset buffer that intersected an ICNF historical-burn
+    #: perimeter within the scoring window (the ``historical_burn_share`` Stage-2
+    #: feature, lifted out of the nested ``features`` dict for the display copy).
+    #: A descriptive footprint statistic — NOT a probability and NOT the
+    #: validation label (the validation "burned" count comes from buffers that
+    #: intersect burns *after* the window, computed separately in validation.py).
+    #: ``None`` when the feature was not present for that run (the field is
+    #: optional so display copies exported before this column existed stay valid).
+    historical_burn_share: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class FuelLegendEntry(BaseModel):

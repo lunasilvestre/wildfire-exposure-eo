@@ -111,6 +111,115 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 }
 #diagrams h3 { margin-top: 14px; }
 
+/* Asset analyser table. Filter controls wrap in a compact grid; the table body
+   scrolls vertically inside a fixed-height wrap so the panel stays navigable
+   even with thousands of rows. Impact-severity cells carry a viridis-ish heat
+   bar (width = severity) so the triage reads at a glance. */
+.analyser-intro { margin-left: 0; }
+
+#analyser-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 8px;
+  margin: 6px 0;
+}
+#analyser-controls label {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: var(--muted);
+  gap: 2px;
+}
+#analyser-controls label.analyser-search { grid-column: 1 / -1; }
+#analyser-controls select,
+#analyser-controls input {
+  font-size: 12px;
+  padding: 2px 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+}
+
+#analyser-count { margin-left: 0; font-weight: 600; color: var(--ink); }
+
+#analyser-table-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#analyser-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  table-layout: fixed;
+}
+/* Fixed column widths so the IMPACT SEVERITY column (the headline) is always in
+   view inside the 380 px panel; long type/AOI text ellipsises rather than
+   pushing the numeric columns off-screen. */
+#analyser-table th:nth-child(1), #analyser-table td:nth-child(1) { width: 21%; }
+#analyser-table th:nth-child(2), #analyser-table td:nth-child(2) { width: 23%; }
+#analyser-table th:nth-child(3), #analyser-table td:nth-child(3) { width: 16%; }
+#analyser-table th:nth-child(4), #analyser-table td:nth-child(4) { width: 9%; }
+#analyser-table th:nth-child(5), #analyser-table td:nth-child(5) { width: 11%; }
+#analyser-table th:nth-child(6), #analyser-table td:nth-child(6) { width: 9%; }
+#analyser-table th:nth-child(7), #analyser-table td:nth-child(7) { width: 11%; }
+#analyser-table td.asset-name, #analyser-table td.asset-type, #analyser-table td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#analyser-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f0efe9;
+  z-index: 1;
+  text-align: left;
+  padding: 4px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+#analyser-table th.num { text-align: right; }
+#analyser-table th[aria-sort] { color: var(--accent); }
+#analyser-table tbody td {
+  padding: 3px 5px;
+  border-bottom: 1px solid #efeee8;
+  vertical-align: middle;
+}
+#analyser-table tbody tr { cursor: pointer; }
+#analyser-table tbody tr:hover { background: #fff3e0; }
+#analyser-table tbody tr.selected { background: #ffe1b3; }
+#analyser-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#analyser-table td.asset-type code { font-size: 10.5px; background: none; padding: 0; color: var(--muted); }
+.burn-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-left: 4px;
+  vertical-align: middle;
+  background: #e31a1c;
+}
+.impact-cell {
+  position: relative;
+  min-width: 56px;
+}
+.impact-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  margin-top: 1px;
+  background: var(--accent);
+}
+#analyser-roads-note {
+  margin-left: 0;
+  background: #f4f4ef;
+  border-left: 3px solid #5a7d9a;
+  padding: 6px 9px;
+}
+#analyser-burned-note { margin-left: 0; }
+
 footer { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 8px; }
 
 .maplibregl-popup-content { font-size: 12.5px; line-height: 1.4; }
@@ -140,8 +249,164 @@ footer { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 8px
   white-space: pre-line;
 }
 
+/* ------------------------------------------------------------------------- *
+ * Symbol legend (shape = asset class). Glyphs are dark-fill inline SVGs; the
+ * colour axis is shown by the viridis ramp above. */
+#legend-symbols { margin-top: 10px; }
+.legend-axis {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #fff; background: #5a7d9a;
+  padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle;
+}
+#legend-exposure .legend-axis { background: #2a6f3c; }
+.legend-note { margin-left: 0; }
+#symbol-legend-list { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+#symbol-legend-list li { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+#symbol-legend-list svg.glyph { flex: none; }
+
+.ghost-btn {
+  font: inherit; font-size: 12px; color: #0b5394;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 8px; cursor: pointer;
+}
+.ghost-btn:hover { background: #eef4fb; }
+
+/* ------------------------------------------------------------------------- *
+ * Floating / dockable attribute table. Overlaid on the map (position:fixed so
+ * its coordinate frame is the viewport — drag math stays offset-free). Three
+ * dock modes via class: .floating (free, left/top set inline), .docked-left,
+ * .docked-right (snap full-height to a side). .collapsed hides the body.
+ *
+ * NOTE: it is fixed to the viewport, not the #map element, but it visually sits
+ * over the map (which fills the right of the layout). Snap docking uses the
+ * map's on-screen rect (app.js) so "dock left" lands at the map's left edge,
+ * not under the study panel. */
+#analyser-float {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  background: #fdfdfb;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  font-size: 13px;
+}
+#analyser-float.floating {
+  width: 440px;
+  height: 60vh;
+  max-height: 88vh;
+}
+#analyser-float.docked-right {
+  top: 0; right: 0; bottom: 0;
+  width: 460px;
+  max-width: 60vw;
+  border-radius: 0;
+  border-right: none; border-top: none; border-bottom: none;
+}
+#analyser-float.docked-left {
+  top: 0; bottom: 0;
+  left: var(--panel-width); /* sit at the map's left edge, beside the study panel */
+  width: 460px;
+  max-width: 60vw;
+  border-radius: 0;
+  border-left: none; border-top: none; border-bottom: none;
+}
+#analyser-float.collapsed { height: auto !important; bottom: auto; }
+#analyser-float.collapsed #analyser-float-body,
+#analyser-float.collapsed #analyser-resize { display: none; }
+#analyser-float.dragging { user-select: none; opacity: 0.96; }
+
+#analyser-float-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: #2f3b45;
+  color: #fff;
+  cursor: grab;
+  touch-action: none;
+  flex: none;
+}
+#analyser-float.dragging #analyser-float-header { cursor: grabbing; }
+#analyser-float-header .grip { opacity: 0.7; font-size: 14px; }
+#analyser-float-header .title { font-size: 13px; flex: 1; }
+#analyser-float-header .float-actions { display: flex; gap: 3px; }
+#analyser-float-header button {
+  font: inherit; font-size: 12px; line-height: 1;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px; padding: 2px 6px; cursor: pointer;
+}
+#analyser-float-header button:hover { background: rgba(255, 255, 255, 0.28); }
+
+#analyser-float-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 10px 10px;
+}
+/* Inside the floating panel the table-wrap is the scroll container and grows to
+   fill the panel height (rather than the old fixed 340px sidebar cap). The
+   filter controls, count line and notes keep their natural height; the table
+   body scrolls inside the remaining space, with the sticky header pinned. */
+#analyser-float #analyser-table-wrap {
+  max-height: none;
+  flex: 1;
+  min-height: 120px;
+}
+#analyser-float #analyser-controls,
+#analyser-float #analyser-count,
+#analyser-float #analyser-burned-note,
+#analyser-float #analyser-roads-note { flex: none; }
+/* Notes below the table: collapse to a scrollable max-height so they do not
+   crowd out the table inside a short panel. */
+#analyser-float #analyser-roads-note { max-height: 6.5em; overflow: auto; }
+
+#analyser-resize {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 16px; height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 50%, #999 50% 60%, transparent 60% 70%, #999 70% 80%, transparent 80%);
+}
+
+/* The ☰ "show table" button, parked at the top of the map when the panel is
+   hidden. */
+#table-show-btn {
+  position: fixed;
+  z-index: 1200;
+  top: 10px;
+  left: calc(var(--panel-width) + 12px);
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  background: #2f3b45; color: #fff;
+  border: none; border-radius: 5px;
+  padding: 6px 11px; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+#table-show-btn:hover { background: #3d4b57; }
+
+/* Row flash on reverse (map → table) reveal: a brief amber pulse so the eye
+   catches the scrolled-to row. */
+@keyframes row-flash {
+  0% { background: #ffd166; }
+  60% { background: #ffe9b3; }
+  100% { background: #ffe1b3; } /* settle on the .selected highlight */
+}
+#analyser-table tbody tr.flash { animation: row-flash 1.2s ease-out; }
+
 @media (max-width: 760px) {
   #layout { flex-direction: column; }
   #panel { width: 100%; height: 45vh; border-right: none; border-bottom: 1px solid var(--border); }
   #map { height: 55vh; }
+  /* On narrow screens the floating table spans the width and docks bottom-ish. */
+  #analyser-float.floating { width: 94vw; height: 50vh; }
+  #analyser-float.docked-left { left: 0; width: 94vw; max-width: 94vw; }
+  #analyser-float.docked-right { width: 94vw; max-width: 94vw; }
+  #table-show-btn { left: 8px; top: auto; bottom: 8px; }
 }

@@ -20,6 +20,216 @@
 const REPO = "https://github.com/lunasilvestre/wildfire-exposure-eo";
 const RAW = "https://raw.githubusercontent.com/lunasilvestre/wildfire-exposure-eo/main";
 
+/* ------------------------------------------------------------------------- *
+ * Per-asset-class VECTOR SYMBOLS (shape = asset class, colour = exposure rank).
+ *
+ * Icon set: hand-authored inline monochrome SVG glyphs, original work for this
+ * repository, released CC0 (public domain) — same MIT/CC0 spirit as the rest of
+ * the demonstrator, NOT a pulled icon font. They are static client-side assets
+ * (no npm/pip dependency; satisfies non-negotiable #8 — nothing added to
+ * pyproject.toml — and #1 — no fabricated third-party identifiers). The glyph
+ * vocabulary is intentionally the classic civil-protection / OSM-map idiom:
+ *   education.school        -> graduation cap
+ *   emergency.hospital      -> H in a rounded box / cross
+ *   emergency.fire_station  -> flame
+ *   emergency.police        -> shield
+ *   power.*                 -> transmission pylon (lines/substation/tower/…)
+ *   water.*                 -> water drop (reservoir / treatment plant)
+ *   telecom.tower           -> broadcast mast
+ *   transport.railway       -> rail track
+ * Each path is drawn inside a 0..24 viewBox, filled solid; the renderer rasters
+ * it WHITE-on-transparent and derives a signed-distance field (see makeSdf) so
+ * MapLibre can tint the glyph per-feature with `icon-color` = the viridis
+ * exposure-rank ramp. Shape carries the asset class; colour carries the
+ * (relative, AOI-normalised) exposure rank — never a probability (#6). */
+const ASSET_ICON_PX = 48; // raster size for the SDF source image (hi-dpi crisp)
+// icon-image is registered at pixelRatio 2 (24 CSS px intrinsic); this multiplier
+// renders the glyph at ~36 CSS px. The glyph IS the marker now (no disc behind
+// it), so it is sized to read its SHAPE at a glance; review feedback: the earlier
+// 0.8 (~19 CSS px) glyph vanished under a white contrast disc, leaving only the
+// disc's coloured ring visible.
+const ASSET_ICON_SIZE = 1.5;
+const ASSET_ICONS = {
+  "education.school":
+    "M12 3 1 8l11 5 9-4.09V15h2V8L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z",
+  "emergency.hospital":
+    "M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm5 3v4H7v2h2v4h2v-4h2v4h2v-4h2v-2h-2V6h-2v4h-2V6H9z",
+  "emergency.fire_station":
+    "M13.5 1.5c.7 2.6-.4 4.3-1.8 5.9C10 9.3 8 11 8 14a4 4 0 0 0 1.6 3.2c-.3-.6-.4-1.3-.2-2 .3-1.3 1.4-2.1 2-3.4.5 1 .9 1.6 1.6 2.3.9.9 1.5 2 1.5 3.1 0 .8-.2 1.5-.6 2.1A4.5 4.5 0 0 0 17 15c0-3-1.6-4.6-2.3-6.2-.6-1.4-.6-3 .3-4.5-1-.3-1.7-1.4-1.5-2.8z",
+  "emergency.police":
+    "M12 2 4 5v6c0 5 3.4 9.1 8 11 4.6-1.9 8-6 8-11V5l-8-3zm0 4.2 1.5 3 3.3.3-2.5 2.2.8 3.2L12 17l-3.1 1.9.8-3.2L7.2 13.5l3.3-.3 1.5-3z",
+  "power.tower":
+    "M11 1v2.2L6.5 6.5 4 9h2.6L11 5.7V8l-4 3.1V13l4-3v3l-3.5 2.7L4 18.5V21h2.3L11 17.4V23h2v-5.6L17.7 21H20v-2.5l-3.5-2.8L13 13v-3l4 3v-1.9L13 8V5.7L17.4 9H20l-2.5-2.5L13 3.2V1h-2z",
+  "power.transmission_line": "__alias:power.tower",
+  "power.distribution_line": "__alias:power.tower",
+  "power.substation": "__alias:power.tower",
+  "power.transformer": "__alias:power.tower",
+  "water.reservoir":
+    "M12 2.5C8 8 5.5 11.8 5.5 15a6.5 6.5 0 0 0 13 0c0-3.2-2.5-7-6.5-12.5zM9 14a3 3 0 0 0 3 3v1.6A4.6 4.6 0 0 1 7.4 14H9z",
+  "water.treatment_plant": "__alias:water.reservoir",
+  "telecom.tower":
+    "M12 2a3 3 0 0 0-1 5.8L8.2 22h2.05l.62-3h2.26l.62 3h2.05L13 7.8A3 3 0 0 0 12 2zm-.71 14 .71-3.4.71 3.4h-1.42zM6.3 4.3 4.9 2.9a9 9 0 0 0 0 12.7l1.4-1.4a7 7 0 0 1 0-9.9zm11.4 0a7 7 0 0 1 0 9.9l1.4 1.4a9 9 0 0 0 0-12.7l-1.4 1.4z",
+  "transport.railway":
+    "M5 2h2v20H5V2zm12 0h2v20h-2V2zM8 4h8v2H8V4zm0 4h8v2H8V8zm0 4h8v2H8v-2zm0 4h8v2H8v-2z",
+};
+// Fallback glyph for any class without a bespoke icon: a filled square pin.
+const ASSET_ICON_FALLBACK = "M5 5h14v14H5z";
+
+// Resolve a class to its glyph path, following one level of "__alias:" pointer.
+function iconPathFor(assetClass) {
+  let p = ASSET_ICONS[assetClass];
+  if (typeof p === "string" && p.startsWith("__alias:")) {
+    p = ASSET_ICONS[p.slice("__alias:".length)];
+  }
+  return typeof p === "string" ? p : ASSET_ICON_FALLBACK;
+}
+
+/* Rasterise a 0..24 viewBox SVG path to a white-on-transparent RGBA bitmap. */
+function rasterizeGlyph(pathData, size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#fff";
+  ctx.translate(size * 0.08, size * 0.08); // 8% padding so the SDF spread fits
+  ctx.scale((size * 0.84) / 24, (size * 0.84) / 24);
+  ctx.fill(new Path2D(pathData));
+  return ctx.getImageData(0, 0, size, size);
+}
+
+/* Build a MapLibre SDF image (single-channel distance packed into RGBA alpha)
+ * from a rasterised glyph. SDF lets `icon-color` tint the glyph and keeps edges
+ * crisp at any zoom. Implemented as a brute-force two-pass distance transform on
+ * the small (ASSET_ICON_PX) bitmap: cheap (<2 ms/icon, ~13 icons, once) and with
+ * NO external dependency. Distance is signed (negative inside the glyph), scaled
+ * so the [-radius, +radius] band maps to alpha [0, 255] with the 0-isoline (the
+ * glyph edge) at the SDF cutoff 0.5 → alpha 191, matching MapLibre's default
+ * `icon-halo`/`text` SDF convention (cutoff 0.25, buffer 0.75 → edge at ~191). */
+function makeSdf(imageData, radius) {
+  const { width: w, height: h, data } = imageData;
+  const inside = new Float64Array(w * h);
+  for (let i = 0; i < w * h; i++) inside[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+  const dist = new Float64Array(w * h);
+  const BIG = 1e9;
+  // For each pixel, brute-force nearest opposite-class pixel within `radius`.
+  const r = Math.ceil(radius);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      const here = inside[idx];
+      let best = BIG;
+      for (let dy = -r; dy <= r; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          if (inside[ny * w + nx] !== here) {
+            const d = dx * dx + dy * dy;
+            if (d < best) best = d;
+          }
+        }
+      }
+      const d = best === BIG ? radius : Math.sqrt(best);
+      // signed: positive outside the glyph, negative inside
+      dist[idx] = here ? -Math.min(d, radius) : Math.min(d, radius);
+    }
+  }
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    // map signed distance [+radius .. -radius] -> alpha [0 .. 255]
+    const a = Math.round(255 * (0.5 - dist[i] / (2 * radius)));
+    out[i * 4] = 255;
+    out[i * 4 + 1] = 255;
+    out[i * 4 + 2] = 255;
+    out[i * 4 + 3] = Math.max(0, Math.min(255, a));
+  }
+  return { width: w, height: h, data: out };
+}
+
+/* Register all asset-class glyphs as SDF images on a Map. Idempotent per id.
+ * Returns the set of registered image ids. */
+function registerAssetIcons(map) {
+  const ids = new Set();
+  const radius = ASSET_ICON_PX * 0.18;
+  for (const assetClass of Object.keys(ASSET_ICONS)) {
+    const id = iconImageId(assetClass);
+    if (map.hasImage(id)) {
+      ids.add(id);
+      continue;
+    }
+    const sdf = makeSdf(rasterizeGlyph(iconPathFor(assetClass), ASSET_ICON_PX), radius);
+    map.addImage(id, sdf, { sdf: true, pixelRatio: 2 });
+    ids.add(id);
+  }
+  // fallback glyph
+  if (!map.hasImage("ai-fallback")) {
+    const sdf = makeSdf(rasterizeGlyph(ASSET_ICON_FALLBACK, ASSET_ICON_PX), radius);
+    map.addImage("ai-fallback", sdf, { sdf: true, pixelRatio: 2 });
+  }
+  return ids;
+}
+
+/* Inline SVG markup for a glyph, for the legend (not the map). Dark fill so the
+ * legend reads "shape = class"; the colour axis is shown by the viridis ramp. */
+function glyphSvg(assetClass, px = 16) {
+  const path = iconPathFor(assetClass);
+  return (
+    `<svg viewBox="0 0 24 24" width="${px}" height="${px}" aria-hidden="true" class="glyph">` +
+    `<path d="${path}" fill="#333"></path></svg>`
+  );
+}
+
+/* Distinct legend rows: one per glyph group (power.* and water.* collapse to a
+ * single representative row), with a human label. Order is grouped by namespace
+ * for readability. */
+const SYMBOL_LEGEND = [
+  ["education.school", "School (education)"],
+  ["emergency.hospital", "Hospital"],
+  ["emergency.fire_station", "Fire station"],
+  ["emergency.police", "Police"],
+  ["power.tower", "Power (line / tower / substation / transformer)"],
+  ["water.reservoir", "Water (reservoir / treatment plant)"],
+  ["telecom.tower", "Telecom mast"],
+  ["transport.railway", "Railway"],
+];
+
+function fillSymbolLegend() {
+  const el = document.getElementById("symbol-legend-list");
+  if (!el) return;
+  el.innerHTML = SYMBOL_LEGEND.map(
+    ([cls, label]) => `<li>${glyphSvg(cls)}<span>${escapeHtml(label)}</span></li>`,
+  ).join("");
+}
+
+function iconImageId(assetClass) {
+  // collapse aliases so power.* share one image; otherwise per-class id
+  const resolved =
+    typeof ASSET_ICONS[assetClass] === "string" && ASSET_ICONS[assetClass].startsWith("__alias:")
+      ? ASSET_ICONS[assetClass].slice("__alias:".length)
+      : assetClass;
+  return ASSET_ICONS[resolved] ? `ai-${resolved}` : "ai-fallback";
+}
+
+/* MapLibre `icon-image` expression: pick the per-class glyph by asset_class,
+ * falling back to the square pin. Built from the known class list so the match
+ * is explicit (no silent class drift). */
+function iconImageExpression() {
+  const expr = ["match", ["get", "asset_class"]];
+  for (const assetClass of Object.keys(ASSET_ICONS)) {
+    if (ASSET_ICONS[assetClass] && !ASSET_ICONS[assetClass].startsWith("__alias:")) {
+      // direct-icon class: list it and every alias that points at it
+      const aliases = Object.keys(ASSET_ICONS).filter(
+        (k) => ASSET_ICONS[k] === `__alias:${assetClass}`,
+      );
+      expr.push([assetClass, ...aliases], `ai-${assetClass}`);
+    }
+  }
+  expr.push("ai-fallback");
+  return expr;
+}
+
 const errBox = document.getElementById("layer-error");
 
 function showError(msg) {
@@ -178,6 +388,36 @@ async function renderDiagrams() {
   }
 }
 
+/* Representative point [lng, lat] for a feature, used by the analyser table to
+ * fly/zoom to a clicked row. Centroid of the coordinate bounding box — exact
+ * enough to recentre the map; the popup then anchors on the same point. Works
+ * for Point / LineString / Polygon (and their Multi* variants) without pulling
+ * in turf. */
+function featureCenter(geometry) {
+  let minx = 180, miny = 90, maxx = -180, maxy = -90;
+  const walk = (coords) => {
+    if (typeof coords[0] === "number") {
+      minx = Math.min(minx, coords[0]);
+      maxx = Math.max(maxx, coords[0]);
+      miny = Math.min(miny, coords[1]);
+      maxy = Math.max(maxy, coords[1]);
+    } else {
+      coords.forEach(walk);
+    }
+  };
+  walk(geometry.coordinates);
+  return [(minx + maxx) / 2, (miny + maxy) / 2];
+}
+
+/* Impact severity = exposure_score × criticality_weight. A transparent RELATIVE
+ * within-AOI triage rank (non-negotiable #6: never a probability). Both inputs
+ * are in [0, 1], so the product is too; sorting by it floats the most-exposed
+ * IMPORTANT assets (high-voltage lines w=1.0, substations w=0.95) above merely
+ * high-rank low-criticality ones (a pole/tower at w=0.4). */
+function impactSeverity(props) {
+  return Number(props.exposure_score) * Number(props.criticality_weight);
+}
+
 function popupHtml(props, n) {
   const osmUrl = `https://www.openstreetmap.org/${props.osm_type}/${props.osm_id}`;
   return `<h4>${props.asset_class}</h4>
@@ -187,7 +427,478 @@ function popupHtml(props, n) {
     <a href="${osmUrl}" target="_blank" rel="noopener">${props.asset_id}</a>`;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+/* ------------------------------------------------------------------------- *
+ * Asset analyser — a filterable / sortable TABLE over the scored asset set.
+ *
+ * Rows come from the SAME published exposure GeoJSONs the map renders (pilot +
+ * the four study AOIs); nothing is fabricated. Each row carries:
+ *   asset_class, AOI, exposure_rank (AOI-relative), exposure_score,
+ *   criticality_weight (the taxonomy importance), impact_severity (=score×weight),
+ *   historical_burn_share (may be null where the AOI's display copy predates the
+ *   field), a representative point for zoomTo, and the raw props for the popup.
+ *
+ * Sorting by IMPACT SEVERITY (the default, descending) is the "find the major
+ * exposed asset" use case: high-criticality lines/substations float to the top.
+ * Clicking a row flies the map to that asset and opens its popup.
+ *
+ * createAnalyser returns { addAoi } — call addAoi(aoiKey, label, geojson, nAssets)
+ * as each AOI's GeoJSON becomes available (pilot eagerly; study areas lazily).
+ * ------------------------------------------------------------------------- */
+function createAnalyser({ flyToAsset }) {
+  const rows = [];
+  const aoiLabels = new Map(); // key -> human label
+  const SEED_DISPLAY = 250; // cap rendered rows (perf); count line states the full match total
+  let sortKey = "impact_severity";
+  let sortDir = -1; // -1 desc, +1 asc
+  let selectedId = null;
+
+  const tbody = document.getElementById("analyser-tbody");
+  const countEl = document.getElementById("analyser-count");
+  const burnedNoteEl = document.getElementById("analyser-burned-note");
+  const els = {
+    aoi: document.getElementById("filter-aoi"),
+    type: document.getElementById("filter-type"),
+    rank: document.getElementById("filter-rank"),
+    impact: document.getElementById("filter-impact"),
+    burned: document.getElementById("filter-burned"),
+    search: document.getElementById("filter-search"),
+  };
+
+  function refreshSelectOptions() {
+    const aoiSel = els.aoi;
+    const keep = aoiSel.value;
+    const aoiKeys = [...aoiLabels.keys()];
+    aoiSel.innerHTML =
+      `<option value="">all (within-AOI ranks)</option>` +
+      aoiKeys.map((k) => `<option value="${k}">${escapeHtml(aoiLabels.get(k))}</option>`).join("");
+    aoiSel.value = aoiKeys.includes(keep) ? keep : "";
+
+    const typeSel = els.type;
+    const keepType = typeSel.value;
+    const classes = [...new Set(rows.map((r) => r.asset_class))].sort();
+    typeSel.innerHTML =
+      `<option value="">all classes</option>` +
+      classes.map((c) => `<option value="${c}">${escapeHtml(c)}</option>`).join("");
+    typeSel.value = classes.includes(keepType) ? keepType : "";
+  }
+
+  function filtered() {
+    const fAoi = els.aoi.value;
+    const fType = els.type.value;
+    const fRank = els.rank.value;
+    const fImpact = els.impact.value;
+    const fBurned = els.burned.value;
+    const q = els.search.value.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (fAoi && r.aoi !== fAoi) return false;
+      if (fType && r.asset_class !== fType) return false;
+      if (fRank) {
+        const frac = r.exposure_rank / r.n_assets; // 0 = most exposed
+        if (fRank === "top10" && frac > 0.1) return false;
+        if (fRank === "top25" && frac > 0.25) return false;
+        if (fRank === "top50" && frac > 0.5) return false;
+        if (fRank === "bottom50" && frac <= 0.5) return false;
+      }
+      if (fImpact) {
+        const s = r.impact_severity;
+        if (fImpact === "high" && s < 0.66) return false;
+        if (fImpact === "medium" && (s < 0.33 || s >= 0.66)) return false;
+        if (fImpact === "low" && s >= 0.33) return false;
+      }
+      if (fBurned) {
+        if (r.historical_burn_share === null || r.historical_burn_share === undefined) return false;
+        const burned = r.historical_burn_share > 0;
+        if (fBurned === "burned" && !burned) return false;
+        if (fBurned === "unburned" && burned) return false;
+      }
+      if (q && !(`${r.asset_class} ${r.props.asset_id}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }
+
+  function render() {
+    const matches = filtered();
+    matches.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === "string") return sortDir * av.localeCompare(bv);
+      return sortDir * ((av ?? -Infinity) - (bv ?? -Infinity));
+    });
+    const shown = matches.slice(0, SEED_DISPLAY);
+    /* Always render the selected row even when it sorts past the display cap, so
+     * the reverse (map→table) binding can scroll/flash to a clicked asset that is
+     * not in the top SEED_DISPLAY. It is appended (sort order is preserved for
+     * the rest); it carries the same flash/select treatment. */
+    let selectionPinned = false;
+    if (selectedId && !shown.some((r) => r.id === selectedId)) {
+      const selRow = matches.find((r) => r.id === selectedId);
+      if (selRow) {
+        shown.push(selRow);
+        selectionPinned = true;
+      }
+    }
+    const burnedKnown = rows.some(
+      (r) => r.historical_burn_share !== null && r.historical_burn_share !== undefined,
+    );
+    countEl.textContent =
+      `${matches.length.toLocaleString("en")} asset${matches.length === 1 ? "" : "s"} match` +
+      (matches.length > SEED_DISPLAY ? ` — showing the top ${SEED_DISPLAY} by current sort` : "") +
+      (selectionPinned ? " + the selected asset" : "") +
+      `  ·  ${rows.length.toLocaleString("en")} loaded`;
+
+    tbody.innerHTML = shown
+      .map((r) => {
+        const sev = r.impact_severity;
+        const burnDot =
+          r.historical_burn_share > 0
+            ? ` <span class="burn-dot" title="buffer overlaps an ICNF historical-burn perimeter"></span>`
+            : "";
+        const sel = r.id === selectedId ? " selected" : "";
+        const cls = escapeHtml(r.asset_class);
+        return `<tr class="arow${sel}" data-id="${r.id}" title="${cls} · ${escapeHtml(r.aoiLabel)}">
+          <td class="asset-name" title="${escapeHtml(shortName(r.asset_class))}">${escapeHtml(shortName(r.asset_class))}${burnDot}</td>
+          <td class="asset-type"><code title="${cls}">${escapeHtml(typeLabel(r))}</code></td>
+          <td title="${escapeHtml(r.aoiLabel)}">${escapeHtml(r.aoiLabel)}</td>
+          <td class="num">${r.exposure_rank}</td>
+          <td class="num">${r.exposure_score.toFixed(3)}</td>
+          <td class="num">${r.criticality_weight.toFixed(2)}</td>
+          <td class="num impact-cell">${sev.toFixed(3)}
+            <span class="impact-bar" style="width:${Math.round(sev * 28)}px"></span></td>
+        </tr>`;
+      })
+      .join("");
+
+    burnedNoteEl.innerHTML = burnedKnown
+      ? `<strong>Burned footprint</strong> (red dot / filter): the asset buffer overlaps an ICNF ` +
+        `historical-burn perimeter (<code>historical_burn_share &gt; 0</code>, 1990&ndash;2024 ` +
+        `vintages). A descriptive footprint, not the post-window validation label and not a ` +
+        `probability. Available for the pilot; study-area display copies predate the column, so ` +
+        `their rows show no dot and the burned filter excludes them.`
+      : "";
+  }
+
+  function selectRow(id) {
+    selectedId = id;
+    for (const tr of tbody.querySelectorAll("tr.arow")) {
+      tr.classList.toggle("selected", tr.dataset.id === id);
+    }
+  }
+
+  // Short, readable asset label (drop the namespace for the first column).
+  function shortName(assetClass) {
+    return assetClass.split(".").slice(-1)[0].replace(/_/g, " ");
+  }
+  // Type column: full taxonomy class. (Road highway= classes would appear here
+  // if roads were scored — they are not; see the roads note under the table.)
+  function typeLabel(r) {
+    return r.asset_class;
+  }
+
+  // Compact AOI label for the (narrow) table cell — the full label still drives
+  // the filter dropdown and the popup denominator.
+  function shortAoi(label) {
+    return label.replace(/\s*\(pilot\)\s*/, "").split(/[\/(]/)[0].trim();
+  }
+
+  function addAoi(aoiKey, label, geojson, nAssets) {
+    aoiLabels.set(aoiKey, label);
+    const n = nAssets || geojson.features.length;
+    for (const f of geojson.features) {
+      const p = f.properties;
+      rows.push({
+        id: `${aoiKey}:${p.asset_id}`,
+        aoi: aoiKey,
+        aoiLabel: shortAoi(label),
+        asset_class: p.asset_class,
+        exposure_rank: Number(p.exposure_rank),
+        exposure_score: Number(p.exposure_score),
+        criticality_weight: Number(p.criticality_weight),
+        impact_severity: impactSeverity(p),
+        historical_burn_share:
+          p.historical_burn_share === undefined ? null : p.historical_burn_share,
+        n_assets: n,
+        center: featureCenter(f.geometry),
+        props: p,
+      });
+    }
+    refreshSelectOptions();
+    render();
+  }
+
+  // Header sort: click toggles direction; impact severity defaults descending.
+  for (const th of document.querySelectorAll("#analyser-table thead th")) {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) {
+        sortDir = -sortDir;
+      } else {
+        sortKey = key;
+        sortDir = key === "asset_class" || key === "aoi" ? 1 : -1;
+      }
+      for (const h of document.querySelectorAll("#analyser-table thead th")) {
+        h.removeAttribute("aria-sort");
+        h.textContent = h.textContent.replace(/ [▲▼]$/, "");
+      }
+      th.setAttribute("aria-sort", sortDir === -1 ? "descending" : "ascending");
+      th.append(sortDir === -1 ? " ▼" : " ▲");
+      render();
+    });
+  }
+
+  for (const el of Object.values(els)) {
+    el.addEventListener("input", render);
+    el.addEventListener("change", render);
+  }
+
+  // Row click → fly the map to the asset and open its popup.
+  tbody.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr.arow");
+    if (!tr) return;
+    const r = rows.find((x) => x.id === tr.dataset.id);
+    if (!r) return;
+    selectRow(r.id);
+    flyToAsset(r);
+  });
+
+  /* Smoothly scroll the (rendered) selected row into view inside the scroll wrap
+   * and flash it. The wrap (#analyser-table-wrap) is the scroll container, so we
+   * scroll IT rather than the document (the floating panel itself does not
+   * scroll the page). */
+  function scrollRowIntoView(id) {
+    const tr = tbody.querySelector(`tr.arow[data-id="${cssEscape(id)}"]`);
+    if (!tr) return false;
+    const wrap = document.getElementById("analyser-table-wrap");
+    const trTop = tr.offsetTop;
+    const target = trTop - wrap.clientHeight / 2 + tr.offsetHeight / 2;
+    wrap.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+    tr.classList.remove("flash");
+    // reflow so the animation restarts even on repeated reveals of the same row
+    void tr.offsetWidth;
+    tr.classList.add("flash");
+    return true;
+  }
+
+  /* Reverse binding: a click on the asset ON THE MAP reveals its row in the
+   * table. If the asset is filtered out, relax the filters that would hide it
+   * (keeping the AOI scoped to the asset's AOI) so the row is guaranteed to
+   * render, then select + scroll + flash it. */
+  function revealAsset(id) {
+    const r = rows.find((x) => x.id === id);
+    if (!r) return;
+    if (!filtered().some((x) => x.id === id)) {
+      els.type.value = "";
+      els.rank.value = "";
+      els.impact.value = "";
+      els.burned.value = "";
+      els.search.value = "";
+      if (els.aoi.value && els.aoi.value !== r.aoi) els.aoi.value = r.aoi;
+    }
+    selectedId = id;
+    render();
+    // render() rebuilt the tbody; selectRow re-applies the class, then scroll.
+    selectRow(id);
+    if (!scrollRowIntoView(id)) {
+      // Row still not in the capped slice (matched but sorted past SEED_DISPLAY):
+      // make the selection the primary sort context by scoping to its AOI.
+      els.aoi.value = r.aoi;
+      render();
+      selectRow(id);
+      scrollRowIntoView(id);
+    }
+    // Ensure the floating table is open so the reveal is visible.
+    showTable();
+  }
+
+  return { addAoi, revealAsset };
+}
+
+// Minimal CSS.escape shim (asset ids are `${aoi}:osm:node/123` — the ":" and "/"
+// are valid in an attribute selector value only when escaped).
+function cssEscape(s) {
+  if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
+}
+
+/* Floating-table visibility helper (defined at module scope so both the
+ * analyser's revealAsset and the toggle button can call it). Wired in main()
+ * once the panel exists; before that it is a no-op. */
+let showTable = () => {};
+
+/* ------------------------------------------------------------------------- *
+ * Floating / dockable attribute table controller.
+ *
+ * Classic GIS floating attribute table: the panel is overlaid on the map and
+ *   - DRAGGABLE by its header (free float),
+ *   - DOCKABLE to the left or right edge (snaps full-height to that side),
+ *   - COLLAPSIBLE to just its header bar,
+ *   - RESIZABLE (bottom-right grip when floating; width grip when docked),
+ *   - SHOW/HIDE via the × in the header and the ☰ button on the map.
+ * All vanilla pointer-events + a few CSS classes — no drag/dock dependency.
+ *
+ * The analyser controls/table markup is cloned in from the <template
+ * id="analyser-content"> so its element IDs exist exactly once in the document
+ * before createAnalyser binds to them. Returns nothing; sets the module-scope
+ * showTable() used by the reverse (map→table) binding. */
+function setupFloatingTable() {
+  const panel = document.getElementById("analyser-float");
+  const header = document.getElementById("analyser-float-header");
+  const body = document.getElementById("analyser-float-body");
+  const showBtn = document.getElementById("table-show-btn");
+  const tpl = document.getElementById("analyser-content");
+  if (!panel || !tpl) return;
+
+  // Clone the template content into the panel body (IDs now live in the doc).
+  body.appendChild(tpl.content.cloneNode(true));
+
+  const setDock = (mode) => {
+    panel.classList.remove("docked-left", "docked-right", "floating");
+    panel.classList.add(mode);
+    if (mode === "floating") {
+      // Centre-ish free float on first undock if it has no explicit position.
+      if (!panel.style.left && !panel.style.top) {
+        panel.style.left = "120px";
+        panel.style.top = "70px";
+      }
+    } else {
+      // Docking clears any free-float offset so the side snap is clean.
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.style.width = "";
+    }
+  };
+
+  showTable = () => {
+    panel.hidden = false;
+    showBtn.hidden = true;
+  };
+  const hideTable = () => {
+    panel.hidden = true;
+    showBtn.hidden = false;
+  };
+
+  document.getElementById("dock-left").addEventListener("click", () => setDock("docked-left"));
+  document.getElementById("dock-right").addEventListener("click", () => setDock("docked-right"));
+  document.getElementById("dock-float").addEventListener("click", () => setDock("floating"));
+  document.getElementById("table-hide").addEventListener("click", hideTable);
+  showBtn.addEventListener("click", showTable);
+  const reopen = document.getElementById("analyser-reopen");
+  if (reopen) reopen.addEventListener("click", showTable);
+
+  const collapseBtn = document.getElementById("table-collapse");
+  collapseBtn.addEventListener("click", () => {
+    panel.classList.toggle("collapsed");
+    collapseBtn.setAttribute(
+      "aria-label",
+      panel.classList.contains("collapsed") ? "Expand" : "Collapse",
+    );
+  });
+
+  /* Drag by the header → free float. Pointer events (covers mouse + touch).
+   * Dragging auto-undocks: a docked panel that is dragged becomes floating at
+   * the cursor. Snap-to-edge: releasing within SNAP px of the left/right map
+   * edge docks to that side (classic GIS magnet docking). */
+  const SNAP = 28;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let originLeft = 0;
+  let originTop = 0;
+  header.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return; // header buttons are not drag handles
+    dragging = true;
+    header.setPointerCapture(e.pointerId);
+    const rect = panel.getBoundingClientRect();
+    // Convert a docked panel to floating at its current on-screen rect.
+    if (!panel.classList.contains("floating")) {
+      panel.classList.remove("docked-left", "docked-right");
+      panel.classList.add("floating");
+      panel.style.width = rect.width + "px";
+    }
+    originLeft = rect.left;
+    originTop = rect.top;
+    startX = e.clientX;
+    startY = e.clientY;
+    panel.classList.add("dragging");
+  });
+  header.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const nx = originLeft + (e.clientX - startX);
+    const ny = originTop + (e.clientY - startY);
+    panel.style.left = Math.max(0, nx) + "px";
+    panel.style.top = Math.max(0, ny) + "px";
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    panel.classList.remove("dragging");
+    try {
+      header.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+    // Snap to a side if released near the map's left/right edge.
+    const mapEl = document.getElementById("map");
+    const m = mapEl.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
+    if (rect.left <= m.left + SNAP) setDock("docked-left");
+    else if (rect.right >= m.right - SNAP) setDock("docked-right");
+  };
+  header.addEventListener("pointerup", endDrag);
+  header.addEventListener("pointercancel", endDrag);
+
+  /* Resize grip (bottom-right). When floating it resizes width+height; when
+   * docked it resizes width only (height stays full). */
+  const grip = document.getElementById("analyser-resize");
+  let resizing = false;
+  let rW = 0;
+  let rH = 0;
+  let rX = 0;
+  let rY = 0;
+  grip.addEventListener("pointerdown", (e) => {
+    resizing = true;
+    grip.setPointerCapture(e.pointerId);
+    const rect = panel.getBoundingClientRect();
+    rW = rect.width;
+    rH = rect.height;
+    rX = e.clientX;
+    rY = e.clientY;
+    e.stopPropagation();
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!resizing) return;
+    const w = Math.max(280, rW + (e.clientX - rX));
+    panel.style.width = w + "px";
+    if (panel.classList.contains("floating")) {
+      const h = Math.max(180, rH + (e.clientY - rY));
+      panel.style.height = h + "px";
+    }
+  });
+  const endResize = (e) => {
+    if (!resizing) return;
+    resizing = false;
+    try {
+      grip.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  };
+  grip.addEventListener("pointerup", endResize);
+  grip.addEventListener("pointercancel", endResize);
+
+  // Open the panel by default (docked right) so the table is visible on load.
+  showTable();
+}
+
 async function main() {
+  // Materialise the floating attribute table (clones the analyser markup into
+  // the panel) BEFORE createAnalyser binds to the analyser element IDs.
+  setupFloatingTable();
+
   const style = await (await fetch("app/data/style_data.json")).json();
   const v = style.validation;
 
@@ -200,10 +911,31 @@ async function main() {
   fillValidation(v);
   fillDownloads(style);
   fillFuelLegend(style.fuel_legend);
+  fillSymbolLegend();
   renderDiagrams();
 
   const aoiGj = await (await fetch(style.artifacts.aoi.href)).json();
   const bounds = bboxOfGeojson(aoiGj);
+
+  /* Fetch the pilot exposure GeoJSON once so it feeds BOTH the map source and
+   * the analyser table (no double download). The analyser is created up front;
+   * pilot rows are added now, study-area rows as each AOI's GeoJSON loads. The
+   * flyToAsset callback recentres the map on the clicked row and opens its
+   * popup (the same popupHtml the map click uses). */
+  const pilotAssetsGj = await (await fetch(style.artifacts.exposure_assets.href)).json();
+  let mapRef = null; // set once the Map is constructed below
+  const analyser = createAnalyser({
+    flyToAsset: (r) => {
+      if (!mapRef) return;
+      mapRef.flyTo({ center: r.center, zoom: Math.max(mapRef.getZoom(), 13.5), duration: 900 });
+      const n = r.aoi === "pilot" ? v.n_assets : r.n_assets;
+      new maplibregl.Popup({ maxWidth: "320px" })
+        .setLngLat(r.center)
+        .setHTML(popupHtml(r.props, n))
+        .addTo(mapRef);
+    },
+  });
+  analyser.addAoi("pilot", "Sever do Vouga (pilot)", pilotAssetsGj, v.n_assets);
 
   /* Optional hover tooltip (default off; gated by #toggle-hover). It is a single
    * <div> appended to <body> — NOT to the map container — so position:fixed +
@@ -279,6 +1011,7 @@ async function main() {
     fitBoundsOptions: { padding: 24 },
     attributionControl: { compact: false },
   });
+  mapRef = map; // hand the constructed Map to the analyser's flyToAsset callback
   map.addControl(new maplibregl.NavigationControl(), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
 
@@ -385,8 +1118,16 @@ async function main() {
       paint: { "line-color": "#444444", "line-width": 1.6, "line-dasharray": [3, 2] },
     });
 
-    map.addSource("assets", { type: "geojson", data: style.artifacts.exposure_assets.href });
-    /* Neutral inputs view (off by default). */
+    /* Register the per-class SDF glyphs once, before any symbol layer that
+     * references them. Idempotent (hasImage-guarded), so study areas re-using
+     * the same image ids are free. */
+    registerAssetIcons(map);
+    const iconImage = iconImageExpression();
+
+    map.addSource("assets", { type: "geojson", data: pilotAssetsGj });
+    /* Neutral inputs view (off by default). The point view uses the SAME per-class
+     * glyph as the output view but a flat slate fill (no rank encoding), so the
+     * "input" reading is class-only. */
     map.addLayer({
       id: "assets-line", type: "line", source: "assets",
       filter: ["==", ["geometry-type"], "LineString"],
@@ -400,15 +1141,23 @@ async function main() {
       layout: { visibility: "none" },
     });
     map.addLayer({
-      id: "assets-point", type: "circle", source: "assets",
+      id: "assets-point", type: "symbol", source: "assets",
       filter: ["==", ["geometry-type"], "Point"],
-      paint: {
-        "circle-color": "#5a7d9a", "circle-radius": 3.5,
-        "circle-stroke-color": "#333", "circle-stroke-width": 0.5,
+      layout: {
+        visibility: "none",
+        "icon-image": iconImage,
+        "icon-size": ASSET_ICON_SIZE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
-      layout: { visibility: "none" },
+      paint: { "icon-color": "#5a7d9a", "icon-halo-color": "rgba(255,255,255,0.85)", "icon-halo-width": 1.4 },
     });
-    /* Headline output view: rank-coloured (viridis, same encoding as fig1). */
+    /* Headline output view: rank-coloured (viridis, same encoding as fig1).
+     * SHAPE = asset class (per-class SDF glyph), COLOUR = exposure rank (viridis
+     * over exposure_rank). The rank-tinted glyph IS the marker — no disc behind
+     * it (review feedback: a white disc swallowed the thin glyph strokes, leaving
+     * only the disc's ring visible). A thin white halo keeps the tinted glyph
+     * legible over any basemap. */
     const rankColor = rankColorExpression(style.viridis_lut, v.n_assets);
     map.addLayer({
       id: "exposure-line", type: "line", source: "assets",
@@ -421,12 +1170,19 @@ async function main() {
       paint: { "fill-color": rankColor, "fill-opacity": 0.75, "fill-outline-color": "#333" },
     });
     map.addLayer({
-      id: "exposure-point", type: "circle", source: "assets",
+      id: "exposure-point", type: "symbol", source: "assets",
       filter: ["==", ["geometry-type"], "Point"],
-      paint: {
-        "circle-color": rankColor, "circle-radius": 4.5,
-        "circle-stroke-color": "#333", "circle-stroke-width": 0.6,
+      layout: {
+        "icon-image": iconImage,
+        "icon-size": ASSET_ICON_SIZE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
+      /* SHAPE = asset class (the SDF glyph); COLOUR = exposure rank (icon-color =
+       * the SAME viridis ramp as fig1, over exposure_rank). A white halo keeps
+       * the tinted glyph crisp over any basemap. Relative rank, not a
+       * probability (#6). */
+      paint: { "icon-color": rankColor, "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.6 },
     });
 
     /* One-line hover summary for an asset/exposure feature. The rank-coloured
@@ -445,10 +1201,13 @@ async function main() {
                            "assets-point", "assets-fill", "assets-line"]) {
       const withRank = layerId.startsWith("exposure-");
       map.on("click", layerId, (e) => {
+        const props = e.features[0].properties;
         new maplibregl.Popup({ maxWidth: "320px" })
           .setLngLat(e.lngLat)
-          .setHTML(popupHtml(e.features[0].properties, v.n_assets))
+          .setHTML(popupHtml(props, v.n_assets))
           .addTo(map);
+        // Reverse binding: scroll the floating table to this asset and flash it.
+        analyser.revealAsset(`pilot:${props.asset_id}`);
       });
       map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mousemove", layerId, (e) => {
@@ -622,6 +1381,11 @@ async function main() {
   function saExposureLayerIds(name) {
     return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
   }
+  // Layers that carry per-feature events (click/hover); same set as the visible
+  // exposure layers now that the glyph (no disc) is the point marker.
+  function saInteractiveLayerIds(name) {
+    return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
+  }
   function saOutlineLayerId(name) { return `sa-${name}-outline`; }
 
   function saPopupHtml(sa, props) {
@@ -654,21 +1418,25 @@ async function main() {
       "aoi",
     );
 
-    /* Exposure source: committed GeoJSON href is loaded directly; the R2 one is
-     * fetched first (a no-Referer GET so Cloudflare hotlink protection allows it,
-     * per the page-level no-referrer meta). */
-    let exposureData;
-    if (sa.committed) {
-      exposureData = sa.exposure_href;
-    } else {
-      const resp = await fetch(sa.exposure_href);
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status} fetching ${sa.label} exposure from Cloudflare R2`);
-      }
-      exposureData = await resp.json();
+    /* Exposure source: fetched + parsed (committed under docs/app/data, or the
+     * R2 one with a no-Referer GET so Cloudflare hotlink protection allows it,
+     * per the page-level no-referrer meta). We parse in both cases so the same
+     * object feeds the map source AND the analyser table's row store — no double
+     * download for the committed AOIs. */
+    const resp = await fetch(sa.exposure_href);
+    if (!resp.ok) {
+      throw new Error(
+        `HTTP ${resp.status} fetching ${sa.label} exposure` +
+          (sa.committed ? "" : " from Cloudflare R2"),
+      );
     }
+    const exposureData = await resp.json();
     map.addSource(`sa-${name}-src`, { type: "geojson", data: exposureData });
+    analyser.addAoi(name, sa.label, exposureData, sa.n_assets);
 
+    // Glyphs are shared across AOIs; registerAssetIcons is idempotent.
+    registerAssetIcons(map);
+    const iconImage = iconImageExpression();
     const rankColor = rankColorExpression(style.viridis_lut, sa.n_assets);
     map.addLayer(
       {
@@ -690,25 +1458,35 @@ async function main() {
       },
       "aoi",
     );
+    /* Per-class SDF glyph, rank-tinted (same encoding as the pilot: SHAPE =
+     * class, COLOUR = AOI-relative exposure rank tinting the glyph). The glyph IS
+     * the marker — no disc behind it — with a thin white halo for basemap
+     * contrast. */
     map.addLayer(
       {
         id: `sa-${name}-point`,
-        type: "circle",
+        type: "symbol",
         source: `sa-${name}-src`,
         filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-color": rankColor, "circle-radius": 4.5,
-          "circle-stroke-color": "#333", "circle-stroke-width": 0.6,
+        layout: {
+          "icon-image": iconImage,
+          "icon-size": ASSET_ICON_SIZE,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
         },
+        paint: { "icon-color": rankColor, "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.6 },
       },
       "aoi",
     );
-    for (const layerId of saExposureLayerIds(name)) {
+    for (const layerId of saInteractiveLayerIds(name)) {
       map.on("click", layerId, (e) => {
+        const props = e.features[0].properties;
         new maplibregl.Popup({ maxWidth: "320px" })
           .setLngLat(e.lngLat)
-          .setHTML(saPopupHtml(sa, e.features[0].properties))
+          .setHTML(saPopupHtml(sa, props))
           .addTo(map);
+        // Reverse binding: scroll the floating table to this study-area asset.
+        analyser.revealAsset(`${name}:${props.asset_id}`);
       });
       map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
@@ -728,9 +1506,36 @@ async function main() {
     }
   }
 
-  /* Fly to a study area (or the pilot) and reveal its exposure layer. */
+  /* Which study area is currently the selected/visible one (null = none, i.e.
+   * pilot-only). The AOI selector drives this: ONE study area is shown at a time,
+   * the rest are hidden — review feedback was "we are getting all AOIs all the
+   * time". */
+  let activeStudyArea = null;
+
+  /* Hide every study area's exposure + outline layers (those already added). */
+  function saHideAll() {
+    for (const name of studyAreaAdded) {
+      setVisibility([...saExposureLayerIds(name), saOutlineLayerId(name)], false);
+    }
+  }
+
+  /* Show ONLY the named study area (adding it lazily on first reveal) and hide
+   * all the others. Returns a promise (the R2-hosted monchique fetch is async). */
+  async function saShowOnly(name) {
+    saHideAll();
+    activeStudyArea = name;
+    await saSetVisible(name, true);
+  }
+
+  /* Fly to a study area (or the pilot) and DRIVE map visibility: a study area is
+   * shown exclusively (others hidden); "pilot" hides all study areas. The master
+   * "Validation study areas" checkbox tracks whether a study area is shown. */
   async function flyToArea(name) {
+    const studyToggle = document.getElementById("toggle-study-areas");
     if (name === "pilot") {
+      saHideAll();
+      activeStudyArea = null;
+      studyToggle.checked = false;
       map.fitBounds(bounds, { padding: 32, duration: 900 });
       return;
     }
@@ -738,8 +1543,8 @@ async function main() {
     if (!sa) return;
     const [minx, miny, maxx, maxy] = sa.bbox_4326;
     map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 32, duration: 900 });
-    document.getElementById("toggle-study-areas").checked = true;
-    await saSetVisible(name, true);
+    studyToggle.checked = true;
+    await saShowOnly(name);
   }
 
   /* FWI operational overlay: one raster source per component, added lazily and
@@ -792,12 +1597,17 @@ async function main() {
 
   function setVisibility(ids, on) {
     for (const id of ids) {
+      // Defensive: a layer may not be added yet (lazy R2 layers, study areas).
+      // Skipping a missing id keeps one toggle from throwing and resetting its
+      // checkbox — the "toggle not working" failure mode.
+      if (!map.getLayer(id)) continue;
       map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     }
   }
 
   const toggles = {
-    "toggle-exposure": (on) => setVisibility(["exposure-point", "exposure-fill", "exposure-line"], on),
+    "toggle-exposure": (on) =>
+      setVisibility(["exposure-point", "exposure-fill", "exposure-line"], on),
     "toggle-aoi": (on) => setVisibility(["aoi"], on),
     "toggle-assets": (on) => setVisibility(["assets-point", "assets-fill", "assets-line"], on),
     "toggle-fuel": (on) => {
@@ -818,19 +1628,24 @@ async function main() {
       fwiSetActive(sel.value, on);
       document.getElementById("fwi-component-row").hidden = !on;
     },
-    /* All four validation study areas at once. Committed AOIs load from
-     * docs/app/data; monchique streams from R2 — both lazily on first reveal.
-     * Failures on one AOI are surfaced but do not abort the others. */
+    /* Master toggle for the SELECTED validation study area (one at a time — the
+     * "Fly to" selector drives which). On: reveal the active study area (default
+     * to the first if none is selected yet, and keep the selector in sync). Off:
+     * hide all study areas. Committed AOIs load from docs/app/data; monchique
+     * streams from R2 — both lazily on first reveal. */
     "toggle-study-areas": async (on) => {
-      const errors = [];
-      for (const sa of studyAreas) {
-        try {
-          await saSetVisible(sa.name, on);
-        } catch (err) {
-          errors.push(`${sa.label}: ${err.message}`);
-        }
+      if (!on) {
+        saHideAll();
+        activeStudyArea = null;
+        const flySel = document.getElementById("aoi-fly");
+        if (flySel) flySel.value = "pilot";
+        return;
       }
-      if (errors.length) throw new Error(errors.join("; "));
+      const name = activeStudyArea || (studyAreas[0] && studyAreas[0].name);
+      if (!name) return;
+      const flySel = document.getElementById("aoi-fly");
+      if (flySel) flySel.value = name;
+      await saShowOnly(name);
     },
   };
   for (const [id, fn] of Object.entries(toggles)) {
@@ -912,8 +1727,10 @@ async function main() {
   }
 
   /* Headless-render hook (no effect in normal use): exposes the map instance so
-   * an automated visual-validation run can wait on "idle" and drive layers. */
+   * an automated visual-validation run can wait on "idle" and drive layers, and
+   * the analyser so the reverse (map→table) binding can be exercised. */
   window.__mapForTest = map;
+  window.__analyserForTest = analyser;
 }
 
 main().catch((e) => showError(`Initialisation failed: ${e.message}`));

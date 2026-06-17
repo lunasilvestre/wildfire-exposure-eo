@@ -101,6 +101,9 @@ _FWI_COMPONENT_LABELS = {
 _ASSET_BASE_URL = "https://wildfire.cheias.pt"
 
 #: GeoJSON feature properties exported for the site (subset of ScoredAsset).
+#: ``historical_burn_share`` is lifted out of the nested ``features`` dict (see
+#: ``_with_historical_burn_share``) so the geobrowser analyser table can offer an
+#: honest burned-footprint filter without re-reading the GeoParquet client-side.
 _EXPORT_PROPS = [
     "asset_id",
     "osm_type",
@@ -109,6 +112,7 @@ _EXPORT_PROPS = [
     "criticality_weight",
     "exposure_score",
     "exposure_rank",
+    "historical_burn_share",
 ]
 
 #: Wave-2 validation study areas beyond the pilot, in display order. Each is
@@ -178,6 +182,39 @@ def select_validated_run(*, smoke: bool) -> tuple[str, dict[str, Any]]:
     return str(metrics["source_run_id"]), metrics
 
 
+def _with_historical_burn_share(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Add a top-level ``historical_burn_share`` column from the nested features.
+
+    The Stage-2 features land in a single ``features`` column as a JSON string
+    (e.g. ``{"slope_max_deg": ..., "historical_burn_share": 0.0, ...}``). The
+    display GeoJSON flattens just ``historical_burn_share`` to a top-level
+    property so the geobrowser can filter on a real burned-footprint signal
+    without parsing nested JSON client-side. Rows whose features dict lacks the
+    key (or have no ``features`` column at all) get ``None`` — the property is
+    optional in :class:`ExposureFeatureProperties`. A descriptive footprint
+    statistic, never a probability and never the post-window validation label.
+    """
+    out = gdf.copy()
+    if "features" not in out.columns:
+        # Float dtype (all-NaN): the GeoJSON writer emits JSON ``null`` for NaN,
+        # and downstream ScoredAsset/ExposureFeatureProperties treat null as the
+        # optional "feature absent for this run" case.
+        out["historical_burn_share"] = np.nan
+        return out
+
+    def _share(raw: object) -> float:
+        if not isinstance(raw, str) or not raw:
+            return float("nan")
+        val = json.loads(raw).get("historical_burn_share")
+        return float("nan") if val is None else float(val)
+
+    # Float dtype keeps the exported values numeric (the client-side analyser
+    # filters on a real number); a missing share is NaN, which geopandas writes
+    # as JSON ``null`` — never a bare NaN token.
+    out["historical_burn_share"] = [_share(r) for r in out["features"]]
+    return out
+
+
 def export_exposure_geojson(parquet_path: Path, out_path: Path) -> int:
     """Scored parquet → display GeoJSON; every row schema-validated first."""
     gdf = gpd.read_parquet(parquet_path)
@@ -185,6 +222,7 @@ def export_exposure_geojson(parquet_path: Path, out_path: Path) -> int:
         raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
     for row in gdf.drop(columns="geometry").to_dict(orient="records"):
         ScoredAsset.model_validate(row)
+    gdf = _with_historical_burn_share(gdf)
     # GeoDataFrame wrap keeps the type (and the geometry column's CRS) explicit
     # after column subsetting, which otherwise degrades to a DataFrame for the
     # type checker.
@@ -208,6 +246,7 @@ def export_study_area_geojson(parquet_path: Path, out_path: Path, *, coord_preci
         raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
     for row in gdf.drop(columns="geometry").to_dict(orient="records"):
         ScoredAsset.model_validate(row)
+    gdf = _with_historical_burn_share(gdf)
     out = gpd.GeoDataFrame(gdf.sort_values("exposure_rank")[[*_EXPORT_PROPS, "geometry"]])
     for props in out.drop(columns="geometry").to_dict(orient="records"):
         ExposureFeatureProperties.model_validate(props)

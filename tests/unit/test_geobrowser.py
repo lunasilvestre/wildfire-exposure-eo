@@ -88,6 +88,40 @@ def test_exposure_feature_properties_rejects_score_above_one() -> None:
         ExposureFeatureProperties.model_validate(props)
 
 
+def _exposure_props(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "asset_id": "osm:way/1497200647",
+        "osm_type": "way",
+        "osm_id": 1497200647,
+        "asset_class": "power.transmission_line",
+        "criticality_weight": 1.0,
+        "exposure_score": 0.864,
+        "exposure_rank": 15,
+        "historical_burn_share": 0.5,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_exposure_feature_properties_accepts_historical_burn_share() -> None:
+    p = ExposureFeatureProperties.model_validate(_exposure_props())
+    assert p.historical_burn_share == 0.5
+
+
+def test_exposure_feature_properties_historical_burn_share_optional() -> None:
+    # Display copies exported before the column existed (the study-area GeoJSONs)
+    # omit it; the analyser table then shows no burned dot for those rows.
+    props = _exposure_props()
+    del props["historical_burn_share"]
+    p = ExposureFeatureProperties.model_validate(props)
+    assert p.historical_burn_share is None
+
+
+def test_exposure_feature_properties_rejects_burn_share_above_one() -> None:
+    with pytest.raises(ValidationError):
+        ExposureFeatureProperties.model_validate(_exposure_props(historical_burn_share=1.2))
+
+
 def test_style_data_round_trip() -> None:
     lut = [(0, 0, 0)] * 256
     style = GeobrowserStyleData(
@@ -317,6 +351,62 @@ def test_export_exposure_geojson_requires_explicit_crs(tmp_path: Path) -> None:
     gdf.to_parquet(src)
     with pytest.raises(ValueError, match="EPSG:4326"):
         geobrowser_mod.export_exposure_geojson(src, tmp_path / "out.geojson")
+
+
+def test_with_historical_burn_share_lifts_nested_feature() -> None:
+    import json as _json
+    import math
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "features": [
+                _json.dumps({"slope_max_deg": 13.9, "historical_burn_share": 1.0}),
+                _json.dumps({"slope_max_deg": 4.0, "historical_burn_share": 0.0}),
+                _json.dumps({"slope_max_deg": 4.0}),  # key absent -> NaN -> JSON null
+            ]
+        },
+        geometry=[Point(0, 0), Point(1, 1), Point(2, 2)],
+        crs="EPSG:4326",
+    )
+    out = geobrowser_mod._with_historical_burn_share(gdf)
+    vals = list(out["historical_burn_share"])
+    assert vals[0] == 1.0
+    assert vals[1] == 0.0
+    assert math.isnan(vals[2])  # geopandas writes NaN as JSON null on export
+
+
+def test_with_historical_burn_share_absent_column_yields_nan() -> None:
+    import math
+
+    gdf = gpd.GeoDataFrame({"a": [1]}, geometry=[Point(0, 0)], crs="EPSG:4326")
+    out = geobrowser_mod._with_historical_burn_share(gdf)
+    assert math.isnan(out["historical_burn_share"].iloc[0])
+
+
+def test_with_historical_burn_share_writes_json_null(tmp_path: Path) -> None:
+    """A NaN burn share serialises to JSON null on GeoJSON export (never a bare
+    NaN token), and present values stay numeric — what the analyser filters on."""
+    import json as _json
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "asset_id": ["osm:way/1", "osm:node/2"],
+            "features": [
+                _json.dumps({"historical_burn_share": 1.0}),
+                _json.dumps({"slope_max_deg": 2.0}),  # no burn share -> null
+            ],
+        },
+        geometry=[Point(0, 0), Point(1, 1)],
+        crs="EPSG:4326",
+    )
+    out = geobrowser_mod._with_historical_burn_share(gdf)
+    dst = tmp_path / "out.geojson"
+    out.to_file(dst, driver="GeoJSON")
+    text = dst.read_text()
+    assert "NaN" not in text  # geopandas serialises NaN as JSON null, not a NaN token
+    feats = {f["properties"]["asset_id"]: f["properties"] for f in _json.loads(text)["features"]}
+    assert feats["osm:way/1"]["historical_burn_share"] == 1.0
+    assert feats["osm:node/2"]["historical_burn_share"] is None
 
 
 def test_validation_headline_from_degenerate_metrics() -> None:

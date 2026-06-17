@@ -2676,9 +2676,9 @@
       "description": "Burn-scar inference-probability COG display copy (warped from the authoritative EPSG:4326 STAC/R2 asset, NEAREST)"
     },
     "icnf_burns": {
-      "href": "https://wildfire.cheias.pt/icnf_burns_20260616T184344Z.geojson",
+      "href": "https://wildfire.cheias.pt/icnf_burns_20260610T164453Z.geojson",
       "crs": "EPSG:4326",
-      "run_id": "20260616T184344Z",
+      "run_id": "20260610T164453Z",
       "role": "display",
       "description": "ICNF \u00c1reas Ardidas perimeters (1990\u20132025 vintages inside the AOI)"
     }
