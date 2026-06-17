@@ -184,6 +184,15 @@ class StudyAreaLayer(BaseModel):
     committed: bool
     #: AOI bbox ``[minlon, minlat, maxlon, maxlat]`` for the fly-to control.
     bbox_4326: tuple[float, float, float, float]
+    #: ICNF Áreas Ardidas perimeters for THIS AOI (EPSG:4326), hosted on
+    #: Cloudflare R2 and loaded lazily when the AOI is shown. ``None`` when no
+    #: burns layer was published for the AOI (the geobrowser then just omits its
+    #: ICNF overlay). Honest scope (#6): observed historical burned-area
+    #: perimeters, never a probability or forecast.
+    icnf_href: str | None = Field(default=None, min_length=1)
+    icnf_crs: str | None = Field(default=None, min_length=1)
+    #: Count of ICNF perimeters in ``icnf_href`` (drives the legend/caption).
+    icnf_n_perimeters: int | None = Field(default=None, ge=0)
 
 
 class GeobrowserStyleData(BaseModel):

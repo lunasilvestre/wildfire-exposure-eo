@@ -2662,7 +2662,7 @@
       "description": "Pilot AOI boundary (copy of data/aoi/pilot.geojson)"
     },
     "fuel_class": {
-      "href": "app/data/fuel_class_3857_20260611T090120Z.tif",
+      "href": "https://wildfire.cheias.pt/fuel_class_3857_20260611T090120Z.tif",
       "crs": "EPSG:3857",
       "run_id": "20260611T090120Z",
       "role": "display",
@@ -2700,7 +2700,10 @@
         39.8,
         -7.7,
         40.3
-      ]
+      ],
+      "icnf_href": "https://wildfire.cheias.pt/icnf_burns_pedrogao_grande_20260617T214222Z.geojson",
+      "icnf_crs": "EPSG:4326",
+      "icnf_n_perimeters": 839
     },
     {
       "name": "serra_da_estrela",
@@ -2718,7 +2721,10 @@
         40.15,
         -7.37,
         40.52
-      ]
+      ],
+      "icnf_href": "https://wildfire.cheias.pt/icnf_burns_serra_da_estrela_20260617T214307Z.geojson",
+      "icnf_crs": "EPSG:4326",
+      "icnf_n_perimeters": 1042
     },
     {
       "name": "peneda_geres",
@@ -2736,7 +2742,10 @@
         41.68,
         -8.05,
         41.99
-      ]
+      ],
+      "icnf_href": "https://wildfire.cheias.pt/icnf_burns_peneda_geres_20260617T214412Z.geojson",
+      "icnf_crs": "EPSG:4326",
+      "icnf_n_perimeters": 3380
     },
     {
       "name": "monchique",
@@ -2754,7 +2763,10 @@
         37.1,
         -8.3,
         37.5
-      ]
+      ],
+      "icnf_href": "https://wildfire.cheias.pt/icnf_burns_monchique_20260617T214454Z.geojson",
+      "icnf_crs": "EPSG:4326",
+      "icnf_n_perimeters": 231
     }
   ],
   "fwi_overlay": {

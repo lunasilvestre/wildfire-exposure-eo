@@ -8,17 +8,25 @@ pipeline artefacts — nothing hand-made:
   against the ``ScoredAsset`` schema before export; feature properties follow
   ``ExposureFeatureProperties``.
 * ``docs/app/data/aoi.geojson`` — AOI boundary copy (EPSG:4326).
-* ``docs/app/data/fuel_class_3857_<run_id>.tif`` — display copy of the fuel
-  COG warped to EPSG:3857 / GoogleMapsCompatible tiling, NEAREST resampling,
-  ``ZOOM_LEVEL_STRATEGY=UPPER`` (no resolution loss). Required because
-  maplibre-cog-protocol renders EPSG:3857 COGs only — the authoritative
-  EPSG:32629 COG stays the STAC asset.
+* ``outputs/geobrowser/fuel_class_3857_<run_id>.tif`` — display copy of the
+  fuel COG warped to EPSG:3857 / GoogleMapsCompatible tiling, NEAREST
+  resampling, ``ZOOM_LEVEL_STRATEGY=UPPER`` (no resolution loss). Required
+  because maplibre-cog-protocol renders EPSG:3857 COGs only — the authoritative
+  EPSG:32629 COG stays the STAC asset. Uploaded to Cloudflare R2 (byte-range
+  capable): a same-origin committed COG renders live but stays BLANK under the
+  local ``python -m http.server`` preview, which cannot serve the HTTP Range
+  requests geotiff.js needs.
 * ``outputs/geobrowser/burn_scar_3857_<run_id>.tif`` — same warp for the
   burn-scar COG (authoritative CRS EPSG:4326); uploaded to Cloudflare R2,
   too large to commit.
-* ``outputs/geobrowser/icnf_burns_<run_id>.geojson`` — ICNF perimeter display
-  copy (EPSG:4326, full precision); uploaded to Cloudflare R2 (7.8 MB,
+* ``outputs/geobrowser/icnf_burns_<run_id>.geojson`` — pilot ICNF perimeter
+  display copy (EPSG:4326, full precision); uploaded to Cloudflare R2 (7.8 MB,
   over the repo's 2 000 kB committed-file cap).
+* ``outputs/geobrowser/icnf_burns_<aoi>_<run_id>.geojson`` — per study-area
+  ICNF perimeter display copy (EPSG:4326, 6 dp for compactness); uploaded to
+  Cloudflare R2 and shown with its AOI. Reuses the
+  ``outputs/parquet/icnf_burns_<aoi>_<run_id>.parquet`` fetched via
+  ``wildfire-exposure-eo fetch-burns --aoi data/aoi/<aoi>.geojson``.
 * ``docs/app/data/style_data.json`` — colour LUTs sampled from the same
   matplotlib colormaps the WU-8 figures use (viridis rank / YlOrRd burn-scar /
   tab10 fuel classes), the fuel legend from ``config/fuel_crosswalk.yaml``,
@@ -273,8 +281,16 @@ def study_area_provenance_model_version(parquet_path: Path) -> str:
     return str(version)
 
 
-def export_burns_geojson(parquet_path: Path, out_path: Path) -> int:
-    """ICNF burns parquet → display GeoJSON (feature_id, vintage_year, area_ha)."""
+def export_burns_geojson(
+    parquet_path: Path, out_path: Path, *, coord_precision: int | None = None
+) -> int:
+    """ICNF burns parquet → display GeoJSON (feature_id, vintage_year, area_ha).
+
+    ``coord_precision`` (decimal degrees) trims coordinate precision so the
+    per-AOI burns files stay compact for R2 streaming; ``None`` keeps full
+    precision (the pilot copy). 6 dp ≈ 0.1 m — finer than ICNF perimeter
+    accuracy warrants, so it loses no honest geometry.
+    """
     gdf = gpd.read_parquet(parquet_path)
     if gdf.crs is None or gdf.crs.to_epsg() != 4326:
         raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
@@ -284,7 +300,10 @@ def export_burns_geojson(parquet_path: Path, out_path: Path) -> int:
         ]
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out.to_file(out_path, driver="GeoJSON")
+    if coord_precision is None:
+        out.to_file(out_path, driver="GeoJSON")
+    else:
+        out.to_file(out_path, driver="GeoJSON", COORDINATE_PRECISION=coord_precision)
     return len(out)
 
 
@@ -469,6 +488,33 @@ def build_study_areas(
         aoi_gdf.to_file(site_data / outline_fname, driver="GeoJSON")
         minx, miny, maxx, maxy = (float(v) for v in aoi_gdf.total_bounds)
 
+        # Per-AOI ICNF Áreas Ardidas perimeters: reuse the latest
+        # icnf_burns_<aoi>_<run>.parquet if fetched (CLI `fetch-burns --aoi
+        # data/aoi/<name>.geojson`), export to a compact (6 dp) GeoJSON in
+        # release_dir for R2 upload, and attach its href. When no parquet exists
+        # the AOI simply ships without an ICNF overlay (icnf_href stays None).
+        icnf_href: str | None = None
+        icnf_crs: str | None = None
+        icnf_n: int | None = None
+        icnf_cands = sorted(_PARQUET_DIR.glob(f"icnf_burns_{name}_*.parquet"))
+        icnf_cands = [
+            c for c in icnf_cands if _RUN_ID_RE.match(c.stem.replace(f"icnf_burns_{name}_", ""))
+        ]
+        if icnf_cands:
+            icnf_pq = icnf_cands[-1]
+            icnf_run = icnf_pq.stem.replace(f"icnf_burns_{name}_", "")
+            icnf_fname = f"icnf_burns_{name}_{icnf_run}.geojson"
+            icnf_n = export_burns_geojson(
+                icnf_pq,
+                release_dir / icnf_fname,
+                coord_precision=_STUDY_AREA_COORD_PRECISION,
+            )
+            icnf_href = f"{asset_base}/{icnf_fname}"
+            icnf_crs = "EPSG:4326"
+            print(f"  ICNF perimeters {name!r}: {icnf_n} → R2 {icnf_fname}")
+        else:
+            print(f"  ICNF perimeters {name!r}: no parquet — overlay omitted")
+
         layers.append(
             StudyAreaLayer(
                 name=name,
@@ -482,6 +528,9 @@ def build_study_areas(
                 n_assets=n_assets,
                 committed=committed,
                 bbox_4326=(minx, miny, maxx, maxy),
+                icnf_href=icnf_href,
+                icnf_crs=icnf_crs,
+                icnf_n_perimeters=icnf_n,
             )
         )
         print(
@@ -534,7 +583,12 @@ def main() -> int:
     aoi.to_file(site_data / "aoi.geojson", driver="GeoJSON")
     print(f"AOI copy: {aoi_src.name}")
 
-    fuel_3857 = site_data / f"fuel_class_3857_{fuel_run_id}.tif"
+    # Fuel display COG is written to release_dir (NOT committed) because it is
+    # served from Cloudflare R2: a same-origin committed COG renders live but
+    # stays blank under the local `python -m http.server` preview, which cannot
+    # serve the HTTP Range requests geotiff.js needs. Upload this file to
+    # r2:wildfire-exposure-eo so the fuel layer renders in local + live.
+    fuel_3857 = release_dir / f"fuel_class_3857_{fuel_run_id}.tif"
     warp_to_3857_cog(fuel_cog, fuel_3857)
     print(f"fuel display COG: {fuel_3857.name} ({fuel_3857.stat().st_size / 1e6:.2f} MB)")
 
@@ -578,7 +632,13 @@ def main() -> int:
                 description="Pilot AOI boundary (copy of data/aoi/pilot.geojson)",
             ),
             "fuel_class": GeobrowserArtifact(
-                href=f"app/data/fuel_class_3857_{fuel_run_id}.tif",
+                # Hosted on Cloudflare R2 (byte-range capable) rather than the
+                # committed copy: maplibre-cog-protocol / geotiff.js needs HTTP
+                # Range, which the local `python -m http.server` preview does NOT
+                # support, so a same-origin committed COG renders live but stays
+                # blank in local preview. R2 serves 206 + CORS so the fuel layer
+                # renders in BOTH local preview and live. See prompts/_session_log.md.
+                href=f"{asset_base}/fuel_class_3857_{fuel_run_id}.tif",
                 crs="EPSG:3857",
                 run_id=fuel_run_id,
                 role="display",

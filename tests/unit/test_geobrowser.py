@@ -296,6 +296,34 @@ def test_study_area_rejects_empty_model_version() -> None:
         _study_area(model_version="")
 
 
+def test_study_area_icnf_fields_default_none() -> None:
+    # A study area without a published per-AOI ICNF overlay carries no ICNF
+    # fields (the geobrowser then simply omits its burns layer).
+    sa = _study_area()
+    assert sa.icnf_href is None
+    assert sa.icnf_crs is None
+    assert sa.icnf_n_perimeters is None
+
+
+def test_study_area_carries_icnf_overlay() -> None:
+    # When the per-AOI ICNF burns are published the layer carries the R2 href,
+    # an explicit CRS (#2), and the perimeter count for the caption.
+    sa = _study_area(
+        icnf_href="https://wildfire.cheias.pt/icnf_burns_monchique_20260617T214454Z.geojson",
+        icnf_crs="EPSG:4326",
+        icnf_n_perimeters=231,
+    )
+    assert sa.icnf_href is not None
+    assert sa.icnf_href.endswith("icnf_burns_monchique_20260617T214454Z.geojson")
+    assert sa.icnf_crs == "EPSG:4326"
+    assert sa.icnf_n_perimeters == 231
+
+
+def test_study_area_rejects_negative_icnf_count() -> None:
+    with pytest.raises(ValidationError):
+        _study_area(icnf_n_perimeters=-1)
+
+
 def test_study_areas_round_trip_in_style_data() -> None:
     lut = [(0, 0, 0)] * 256
     style = GeobrowserStyleData(
