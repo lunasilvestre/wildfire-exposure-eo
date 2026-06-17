@@ -110,7 +110,9 @@ def main() -> int:
         type=Path,
         default=_SOURCE_ROOT / "outputs/cogs/fuel_class_20260611T090120Z.tif",
     )
-    parser.add_argument("--exposure-config", type=Path, default=_ROOT / "config/exposure_score.yaml")
+    parser.add_argument(
+        "--exposure-config", type=Path, default=_ROOT / "config/exposure_score.yaml"
+    )
     parser.add_argument(
         "--taxonomy", type=Path, default=_ROOT / "data/taxonomy/critical_infrastructure.yaml"
     )
@@ -258,7 +260,8 @@ def main() -> int:
     print(f"wrote {feats_out}", file=sys.stderr)
     print(f"wrote {exp_out}", file=sys.stderr)
     print(
-        f"run_id={run_id} model_version={config.version} n_assets={len(composed)} seed={DEFAULT_SEED}",
+        f"run_id={run_id} model_version={config.version} "
+        f"n_assets={len(composed)} seed={DEFAULT_SEED}",
         file=sys.stderr,
     )
     # stdout: the run_id, so callers can chain publishing on it.

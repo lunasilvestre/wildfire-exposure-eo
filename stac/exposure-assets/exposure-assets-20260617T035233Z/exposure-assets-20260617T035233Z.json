@@ -2,7 +2,7 @@
   "type": "Feature",
   "stac_version": "1.1.0",
   "stac_extensions": [],
-  "id": "exposure-assets-20260611T170549Z",
+  "id": "exposure-assets-20260617T035233Z",
   "geometry": {
     "type": "Polygon",
     "coordinates": [
@@ -38,12 +38,12 @@
   ],
   "properties": {
     "wildfire_exposure_eo:provenance": {
-      "model_version": "0.2.0",
-      "config_sha": "13b6361a3d75275601894d03a9b7eadcd2e78527cd3c57579e0741d084cf4fe3",
+      "model_version": "0.3.1",
+      "config_sha": "d7492c56a86f82e4206bd7f8c9b4e5bae33192bbf6aa5a5a3edef60b80bfc1f2",
       "crosswalk_sha": "df69c47fa35e24386121b67fa54393e23777ea0a8ef38af8f698df06e0035853",
-      "run_id": "20260611T170549Z",
-      "code_commit_sha": "988e59f2eab0fde3bf389ee0d3c6eb2312b81ae7",
-      "aoi_path": "data/aoi/pilot.geojson",
+      "run_id": "20260617T035233Z",
+      "code_commit_sha": "71681fe0508ce459728b9deb8232d8f80fa8c26b",
+      "aoi_path": "/home/nls/Documents/dev/wildfire-exposure-eo/.claude/worktrees/agent-a673a2b260ccd0b77/data/aoi/pilot.geojson",
       "aoi_geometry_sha": "c7c84de2ab86d31c8be07183c6cd4945a28082507a17ecce0c3a5c379d35b7f0",
       "window_start": "2023-12-31",
       "window_end": "2024-12-31",
@@ -113,12 +113,25 @@
         "S2B_MSIL2A_20240930T112119_R037_T29TNE_20240930T142524",
         "S2B_MSIL2A_20240930T112119_R037_T29TNF_20240930T142524"
       ],
-      "burn_share_threshold": 0.5
+      "burn_share_threshold": 0.5,
+      "fire_weather_product_id": null,
+      "fire_weather_config_version": null,
+      "fire_weather_season_year": null,
+      "fire_weather_sample_dates": [],
+      "fire_weather_out_of_archive": null,
+      "fwi_product_id": null,
+      "fwi_doi": null,
+      "fwi_config_version": null,
+      "fwi_dataset_type": null,
+      "fwi_system_version": null,
+      "fwi_requested_date": null,
+      "fwi_valid_date": null,
+      "fwi_variable_map": {}
     },
     "wildfire_exposure_eo:n_assets": 3045,
     "start_datetime": "2023-12-31T00:00:00Z",
     "end_datetime": "2024-12-31T23:59:59Z",
-    "datetime": "2026-06-11T17:05:49Z"
+    "datetime": "2026-06-17T03:52:33Z"
   },
   "links": [
     {
@@ -142,7 +155,7 @@
   ],
   "assets": {
     "exposure_assets": {
-      "href": "./exposure_20260611T170549Z.parquet",
+      "href": "./exposure_20260617T035233Z.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "Scored-asset GeoParquet (exposure rank, full provenance)",
       "description": "3045 assets, EPSG:4326, snappy GeoParquet. Score window 2023-12-31..2024-12-31 (backdated run validated against the 2025 ICNF vintage \u2014 see docs/validation_report.md). exposure_score is a relative, AOI-normalised screening rank, not a probability.",
