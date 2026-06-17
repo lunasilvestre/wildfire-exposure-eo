@@ -44,9 +44,11 @@ const RAW = "https://raw.githubusercontent.com/lunasilvestre/wildfire-exposure-e
  * (relative, AOI-normalised) exposure rank — never a probability (#6). */
 const ASSET_ICON_PX = 48; // raster size for the SDF source image (hi-dpi crisp)
 // icon-image is registered at pixelRatio 2 (24 CSS px intrinsic); this multiplier
-// renders the glyph at ~19 CSS px so its SHAPE reads inside the contrast disc.
-const ASSET_ICON_SIZE = 0.8;
-const ASSET_HALO_RADIUS = 9.5; // neutral contrast disc behind the rank-tinted glyph
+// renders the glyph at ~36 CSS px. The glyph IS the marker now (no disc behind
+// it), so it is sized to read its SHAPE at a glance; review feedback: the earlier
+// 0.8 (~19 CSS px) glyph vanished under a white contrast disc, leaving only the
+// disc's coloured ring visible.
+const ASSET_ICON_SIZE = 1.5;
 const ASSET_ICONS = {
   "education.school":
     "M12 3 1 8l11 5 9-4.09V15h2V8L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z",
@@ -1148,13 +1150,14 @@ async function main() {
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
-      paint: { "icon-color": "#5a7d9a", "icon-halo-color": "#fff", "icon-halo-width": 1.1 },
+      paint: { "icon-color": "#5a7d9a", "icon-halo-color": "rgba(255,255,255,0.85)", "icon-halo-width": 1.4 },
     });
     /* Headline output view: rank-coloured (viridis, same encoding as fig1).
      * SHAPE = asset class (per-class SDF glyph), COLOUR = exposure rank (viridis
-     * over exposure_rank). A rank-coloured halo RING sits under the glyph so the
-     * rank colour is legible even where the thin glyph strokes are small — the
-     * rank encoding is carried redundantly by both the glyph tint and the ring. */
+     * over exposure_rank). The rank-tinted glyph IS the marker — no disc behind
+     * it (review feedback: a white disc swallowed the thin glyph strokes, leaving
+     * only the disc's ring visible). A thin white halo keeps the tinted glyph
+     * legible over any basemap. */
     const rankColor = rankColorExpression(style.viridis_lut, v.n_assets);
     map.addLayer({
       id: "exposure-line", type: "line", source: "assets",
@@ -1165,18 +1168,6 @@ async function main() {
       id: "exposure-fill", type: "fill", source: "assets",
       filter: ["==", ["geometry-type"], "Polygon"],
       paint: { "fill-color": rankColor, "fill-opacity": 0.75, "fill-outline-color": "#333" },
-    });
-    /* Neutral contrast disc + thin rank-coloured ring under the glyph: keeps the
-     * SHAPE legible over any basemap, and the ring reinforces the rank colour so
-     * it reads even where the thin glyph strokes are small. */
-    map.addLayer({
-      id: "exposure-point-halo", type: "circle", source: "assets",
-      filter: ["==", ["geometry-type"], "Point"],
-      paint: {
-        "circle-color": "#ffffff", "circle-radius": ASSET_HALO_RADIUS,
-        "circle-opacity": 0.9,
-        "circle-stroke-color": rankColor, "circle-stroke-width": 2,
-      },
     });
     map.addLayer({
       id: "exposure-point", type: "symbol", source: "assets",
@@ -1189,9 +1180,9 @@ async function main() {
       },
       /* SHAPE = asset class (the SDF glyph); COLOUR = exposure rank (icon-color =
        * the SAME viridis ramp as fig1, over exposure_rank). A white halo keeps
-       * the tinted glyph crisp on the contrast disc. Relative rank, not a
+       * the tinted glyph crisp over any basemap. Relative rank, not a
        * probability (#6). */
-      paint: { "icon-color": rankColor, "icon-halo-color": "#ffffff", "icon-halo-width": 1.2 },
+      paint: { "icon-color": rankColor, "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.6 },
     });
 
     /* One-line hover summary for an asset/exposure feature. The rank-coloured
@@ -1388,10 +1379,10 @@ async function main() {
   const studyAreaAdded = new Set();
 
   function saExposureLayerIds(name) {
-    return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point-halo`, `sa-${name}-point`];
+    return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
   }
-  // Only the layers that carry per-feature events (click/hover): the symbol
-  // point, not the underlying halo ring.
+  // Layers that carry per-feature events (click/hover); same set as the visible
+  // exposure layers now that the glyph (no disc) is the point marker.
   function saInteractiveLayerIds(name) {
     return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
   }
@@ -1467,22 +1458,10 @@ async function main() {
       },
       "aoi",
     );
-    /* Neutral contrast disc + thin rank-coloured ring + per-class SDF glyph
-     * (same encoding as the pilot: SHAPE = class, COLOUR = AOI-relative exposure
-     * rank tinting the glyph). */
-    map.addLayer(
-      {
-        id: `sa-${name}-point-halo`,
-        type: "circle",
-        source: `sa-${name}-src`,
-        filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-color": "#ffffff", "circle-radius": ASSET_HALO_RADIUS, "circle-opacity": 0.9,
-          "circle-stroke-color": rankColor, "circle-stroke-width": 2,
-        },
-      },
-      "aoi",
-    );
+    /* Per-class SDF glyph, rank-tinted (same encoding as the pilot: SHAPE =
+     * class, COLOUR = AOI-relative exposure rank tinting the glyph). The glyph IS
+     * the marker — no disc behind it — with a thin white halo for basemap
+     * contrast. */
     map.addLayer(
       {
         id: `sa-${name}-point`,
@@ -1495,7 +1474,7 @@ async function main() {
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
-        paint: { "icon-color": rankColor, "icon-halo-color": "#ffffff", "icon-halo-width": 1.2 },
+        paint: { "icon-color": rankColor, "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.6 },
       },
       "aoi",
     );
@@ -1527,9 +1506,36 @@ async function main() {
     }
   }
 
-  /* Fly to a study area (or the pilot) and reveal its exposure layer. */
+  /* Which study area is currently the selected/visible one (null = none, i.e.
+   * pilot-only). The AOI selector drives this: ONE study area is shown at a time,
+   * the rest are hidden — review feedback was "we are getting all AOIs all the
+   * time". */
+  let activeStudyArea = null;
+
+  /* Hide every study area's exposure + outline layers (those already added). */
+  function saHideAll() {
+    for (const name of studyAreaAdded) {
+      setVisibility([...saExposureLayerIds(name), saOutlineLayerId(name)], false);
+    }
+  }
+
+  /* Show ONLY the named study area (adding it lazily on first reveal) and hide
+   * all the others. Returns a promise (the R2-hosted monchique fetch is async). */
+  async function saShowOnly(name) {
+    saHideAll();
+    activeStudyArea = name;
+    await saSetVisible(name, true);
+  }
+
+  /* Fly to a study area (or the pilot) and DRIVE map visibility: a study area is
+   * shown exclusively (others hidden); "pilot" hides all study areas. The master
+   * "Validation study areas" checkbox tracks whether a study area is shown. */
   async function flyToArea(name) {
+    const studyToggle = document.getElementById("toggle-study-areas");
     if (name === "pilot") {
+      saHideAll();
+      activeStudyArea = null;
+      studyToggle.checked = false;
       map.fitBounds(bounds, { padding: 32, duration: 900 });
       return;
     }
@@ -1537,8 +1543,8 @@ async function main() {
     if (!sa) return;
     const [minx, miny, maxx, maxy] = sa.bbox_4326;
     map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 32, duration: 900 });
-    document.getElementById("toggle-study-areas").checked = true;
-    await saSetVisible(name, true);
+    studyToggle.checked = true;
+    await saShowOnly(name);
   }
 
   /* FWI operational overlay: one raster source per component, added lazily and
@@ -1591,13 +1597,17 @@ async function main() {
 
   function setVisibility(ids, on) {
     for (const id of ids) {
+      // Defensive: a layer may not be added yet (lazy R2 layers, study areas).
+      // Skipping a missing id keeps one toggle from throwing and resetting its
+      // checkbox — the "toggle not working" failure mode.
+      if (!map.getLayer(id)) continue;
       map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     }
   }
 
   const toggles = {
     "toggle-exposure": (on) =>
-      setVisibility(["exposure-point", "exposure-point-halo", "exposure-fill", "exposure-line"], on),
+      setVisibility(["exposure-point", "exposure-fill", "exposure-line"], on),
     "toggle-aoi": (on) => setVisibility(["aoi"], on),
     "toggle-assets": (on) => setVisibility(["assets-point", "assets-fill", "assets-line"], on),
     "toggle-fuel": (on) => {
@@ -1618,19 +1628,24 @@ async function main() {
       fwiSetActive(sel.value, on);
       document.getElementById("fwi-component-row").hidden = !on;
     },
-    /* All four validation study areas at once. Committed AOIs load from
-     * docs/app/data; monchique streams from R2 — both lazily on first reveal.
-     * Failures on one AOI are surfaced but do not abort the others. */
+    /* Master toggle for the SELECTED validation study area (one at a time — the
+     * "Fly to" selector drives which). On: reveal the active study area (default
+     * to the first if none is selected yet, and keep the selector in sync). Off:
+     * hide all study areas. Committed AOIs load from docs/app/data; monchique
+     * streams from R2 — both lazily on first reveal. */
     "toggle-study-areas": async (on) => {
-      const errors = [];
-      for (const sa of studyAreas) {
-        try {
-          await saSetVisible(sa.name, on);
-        } catch (err) {
-          errors.push(`${sa.label}: ${err.message}`);
-        }
+      if (!on) {
+        saHideAll();
+        activeStudyArea = null;
+        const flySel = document.getElementById("aoi-fly");
+        if (flySel) flySel.value = "pilot";
+        return;
       }
-      if (errors.length) throw new Error(errors.join("; "));
+      const name = activeStudyArea || (studyAreas[0] && studyAreas[0].name);
+      if (!name) return;
+      const flySel = document.getElementById("aoi-fly");
+      if (flySel) flySel.value = name;
+      await saShowOnly(name);
     },
   };
   for (const [id, fn] of Object.entries(toggles)) {

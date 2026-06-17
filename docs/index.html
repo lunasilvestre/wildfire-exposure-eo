@@ -98,8 +98,8 @@
           Streamed from Cloudflare R2 (loads on toggle).</p>
       </div>
       <div class="layer-row" id="study-areas-row" hidden>
-        <label><input type="checkbox" id="toggle-study-areas"> Validation study areas <span class="tag output">output</span></label>
-        <label class="fwi-select-label">Fly to:
+        <label><input type="checkbox" id="toggle-study-areas"> Validation study area <span class="tag output">output</span></label>
+        <label class="fwi-select-label">Show AOI:
           <select id="aoi-fly"></select>
         </label>
         <p class="caption">Four additional Portuguese AOIs the rank was reproduced on
@@ -107,8 +107,10 @@
           <strong>independently</strong> with the same open-data pipeline and shown with the same
           viridis exposure-rank encoding. The exposure rank is <strong>AOI-relative</strong> — rank 1
           is the most exposed asset <em>within that AOI</em>, not comparable across AOIs. These are
-          <strong>model v0.3.0</strong> runs (the pilot is v0.3.1; labelled honestly per AOI). Pick an
-          AOI to fly there; the layer loads on demand (Monchique streams from Cloudflare R2).</p>
+          <strong>model v0.3.0</strong> runs (the pilot is v0.3.1; labelled honestly per AOI).
+          Pick an AOI from the selector to fly there and show it on the map — <strong>one study area
+          at a time</strong> (the others hide); pick <em>Pilot</em> to hide all of them. The layer
+          loads on demand (Monchique streams from Cloudflare R2).</p>
         <ul id="study-areas-list" class="caption"></ul>
       </div>
       <div class="layer-row" id="hover-toggle-row">
@@ -128,7 +130,7 @@
         <div class="ramp-labels"><span id="ramp-rank-low">rank n (least exposed)</span><span>rank 1 (most exposed)</span></div>
         <p class="caption legend-note">Relative, AOI-normalised screening rank — not a probability.
           Marker <strong>shape = asset class</strong>; marker <strong>colour = exposure rank</strong>
-          (a viridis-tinted glyph on a rank-coloured ring).</p>
+          (the per-class glyph itself is viridis-tinted by its rank).</p>
       </div>
       <div id="legend-symbols">
         <h3>Asset class <span class="legend-axis">shape</span></h3>
