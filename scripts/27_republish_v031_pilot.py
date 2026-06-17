@@ -33,8 +33,8 @@ screening rank in [0, 1] — never a probability of fire.
 
 Usage::
 
-    uv run python scripts/26_republish_v031_pilot.py --smoke   # verify-then-act
-    uv run python scripts/26_republish_v031_pilot.py           # full pilot
+    uv run python scripts/27_republish_v031_pilot.py --smoke   # verify-then-act
+    uv run python scripts/27_republish_v031_pilot.py           # full pilot
 
 ``--smoke`` recomposes on a deterministic asset subset and writes ``*_smoke_*``
 outputs (touching nothing canonical); the full run writes the canonical
