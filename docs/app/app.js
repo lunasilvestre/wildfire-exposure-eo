@@ -178,6 +178,36 @@ async function renderDiagrams() {
   }
 }
 
+/* Representative point [lng, lat] for a feature, used by the analyser table to
+ * fly/zoom to a clicked row. Centroid of the coordinate bounding box — exact
+ * enough to recentre the map; the popup then anchors on the same point. Works
+ * for Point / LineString / Polygon (and their Multi* variants) without pulling
+ * in turf. */
+function featureCenter(geometry) {
+  let minx = 180, miny = 90, maxx = -180, maxy = -90;
+  const walk = (coords) => {
+    if (typeof coords[0] === "number") {
+      minx = Math.min(minx, coords[0]);
+      maxx = Math.max(maxx, coords[0]);
+      miny = Math.min(miny, coords[1]);
+      maxy = Math.max(maxy, coords[1]);
+    } else {
+      coords.forEach(walk);
+    }
+  };
+  walk(geometry.coordinates);
+  return [(minx + maxx) / 2, (miny + maxy) / 2];
+}
+
+/* Impact severity = exposure_score × criticality_weight. A transparent RELATIVE
+ * within-AOI triage rank (non-negotiable #6: never a probability). Both inputs
+ * are in [0, 1], so the product is too; sorting by it floats the most-exposed
+ * IMPORTANT assets (high-voltage lines w=1.0, substations w=0.95) above merely
+ * high-rank low-criticality ones (a pole/tower at w=0.4). */
+function impactSeverity(props) {
+  return Number(props.exposure_score) * Number(props.criticality_weight);
+}
+
 function popupHtml(props, n) {
   const osmUrl = `https://www.openstreetmap.org/${props.osm_type}/${props.osm_id}`;
   return `<h4>${props.asset_class}</h4>
@@ -185,6 +215,234 @@ function popupHtml(props, n) {
     (score ${Number(props.exposure_score).toFixed(3)} — relative rank, not a probability)<br>
     criticality weight ${props.criticality_weight}<br>
     <a href="${osmUrl}" target="_blank" rel="noopener">${props.asset_id}</a>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+/* ------------------------------------------------------------------------- *
+ * Asset analyser — a filterable / sortable TABLE over the scored asset set.
+ *
+ * Rows come from the SAME published exposure GeoJSONs the map renders (pilot +
+ * the four study AOIs); nothing is fabricated. Each row carries:
+ *   asset_class, AOI, exposure_rank (AOI-relative), exposure_score,
+ *   criticality_weight (the taxonomy importance), impact_severity (=score×weight),
+ *   historical_burn_share (may be null where the AOI's display copy predates the
+ *   field), a representative point for zoomTo, and the raw props for the popup.
+ *
+ * Sorting by IMPACT SEVERITY (the default, descending) is the "find the major
+ * exposed asset" use case: high-criticality lines/substations float to the top.
+ * Clicking a row flies the map to that asset and opens its popup.
+ *
+ * createAnalyser returns { addAoi } — call addAoi(aoiKey, label, geojson, nAssets)
+ * as each AOI's GeoJSON becomes available (pilot eagerly; study areas lazily).
+ * ------------------------------------------------------------------------- */
+function createAnalyser({ flyToAsset }) {
+  const rows = [];
+  const aoiLabels = new Map(); // key -> human label
+  const SEED_DISPLAY = 250; // cap rendered rows (perf); count line states the full match total
+  let sortKey = "impact_severity";
+  let sortDir = -1; // -1 desc, +1 asc
+  let selectedId = null;
+
+  const tbody = document.getElementById("analyser-tbody");
+  const countEl = document.getElementById("analyser-count");
+  const burnedNoteEl = document.getElementById("analyser-burned-note");
+  const els = {
+    aoi: document.getElementById("filter-aoi"),
+    type: document.getElementById("filter-type"),
+    rank: document.getElementById("filter-rank"),
+    impact: document.getElementById("filter-impact"),
+    burned: document.getElementById("filter-burned"),
+    search: document.getElementById("filter-search"),
+  };
+
+  function refreshSelectOptions() {
+    const aoiSel = els.aoi;
+    const keep = aoiSel.value;
+    const aoiKeys = [...aoiLabels.keys()];
+    aoiSel.innerHTML =
+      `<option value="">all (within-AOI ranks)</option>` +
+      aoiKeys.map((k) => `<option value="${k}">${escapeHtml(aoiLabels.get(k))}</option>`).join("");
+    aoiSel.value = aoiKeys.includes(keep) ? keep : "";
+
+    const typeSel = els.type;
+    const keepType = typeSel.value;
+    const classes = [...new Set(rows.map((r) => r.asset_class))].sort();
+    typeSel.innerHTML =
+      `<option value="">all classes</option>` +
+      classes.map((c) => `<option value="${c}">${escapeHtml(c)}</option>`).join("");
+    typeSel.value = classes.includes(keepType) ? keepType : "";
+  }
+
+  function filtered() {
+    const fAoi = els.aoi.value;
+    const fType = els.type.value;
+    const fRank = els.rank.value;
+    const fImpact = els.impact.value;
+    const fBurned = els.burned.value;
+    const q = els.search.value.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (fAoi && r.aoi !== fAoi) return false;
+      if (fType && r.asset_class !== fType) return false;
+      if (fRank) {
+        const frac = r.exposure_rank / r.n_assets; // 0 = most exposed
+        if (fRank === "top10" && frac > 0.1) return false;
+        if (fRank === "top25" && frac > 0.25) return false;
+        if (fRank === "top50" && frac > 0.5) return false;
+        if (fRank === "bottom50" && frac <= 0.5) return false;
+      }
+      if (fImpact) {
+        const s = r.impact_severity;
+        if (fImpact === "high" && s < 0.66) return false;
+        if (fImpact === "medium" && (s < 0.33 || s >= 0.66)) return false;
+        if (fImpact === "low" && s >= 0.33) return false;
+      }
+      if (fBurned) {
+        if (r.historical_burn_share === null || r.historical_burn_share === undefined) return false;
+        const burned = r.historical_burn_share > 0;
+        if (fBurned === "burned" && !burned) return false;
+        if (fBurned === "unburned" && burned) return false;
+      }
+      if (q && !(`${r.asset_class} ${r.props.asset_id}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }
+
+  function render() {
+    const matches = filtered();
+    matches.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === "string") return sortDir * av.localeCompare(bv);
+      return sortDir * ((av ?? -Infinity) - (bv ?? -Infinity));
+    });
+    const shown = matches.slice(0, SEED_DISPLAY);
+    const burnedKnown = rows.some(
+      (r) => r.historical_burn_share !== null && r.historical_burn_share !== undefined,
+    );
+    countEl.textContent =
+      `${matches.length.toLocaleString("en")} asset${matches.length === 1 ? "" : "s"} match` +
+      (matches.length > SEED_DISPLAY ? ` — showing the top ${SEED_DISPLAY} by current sort` : "") +
+      `  ·  ${rows.length.toLocaleString("en")} loaded`;
+
+    tbody.innerHTML = shown
+      .map((r) => {
+        const sev = r.impact_severity;
+        const burnDot =
+          r.historical_burn_share > 0
+            ? ` <span class="burn-dot" title="buffer overlaps an ICNF historical-burn perimeter"></span>`
+            : "";
+        const sel = r.id === selectedId ? " selected" : "";
+        const cls = escapeHtml(r.asset_class);
+        return `<tr class="arow${sel}" data-id="${r.id}" title="${cls} · ${escapeHtml(r.aoiLabel)}">
+          <td class="asset-name" title="${escapeHtml(shortName(r.asset_class))}">${escapeHtml(shortName(r.asset_class))}${burnDot}</td>
+          <td class="asset-type"><code title="${cls}">${escapeHtml(typeLabel(r))}</code></td>
+          <td title="${escapeHtml(r.aoiLabel)}">${escapeHtml(r.aoiLabel)}</td>
+          <td class="num">${r.exposure_rank}</td>
+          <td class="num">${r.exposure_score.toFixed(3)}</td>
+          <td class="num">${r.criticality_weight.toFixed(2)}</td>
+          <td class="num impact-cell">${sev.toFixed(3)}
+            <span class="impact-bar" style="width:${Math.round(sev * 28)}px"></span></td>
+        </tr>`;
+      })
+      .join("");
+
+    burnedNoteEl.innerHTML = burnedKnown
+      ? `<strong>Burned footprint</strong> (red dot / filter): the asset buffer overlaps an ICNF ` +
+        `historical-burn perimeter (<code>historical_burn_share &gt; 0</code>, 1990&ndash;2024 ` +
+        `vintages). A descriptive footprint, not the post-window validation label and not a ` +
+        `probability. Available for the pilot; study-area display copies predate the column, so ` +
+        `their rows show no dot and the burned filter excludes them.`
+      : "";
+  }
+
+  function selectRow(id) {
+    selectedId = id;
+    for (const tr of tbody.querySelectorAll("tr.arow")) {
+      tr.classList.toggle("selected", tr.dataset.id === id);
+    }
+  }
+
+  // Short, readable asset label (drop the namespace for the first column).
+  function shortName(assetClass) {
+    return assetClass.split(".").slice(-1)[0].replace(/_/g, " ");
+  }
+  // Type column: full taxonomy class. (Road highway= classes would appear here
+  // if roads were scored — they are not; see the roads note under the table.)
+  function typeLabel(r) {
+    return r.asset_class;
+  }
+
+  // Compact AOI label for the (narrow) table cell — the full label still drives
+  // the filter dropdown and the popup denominator.
+  function shortAoi(label) {
+    return label.replace(/\s*\(pilot\)\s*/, "").split(/[\/(]/)[0].trim();
+  }
+
+  function addAoi(aoiKey, label, geojson, nAssets) {
+    aoiLabels.set(aoiKey, label);
+    const n = nAssets || geojson.features.length;
+    for (const f of geojson.features) {
+      const p = f.properties;
+      rows.push({
+        id: `${aoiKey}:${p.asset_id}`,
+        aoi: aoiKey,
+        aoiLabel: shortAoi(label),
+        asset_class: p.asset_class,
+        exposure_rank: Number(p.exposure_rank),
+        exposure_score: Number(p.exposure_score),
+        criticality_weight: Number(p.criticality_weight),
+        impact_severity: impactSeverity(p),
+        historical_burn_share:
+          p.historical_burn_share === undefined ? null : p.historical_burn_share,
+        n_assets: n,
+        center: featureCenter(f.geometry),
+        props: p,
+      });
+    }
+    refreshSelectOptions();
+    render();
+  }
+
+  // Header sort: click toggles direction; impact severity defaults descending.
+  for (const th of document.querySelectorAll("#analyser-table thead th")) {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) {
+        sortDir = -sortDir;
+      } else {
+        sortKey = key;
+        sortDir = key === "asset_class" || key === "aoi" ? 1 : -1;
+      }
+      for (const h of document.querySelectorAll("#analyser-table thead th")) {
+        h.removeAttribute("aria-sort");
+        h.textContent = h.textContent.replace(/ [▲▼]$/, "");
+      }
+      th.setAttribute("aria-sort", sortDir === -1 ? "descending" : "ascending");
+      th.append(sortDir === -1 ? " ▼" : " ▲");
+      render();
+    });
+  }
+
+  for (const el of Object.values(els)) {
+    el.addEventListener("input", render);
+    el.addEventListener("change", render);
+  }
+
+  // Row click → fly the map to the asset and open its popup.
+  tbody.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr.arow");
+    if (!tr) return;
+    const r = rows.find((x) => x.id === tr.dataset.id);
+    if (!r) return;
+    selectRow(r.id);
+    flyToAsset(r);
+  });
+
+  return { addAoi };
 }
 
 async function main() {
@@ -204,6 +462,26 @@ async function main() {
 
   const aoiGj = await (await fetch(style.artifacts.aoi.href)).json();
   const bounds = bboxOfGeojson(aoiGj);
+
+  /* Fetch the pilot exposure GeoJSON once so it feeds BOTH the map source and
+   * the analyser table (no double download). The analyser is created up front;
+   * pilot rows are added now, study-area rows as each AOI's GeoJSON loads. The
+   * flyToAsset callback recentres the map on the clicked row and opens its
+   * popup (the same popupHtml the map click uses). */
+  const pilotAssetsGj = await (await fetch(style.artifacts.exposure_assets.href)).json();
+  let mapRef = null; // set once the Map is constructed below
+  const analyser = createAnalyser({
+    flyToAsset: (r) => {
+      if (!mapRef) return;
+      mapRef.flyTo({ center: r.center, zoom: Math.max(mapRef.getZoom(), 13.5), duration: 900 });
+      const n = r.aoi === "pilot" ? v.n_assets : r.n_assets;
+      new maplibregl.Popup({ maxWidth: "320px" })
+        .setLngLat(r.center)
+        .setHTML(popupHtml(r.props, n))
+        .addTo(mapRef);
+    },
+  });
+  analyser.addAoi("pilot", "Sever do Vouga (pilot)", pilotAssetsGj, v.n_assets);
 
   /* Optional hover tooltip (default off; gated by #toggle-hover). It is a single
    * <div> appended to <body> — NOT to the map container — so position:fixed +
@@ -279,6 +557,7 @@ async function main() {
     fitBoundsOptions: { padding: 24 },
     attributionControl: { compact: false },
   });
+  mapRef = map; // hand the constructed Map to the analyser's flyToAsset callback
   map.addControl(new maplibregl.NavigationControl(), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
 
@@ -385,7 +664,7 @@ async function main() {
       paint: { "line-color": "#444444", "line-width": 1.6, "line-dasharray": [3, 2] },
     });
 
-    map.addSource("assets", { type: "geojson", data: style.artifacts.exposure_assets.href });
+    map.addSource("assets", { type: "geojson", data: pilotAssetsGj });
     /* Neutral inputs view (off by default). */
     map.addLayer({
       id: "assets-line", type: "line", source: "assets",
@@ -654,20 +933,21 @@ async function main() {
       "aoi",
     );
 
-    /* Exposure source: committed GeoJSON href is loaded directly; the R2 one is
-     * fetched first (a no-Referer GET so Cloudflare hotlink protection allows it,
-     * per the page-level no-referrer meta). */
-    let exposureData;
-    if (sa.committed) {
-      exposureData = sa.exposure_href;
-    } else {
-      const resp = await fetch(sa.exposure_href);
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status} fetching ${sa.label} exposure from Cloudflare R2`);
-      }
-      exposureData = await resp.json();
+    /* Exposure source: fetched + parsed (committed under docs/app/data, or the
+     * R2 one with a no-Referer GET so Cloudflare hotlink protection allows it,
+     * per the page-level no-referrer meta). We parse in both cases so the same
+     * object feeds the map source AND the analyser table's row store — no double
+     * download for the committed AOIs. */
+    const resp = await fetch(sa.exposure_href);
+    if (!resp.ok) {
+      throw new Error(
+        `HTTP ${resp.status} fetching ${sa.label} exposure` +
+          (sa.committed ? "" : " from Cloudflare R2"),
+      );
     }
+    const exposureData = await resp.json();
     map.addSource(`sa-${name}-src`, { type: "geojson", data: exposureData });
+    analyser.addAoi(name, sa.label, exposureData, sa.n_assets);
 
     const rankColor = rankColorExpression(style.viridis_lut, sa.n_assets);
     map.addLayer(

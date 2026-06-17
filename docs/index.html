@@ -153,6 +153,84 @@
         <a href="https://github.com/lunasilvestre/wildfire-exposure-eo/blob/main/docs/validation_report.md">validation report</a>.</p>
     </section>
 
+    <section id="analyser-section">
+      <h2>Asset analyser</h2>
+      <p class="caption analyser-intro">A filterable, sortable table of every scored
+        critical-infrastructure asset across the AOIs. <strong>Impact severity</strong> =
+        exposure&nbsp;score&nbsp;&times;&nbsp;importance — a transparent <em>relative within-AOI
+        triage rank</em> that floats the most-exposed important assets (e.g. high-voltage lines and
+        substations) to the top. Not a probability. Sort by it, or filter, then click a row to fly
+        the map there. <strong>Roads/highways are not in the scored set</strong> — see the note below
+        the table.</p>
+      <div id="analyser-controls">
+        <label>AOI
+          <select id="filter-aoi"><option value="">all (within-AOI ranks)</option></select>
+        </label>
+        <label>Type
+          <select id="filter-type"><option value="">all classes</option></select>
+        </label>
+        <label>Exposure rank
+          <select id="filter-rank">
+            <option value="">any</option>
+            <option value="top10">top 10%</option>
+            <option value="top25">top 25%</option>
+            <option value="top50">top 50%</option>
+            <option value="bottom50">bottom 50%</option>
+          </select>
+        </label>
+        <label>Impact severity
+          <select id="filter-impact">
+            <option value="">any</option>
+            <option value="high">high (&ge; 0.66)</option>
+            <option value="medium">medium (0.33&ndash;0.66)</option>
+            <option value="low">low (&lt; 0.33)</option>
+          </select>
+        </label>
+        <label>Burned footprint
+          <select id="filter-burned">
+            <option value="">any</option>
+            <option value="burned">overlaps ICNF historical burn</option>
+            <option value="unburned">no historical-burn overlap</option>
+          </select>
+        </label>
+        <label class="analyser-search">Search
+          <input type="text" id="filter-search" placeholder="class or OSM id" autocomplete="off">
+        </label>
+      </div>
+      <p class="caption" id="analyser-count">…</p>
+      <div id="analyser-table-wrap">
+        <table id="analyser-table">
+          <thead>
+            <tr>
+              <th data-sort="asset_class">Asset</th>
+              <th data-sort="asset_class">Type</th>
+              <th data-sort="aoi">AOI</th>
+              <th data-sort="exposure_rank">Rank</th>
+              <th data-sort="exposure_score" class="num">Score</th>
+              <th data-sort="criticality_weight" class="num">Import.</th>
+              <th data-sort="impact_severity" class="num" id="th-impact" aria-sort="descending">Impact&nbsp;sev. &#9660;</th>
+            </tr>
+          </thead>
+          <tbody id="analyser-tbody"></tbody>
+        </table>
+      </div>
+      <p class="caption" id="analyser-burned-note"></p>
+      <p class="caption" id="analyser-roads-note">
+        <strong>Roads finding (honest):</strong> the scored asset set is OSM power, telecom, water,
+        education, emergency and <em>railway</em> infrastructure — the road network
+        (<code>highway=*</code>) is <strong>not fetched and not scored</strong>, so motorways and
+        arteries carry no exposure or impact-severity here. <code>transport.railway</code> is rail
+        track, not roads. Scoring roads as a class — so a major exposed road artery would surface in
+        this table — is a separate scoring-pipeline / data-contract step (the road-network work,
+        issue&nbsp;#11), not silently folded in. This table represents the scored set as it stands.
+      </p>
+      <p class="caption">Columns map to the published GeoJSON properties + the criticality weights in
+        <a href="https://github.com/lunasilvestre/wildfire-exposure-eo/blob/main/data/taxonomy/critical_infrastructure.yaml"><code>data/taxonomy/critical_infrastructure.yaml</code></a>.
+        Impact severity is within-AOI (the exposure rank is AOI-relative; scores are not comparable
+        across AOIs). Study-area rows (model v0.3.0) load when you reveal the validation study areas
+        or pick that AOI; Monchique streams from R2.</p>
+    </section>
+
     <section id="scope-section">
       <h2>Scope boundaries</h2>
       <ul>

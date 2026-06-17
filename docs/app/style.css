@@ -111,6 +111,115 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 }
 #diagrams h3 { margin-top: 14px; }
 
+/* Asset analyser table. Filter controls wrap in a compact grid; the table body
+   scrolls vertically inside a fixed-height wrap so the panel stays navigable
+   even with thousands of rows. Impact-severity cells carry a viridis-ish heat
+   bar (width = severity) so the triage reads at a glance. */
+.analyser-intro { margin-left: 0; }
+
+#analyser-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 8px;
+  margin: 6px 0;
+}
+#analyser-controls label {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: var(--muted);
+  gap: 2px;
+}
+#analyser-controls label.analyser-search { grid-column: 1 / -1; }
+#analyser-controls select,
+#analyser-controls input {
+  font-size: 12px;
+  padding: 2px 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+}
+
+#analyser-count { margin-left: 0; font-weight: 600; color: var(--ink); }
+
+#analyser-table-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#analyser-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  table-layout: fixed;
+}
+/* Fixed column widths so the IMPACT SEVERITY column (the headline) is always in
+   view inside the 380 px panel; long type/AOI text ellipsises rather than
+   pushing the numeric columns off-screen. */
+#analyser-table th:nth-child(1), #analyser-table td:nth-child(1) { width: 21%; }
+#analyser-table th:nth-child(2), #analyser-table td:nth-child(2) { width: 23%; }
+#analyser-table th:nth-child(3), #analyser-table td:nth-child(3) { width: 16%; }
+#analyser-table th:nth-child(4), #analyser-table td:nth-child(4) { width: 9%; }
+#analyser-table th:nth-child(5), #analyser-table td:nth-child(5) { width: 11%; }
+#analyser-table th:nth-child(6), #analyser-table td:nth-child(6) { width: 9%; }
+#analyser-table th:nth-child(7), #analyser-table td:nth-child(7) { width: 11%; }
+#analyser-table td.asset-name, #analyser-table td.asset-type, #analyser-table td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#analyser-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f0efe9;
+  z-index: 1;
+  text-align: left;
+  padding: 4px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+#analyser-table th.num { text-align: right; }
+#analyser-table th[aria-sort] { color: var(--accent); }
+#analyser-table tbody td {
+  padding: 3px 5px;
+  border-bottom: 1px solid #efeee8;
+  vertical-align: middle;
+}
+#analyser-table tbody tr { cursor: pointer; }
+#analyser-table tbody tr:hover { background: #fff3e0; }
+#analyser-table tbody tr.selected { background: #ffe1b3; }
+#analyser-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#analyser-table td.asset-type code { font-size: 10.5px; background: none; padding: 0; color: var(--muted); }
+.burn-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-left: 4px;
+  vertical-align: middle;
+  background: #e31a1c;
+}
+.impact-cell {
+  position: relative;
+  min-width: 56px;
+}
+.impact-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  margin-top: 1px;
+  background: var(--accent);
+}
+#analyser-roads-note {
+  margin-left: 0;
+  background: #f4f4ef;
+  border-left: 3px solid #5a7d9a;
+  padding: 6px 9px;
+}
+#analyser-burned-note { margin-left: 0; }
+
 footer { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 8px; }
 
 .maplibregl-popup-content { font-size: 12.5px; line-height: 1.4; }
