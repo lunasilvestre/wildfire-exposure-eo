@@ -13,6 +13,8 @@ from shapely.geometry import Point
 from wildfire_exposure_eo.schemas import (
     ExposureFeatureProperties,
     FuelLegendEntry,
+    FwiOverlay,
+    FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
     ValidationHeadline,
@@ -119,6 +121,109 @@ def test_style_data_rejects_short_lut() -> None:
             validation=ValidationHeadline.model_validate(_headline()),
             artifacts={},
         )
+
+
+# --------------------------------------------------------------------------- #
+# FWI operational overlay schema
+# --------------------------------------------------------------------------- #
+
+
+def _fwi_component(**overrides: object) -> FwiOverlayComponent:
+    base: dict[str, object] = {
+        "component": "fwi",
+        "label": "Fire Weather Index (FWI)",
+        "href": "https://wildfire.cheias.pt/fwi_fwi_3857_2026-06-11.tif",
+        "crs": "EPSG:3857",
+        "value_min": 6.67,
+        "value_max": 51.36,
+    }
+    base.update(overrides)
+    return FwiOverlayComponent.model_validate(base)
+
+
+def test_fwi_overlay_component_rejects_inverted_range() -> None:
+    with pytest.raises(ValidationError):
+        _fwi_component(value_min=50.0, value_max=10.0)
+
+
+def test_fwi_overlay_round_trip_in_style_data() -> None:
+    lut = [(0, 0, 0)] * 256
+    overlay = FwiOverlay(
+        valid_date="2026-06-11",
+        lag_note="~2-day lag",
+        attribution="Source: CEMS Early Warning Data Store — Copernicus / ECMWF (CC-BY-4.0)",
+        components=[
+            _fwi_component(),
+            _fwi_component(component="bui", label="Build-Up Index (BUI)"),
+        ],
+    )
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+        fwi_overlay=overlay,
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert parsed.fwi_overlay is not None
+    assert parsed.fwi_overlay.valid_date == "2026-06-11"
+    assert [c.component for c in parsed.fwi_overlay.components] == ["fwi", "bui"]
+
+
+def test_style_data_fwi_overlay_defaults_none() -> None:
+    """Bundles built before the EWDS pull omit the overlay; the field is optional."""
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+    )
+    assert style.fwi_overlay is None
+
+
+def test_build_fwi_overlay_returns_none_when_manifest_absent(tmp_path: Path) -> None:
+    missing = tmp_path / "no_manifest.json"
+    assert geobrowser_mod.build_fwi_overlay(missing, "https://wildfire.cheias.pt") is None
+
+
+def test_build_fwi_overlay_reads_manifest(tmp_path: Path) -> None:
+    import json
+
+    manifest = {
+        "fwi_valid_date": "2026-06-11",
+        "display_crs": "EPSG:3857",
+        "components": [
+            {
+                "component": "fwi",
+                "filename": "fwi_fwi_3857_2026-06-11.tif",
+                "value_min": 6.67,
+                "value_max": 51.36,
+            },
+            {
+                "component": "ffmc",
+                "filename": "fwi_ffmc_3857_2026-06-11.tif",
+                "value_min": 80.45,
+                "value_max": 96.78,
+            },
+        ],
+    }
+    mp = tmp_path / "fwi_overlay_manifest.json"
+    mp.write_text(json.dumps(manifest))
+    overlay = geobrowser_mod.build_fwi_overlay(mp, "https://wildfire.cheias.pt")
+    assert overlay is not None
+    assert overlay.valid_date == "2026-06-11"
+    assert overlay.components[0].href == "https://wildfire.cheias.pt/fwi_fwi_3857_2026-06-11.tif"
+    assert overlay.components[0].crs == "EPSG:3857"
+    assert overlay.components[1].label == "Fine Fuel Moisture Code (FFMC)"
+    # Attribution is read from config/fire_weather.yaml (no invented identifiers).
+    assert "CEMS" in overlay.attribution
 
 
 # --------------------------------------------------------------------------- #

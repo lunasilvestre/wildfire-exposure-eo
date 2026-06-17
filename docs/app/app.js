@@ -40,6 +40,32 @@ function drawRamp(canvasId, lut) {
   }
 }
 
+/* Magma colour anchors (matplotlib magma, sampled at 9 stops) used for the FWI
+ * operational overlay. A distinct ramp from the structural viridis (exposure
+ * rank) and the YlOrRd (burn-scar) so the two-axis view is read at a glance:
+ * the structural axis is viridis, the fire-weather axis is magma. Built as a
+ * 256-step LUT by linear interpolation between the anchors. */
+const MAGMA_ANCHORS = [
+  [0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99],
+  [212, 72, 66], [245, 125, 21], [250, 193, 39], [252, 253, 191],
+];
+function buildMagmaLut() {
+  const lut = [];
+  const segs = MAGMA_ANCHORS.length - 1;
+  for (let i = 0; i < 256; i++) {
+    const t = (i / 255) * segs;
+    const s = Math.min(segs - 1, Math.floor(t));
+    const f = t - s;
+    const a = MAGMA_ANCHORS[s], b = MAGMA_ANCHORS[s + 1];
+    lut.push([
+      Math.round(a[0] + (b[0] - a[0]) * f),
+      Math.round(a[1] + (b[1] - a[1]) * f),
+      Math.round(a[2] + (b[2] - a[2]) * f),
+    ]);
+  }
+  return lut;
+}
+
 /* Viridis over exposure_rank, matching fig1: rank_norm = 1-(rank-1)/(n-1),
  * so rank 1 (most exposed) gets viridis's bright end. Built as a MapLibre
  * interpolate expression with 33 stops sampled from the 256-step LUT. */
@@ -110,6 +136,14 @@ function fillDownloads(style) {
     [a.burn_scar.href, "Burn-scar COG, EPSG:3857 display copy", "46 MB"],
     [a.icnf_burns.href, "ICNF burn perimeters 1990–2025 — GeoJSON (EPSG:4326)", "8 MB"],
   ];
+  if (style.fwi_overlay) {
+    const fwiComp = style.fwi_overlay.components.find((c) => c.component === "fwi");
+    if (fwiComp) {
+      items.push([fwiComp.href,
+        `Current-season FWI COG (EPSG:3857, EWDS reanalysis, valid ${style.fwi_overlay.valid_date})`,
+        "<0.1 MB"]);
+    }
+  }
   document.getElementById("downloads-list").innerHTML = items
     .map(([href, label, size]) =>
       `<li><a href="${href}">${label}</a> <span class="size">(${size})</span></li>`)
@@ -289,6 +323,36 @@ async function main() {
     }
   });
 
+  /* Current-season FWI operational overlay (the second axis). One EPSG:3857
+   * display COG per component on Cloudflare R2; each is painted magma-on-value,
+   * stretched between its own finite [min, max] so the coarse 0.25° regional
+   * field reads clearly. Terminology guard (non-negotiable #6): these are
+   * OBSERVED reanalysis danger indices (~2-day lag, regional grid), never a
+   * per-asset score, probability, or forecast. The overlay block is optional —
+   * absent in bundles built before the EWDS pull. */
+  const fwiOverlay = style.fwi_overlay || null;
+  const FWI_OPACITY = 0.65;
+  const magmaLut = buildMagmaLut();
+  /* component token -> {comp def, added flag}; the active component id is the
+   * one currently rendered (single-COG-at-a-time keeps R2 reads bounded). */
+  const fwiByToken = new Map();
+  if (fwiOverlay) {
+    for (const c of fwiOverlay.components) {
+      fwiByToken.set(c.component, c);
+      const span = Math.max(1e-6, c.value_max - c.value_min);
+      MaplibreCOGProtocol.setColorFunction(c.href, (pixel, color, metadata) => {
+        const val = pixel[0];
+        if (val === metadata.noData || isNaN(val)) {
+          color.set([0, 0, 0, 0]);
+        } else {
+          const t = Math.max(0, Math.min(1, (val - c.value_min) / span));
+          const idx = Math.round(t * 255);
+          color.set([...magmaLut[idx], Math.round(255 * FWI_OPACITY)]);
+        }
+      });
+    }
+  }
+
   map.on("load", () => {
     /* Rasters first so vectors draw on top. Sources with visibility:none do
      * not fetch tiles until toggled on. */
@@ -399,13 +463,22 @@ async function main() {
     let rasterHoverTimer = null;
     const vectorHoverLayers = ["exposure-point", "exposure-fill", "exposure-line",
                                "assets-point", "assets-fill", "assets-line", "aoi"];
+    /* Which FWI component (if any) is currently the visible overlay. */
+    const activeFwiToken = () => {
+      for (const t of fwiByToken.keys()) {
+        const id = fwiLayerId(t);
+        if (map.getLayer(id) && map.getLayoutProperty(id, "visibility") === "visible") return t;
+      }
+      return null;
+    };
     map.on("mousemove", (e) => {
       if (!hoverEnabled) return;
       const fuelOn = map.getLayer("fuel") &&
         map.getLayoutProperty("fuel", "visibility") === "visible";
       const burnScarOn = burnScarAdded && map.getLayer("burnscar") &&
         map.getLayoutProperty("burnscar", "visibility") === "visible";
-      if (!fuelOn && !burnScarOn) return;
+      const fwiToken = activeFwiToken();
+      if (!fuelOn && !burnScarOn && !fwiToken) return;
       const burnLayers = burnsAdded ? ["burns-fill"] : [];
       const overVector = map.queryRenderedFeatures(e.point, {
         layers: [...vectorHoverLayers, ...burnLayers].filter((id) => map.getLayer(id)),
@@ -438,6 +511,19 @@ async function main() {
               const code = Math.round(val);
               const label = fuelCodeToLabel.get(code) ?? `code ${code}`;
               showTip(oe, `Fuel class: ${label}`);
+              return;
+            }
+          }
+          /* FWI value read (regional reanalysis index — not a per-asset score,
+           * not a probability, not a forecast). */
+          if (fwiToken) {
+            const c = fwiByToken.get(fwiToken);
+            const [val] = await MaplibreCOGProtocol.locationValues(
+              c.href, { latitude: lat, longitude: lng }, zoom,
+            );
+            if (!isNaN(val)) {
+              showTip(oe, `${c.label}: ${val.toFixed(1)}\n` +
+                `(observed reanalysis, valid ${fwiOverlay.valid_date}; regional, not a forecast)`);
               return;
             }
           }
@@ -500,6 +586,44 @@ async function main() {
     burnsAdded = true;
   }
 
+  /* FWI operational overlay: one raster source per component, added lazily and
+   * shown one-at-a-time (the component <select> swaps which is visible). Each is
+   * inserted below "aoi" so the AOI outline and the vector layers stay on top. */
+  const fwiAdded = new Set();
+  function fwiLayerId(token) { return `fwi-${token}`; }
+  function fwiAddComponent(token) {
+    const c = fwiByToken.get(token);
+    const srcId = fwiLayerId(token);
+    map.addSource(srcId, { type: "raster", url: `cog://${c.href}`, tileSize: 256 });
+    map.addLayer(
+      { id: srcId, type: "raster", source: srcId, paint: { "raster-opacity": 1 } },
+      "aoi",
+    );
+    fwiAdded.add(token);
+  }
+  function fwiSetActive(token, on) {
+    for (const t of fwiByToken.keys()) {
+      const id = fwiLayerId(t);
+      if (!map.getLayer(id)) continue;
+      const show = on && t === token;
+      map.setLayoutProperty(id, "visibility", show ? "visible" : "none");
+    }
+    if (on && !fwiAdded.has(token)) fwiAddComponent(token);
+    drawFwiLegend(token);
+    document.getElementById("legend-fwi").hidden = !on;
+  }
+  function drawFwiLegend(token) {
+    if (!fwiOverlay) return;
+    const c = fwiByToken.get(token);
+    drawRamp("ramp-fwi", magmaLut);
+    document.getElementById("legend-fwi-title").textContent = c.label;
+    document.getElementById("ramp-fwi-low").textContent = c.value_min.toFixed(1);
+    document.getElementById("ramp-fwi-high").textContent = c.value_max.toFixed(1);
+    document.getElementById("legend-fwi-caption").textContent =
+      `Observed reanalysis, valid ${fwiOverlay.valid_date} (${fwiOverlay.lag_note}, ` +
+      `0.25° regional grid). ${fwiOverlay.attribution}`;
+  }
+
   function setVisibility(ids, on) {
     for (const id of ids) {
       map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
@@ -523,6 +647,11 @@ async function main() {
       if (on && !burnsAdded) await addBurns();
       else if (burnsAdded) setVisibility(["burns-fill", "burns-2025"], on);
     },
+    "toggle-fwi": (on) => {
+      const sel = document.getElementById("fwi-component");
+      fwiSetActive(sel.value, on);
+      document.getElementById("fwi-component-row").hidden = !on;
+    },
   };
   for (const [id, fn] of Object.entries(toggles)) {
     document.getElementById(id).addEventListener("change", async (e) => {
@@ -534,6 +663,26 @@ async function main() {
                   `host is unreachable, this layer has no data source.`);
       }
     });
+  }
+
+  /* FWI overlay UI: only revealed when the bundle carries an fwi_overlay block.
+   * Populate the component selector (FWI first, then sub-indices), set the
+   * honest valid-date caption, and swap the active COG when the selection
+   * changes while the overlay is on. */
+  if (fwiOverlay) {
+    const row = document.getElementById("fwi-row");
+    const sel = document.getElementById("fwi-component");
+    sel.innerHTML = fwiOverlay.components
+      .map((c) => `<option value="${c.component}">${c.label}</option>`)
+      .join("");
+    document.getElementById("fwi-caption").textContent =
+      `FWI valid date: ${fwiOverlay.valid_date} (${fwiOverlay.lag_note}). ` +
+      `Current observed reanalysis fire weather — regional context, not a forecast.`;
+    sel.addEventListener("change", () => {
+      const on = document.getElementById("toggle-fwi").checked;
+      if (on) fwiSetActive(sel.value, true);
+    });
+    row.hidden = false;
   }
 
   /* Hover labels are wired separately (not in the toggles object) because they

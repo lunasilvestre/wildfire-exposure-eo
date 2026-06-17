@@ -69,7 +69,11 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 }
 .tag.output { background: #2a6f3c; color: #fff; }
 .tag.input { background: #e8e6df; color: #555; }
-.tag.ui, .layer-row label .tag:not(.output):not(.input) { background: #d9e6ef; color: #355; }
+.tag.operational, .layer-row label .tag.operational { background: #b5471f; color: #fff; }
+.tag.ui, .layer-row label .tag:not(.output):not(.input):not(.operational) { background: #d9e6ef; color: #355; }
+
+.fwi-select-label { display: block; margin: 4px 0 0 22px; font-size: 12px; color: var(--muted); }
+.fwi-select-label select { margin-left: 4px; font-size: 12px; }
 
 .error { color: #b00020; font-size: 12px; }
 

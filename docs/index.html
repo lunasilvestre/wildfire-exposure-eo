@@ -82,6 +82,19 @@
         <p class="caption">ICNF Áreas Ardidas 1990–2025 inside the AOI (© ICNF). The 2025 vintage is the
           validation label set. Fetched from Cloudflare R2 (~8 MB; loads on toggle).</p>
       </div>
+      <div class="layer-row" id="fwi-row" hidden>
+        <label><input type="checkbox" id="toggle-fwi"> Fire weather (FWI) <span class="tag operational">operational</span></label>
+        <p class="caption" id="fwi-caption">Current observed fire weather.</p>
+        <label class="fwi-select-label" id="fwi-component-row" hidden>Component:
+          <select id="fwi-component"></select>
+        </label>
+        <p class="caption">The <strong>operational second axis</strong>: current observed reanalysis
+          fire weather from the CEMS Early Warning Data Store (Canadian FWI system). This is
+          <strong>regional context</strong> on a coarse 0.25° grid (≈25 km cells), with a ~2-day lag —
+          <em>not</em> a per-asset score, <em>not</em> a probability, <em>not</em> a forecast. Read it
+          alongside the exposure rank: the rank is the <strong>validated structural</strong> axis, this
+          is the <strong>current weather</strong> axis. Streamed from Cloudflare R2 (loads on toggle).</p>
+      </div>
       <div class="layer-row" id="hover-toggle-row">
         <label><input type="checkbox" id="toggle-hover"> Hover labels <span class="tag">ui</span></label>
         <p class="caption">Show a tooltip under the cursor with layer attributes (asset class and rank,
@@ -106,6 +119,12 @@
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>
         <ul id="fuel-legend-list"></ul>
+      </div>
+      <div id="legend-fwi" hidden>
+        <h3 id="legend-fwi-title">Fire weather (FWI)</h3>
+        <canvas id="ramp-fwi" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span id="ramp-fwi-low">min</span><span id="ramp-fwi-high">max</span></div>
+        <p class="caption" id="legend-fwi-caption"></p>
       </div>
     </section>
 

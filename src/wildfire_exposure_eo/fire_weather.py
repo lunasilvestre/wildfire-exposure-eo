@@ -756,3 +756,61 @@ def ewds_fwi_provenance(
         "fwi_feature_names": list(config.feature_names),
         "fwi_attribution": config.attribution,
     }
+
+
+# ---------------------------------------------------------------------------
+# Display-COG export of the EWDS FWI surfaces for the geobrowser overlay.
+# Each component is reprojected EPSG:4326 -> EPSG:3857 (BILINEAR — these are
+# continuous danger *indices*, not categorical codes) and written as a
+# GoogleMapsCompatible COG so maplibre-cog-protocol can render it client-side.
+# ---------------------------------------------------------------------------
+
+#: Web-Mercator display CRS for the geobrowser COG overlays (maplibre-cog-protocol
+#: renders EPSG:3857 COGs only — the EWDS netCDF arrives in EPSG:4326).
+FWI_DISPLAY_CRS = "EPSG:3857"
+
+
+def fwi_component_value_range(surface: EwdsFwiSurface, feature_name: str) -> tuple[float, float]:
+    """Finite (min, max) of one component surface — for the overlay colour ramp.
+
+    Raises if the component is entirely non-finite (an out-of-range pull); the
+    caller should have checked ``surface.is_null`` first.
+    """
+    da = surface.components[feature_name]
+    vals = np.asarray(da.values, dtype="float64")
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        raise ValueError(f"component {feature_name!r} has no finite values")
+    return float(np.min(vals)), float(np.max(vals))
+
+
+def write_fwi_component_cog(
+    surface: EwdsFwiSurface,
+    feature_name: str,
+    dst_path: Path,
+) -> None:
+    """Reproject one EWDS FWI component to EPSG:3857 and write a display COG.
+
+    The component arrives in EPSG:4326 (explicit CRS asserted at fetch). It is
+    reprojected to :data:`FWI_DISPLAY_CRS` with BILINEAR resampling — these are
+    continuous fire-weather *indices*, so bilinear is appropriate (unlike the
+    NEAREST used for categorical fuel codes), and ``NaN`` nodata is preserved so
+    the client paints out-of-grid pixels transparent. Output is a
+    GoogleMapsCompatible COG (DEFLATE). Source CRS must be explicit
+    (non-negotiable #2).
+    """
+    import rioxarray  # noqa: F401  (registers the .rio accessor)
+    from rasterio.enums import Resampling
+
+    da = surface.components[feature_name]
+    if da.rio.crs is None:
+        raise ValueError(f"component {feature_name!r} has no CRS (cannot reproject)")
+    da3857 = da.rio.reproject(FWI_DISPLAY_CRS, resampling=Resampling.bilinear, nodata=np.nan)
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    da3857.rio.to_raster(
+        dst_path,
+        driver="COG",
+        compress="DEFLATE",
+        dtype="float32",
+        BIGTIFF="IF_SAFER",
+    )

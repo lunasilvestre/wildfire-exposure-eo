@@ -89,6 +89,56 @@ class GeobrowserArtifact(BaseModel):
     description: str = Field(..., min_length=1)
 
 
+class FwiOverlayComponent(BaseModel):
+    """One current-season FWI overlay component (FWI or a Canadian sub-index).
+
+    The href points at the EPSG:3857 display COG on Cloudflare R2. ``value_min``
+    / ``value_max`` are the finite range of the surface, driving the colour ramp
+    in the geobrowser legend. The value is an OBSERVED reanalysis danger
+    *index*, never a probability or a forecast (non-negotiable #6).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Short component token (``fwi``, ``ffmc``, ``dmc``, ``dc``, ``isi``, ``bui``).
+    component: str = Field(..., min_length=1)
+    #: Human label shown in the legend (e.g. "Fine Fuel Moisture Code (FFMC)").
+    label: str = Field(..., min_length=1)
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    value_min: float
+    value_max: float
+
+    def __init__(self, **data: object) -> None:
+        super().__init__(**data)
+        if self.value_max < self.value_min:
+            raise ValueError(
+                f"FWI component {self.component!r}: value_max {self.value_max} "
+                f"< value_min {self.value_min}"
+            )
+
+
+class FwiOverlay(BaseModel):
+    """Current-season EWDS FWI overlay manifest (the operational second axis).
+
+    Terminology guard (non-negotiable #6): this is CURRENT OBSERVED reanalysis
+    fire weather (~2-day lag, 0.25° regional grid), NOT a per-asset score, NOT a
+    probability, NOT a forecast. It is the operational counterpart to the
+    VALIDATED STRUCTURAL exposure rank carried by the assets layer.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: netCDF ``valid_time`` of the EWDS reanalysis day rendered (ISO date).
+    valid_date: str = Field(..., min_length=1)
+    #: Lag note shown in the caption (e.g. "~2-day lag").
+    lag_note: str = Field(..., min_length=1)
+    #: Source attribution (CEMS EWDS, CC-BY-4.0) read from config.
+    attribution: str = Field(..., min_length=1)
+    #: Components in display order (FWI first, then the Canadian sub-indices).
+    components: list[FwiOverlayComponent] = Field(..., min_length=1)
+
+
 class GeobrowserStyleData(BaseModel):
     """``docs/app/data/style_data.json`` — everything the site needs that is
     derived from pipeline artefacts or repo config (nothing hand-made)."""
@@ -103,3 +153,6 @@ class GeobrowserStyleData(BaseModel):
     fuel_legend: list[FuelLegendEntry]
     validation: ValidationHeadline
     artifacts: dict[str, GeobrowserArtifact]
+    #: Current-season FWI operational overlay; ``None`` when no EWDS COGs are
+    #: wired (e.g. the smoke bundle or a tree built before the FWI pull).
+    fwi_overlay: FwiOverlay | None = None

@@ -60,6 +60,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from wildfire_exposure_eo.schemas import (
     ExposureFeatureProperties,
     FuelLegendEntry,
+    FwiOverlay,
+    FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
     ScoredAsset,
@@ -71,9 +73,24 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PARQUET_DIR = _ROOT / "outputs" / "parquet"
 _COG_DIR = _ROOT / "outputs" / "cogs"
 _VAL_DIR = _ROOT / "outputs" / "validation"
+_GEOBROWSER_DIR = _ROOT / "outputs" / "geobrowser"
 _CROSSWALK = _ROOT / "config" / "fuel_crosswalk.yaml"
+_FIRE_WEATHER_CONFIG = _ROOT / "config" / "fire_weather.yaml"
 _AOI_PILOT = _ROOT / "data" / "aoi" / "pilot.geojson"
 _AOI_SMOKE = _ROOT / "data" / "aoi" / "smoke.geojson"
+
+#: Manifest written by scripts/23_make_fwi_cogs.py (current-season EWDS FWI COGs).
+_FWI_MANIFEST = _GEOBROWSER_DIR / "fwi_overlay_manifest.json"
+
+#: Human labels for the FWI overlay components (display order is the manifest's).
+_FWI_COMPONENT_LABELS = {
+    "fwi": "Fire Weather Index (FWI)",
+    "ffmc": "Fine Fuel Moisture Code (FFMC)",
+    "dmc": "Duff Moisture Code (DMC)",
+    "dc": "Drought Code (DC)",
+    "isi": "Initial Spread Index (ISI)",
+    "bui": "Build-Up Index (BUI)",
+}
 
 #: Cloudflare R2 bucket (custom domain ``wildfire.cheias.pt``) hosting the geodata
 #: too large for the 2 000 kB committed-file cap — the burn-scar display COG and
@@ -250,6 +267,50 @@ def validation_headline(run_id: str, metrics: dict[str, Any]) -> ValidationHeadl
     )
 
 
+def build_fwi_overlay(manifest_path: Path, asset_base: str) -> FwiOverlay | None:
+    """Read the EWDS FWI COG manifest → :class:`FwiOverlay`, or ``None`` if absent.
+
+    The manifest is written by ``scripts/23_make_fwi_cogs.py`` (the live EWDS
+    pull). When it is missing the overlay is simply omitted from the bundle —
+    the geobrowser then renders without the operational second axis rather than
+    referencing COGs that were never produced. Each component's R2 href is built
+    from the manifest filename and the public asset base; the attribution is read
+    from the EWDS block of ``config/fire_weather.yaml`` (non-negotiable #1 — no
+    invented identifiers).
+    """
+    if not manifest_path.exists():
+        try:
+            shown = manifest_path.relative_to(_ROOT)
+        except ValueError:
+            shown = manifest_path
+        print(f"FWI overlay: no manifest at {shown} — overlay omitted")
+        return None
+    manifest = json.loads(manifest_path.read_text())
+    fw_cfg = yaml.safe_load(_FIRE_WEATHER_CONFIG.read_text())
+    attribution = str(fw_cfg["ewds_fwi"]["attribution"])
+    components: list[FwiOverlayComponent] = []
+    for comp in manifest["components"]:
+        token = str(comp["component"])
+        components.append(
+            FwiOverlayComponent(
+                component=token,
+                label=_FWI_COMPONENT_LABELS.get(token, token.upper()),
+                href=f"{asset_base}/{comp['filename']}",
+                crs=str(manifest["display_crs"]),
+                value_min=float(comp["value_min"]),
+                value_max=float(comp["value_max"]),
+            )
+        )
+    overlay = FwiOverlay(
+        valid_date=str(manifest["fwi_valid_date"]),
+        lag_note="~2-day lag",
+        attribution=attribution,
+        components=components,
+    )
+    print(f"FWI overlay: {len(components)} components, valid {overlay.valid_date}")
+    return overlay
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true", help="smoke AOI, outputs/logs only")
@@ -359,6 +420,7 @@ def main() -> int:
                 description="ICNF Áreas Ardidas perimeters (1990–2025 vintages inside the AOI)",
             ),
         },
+        fwi_overlay=build_fwi_overlay(_FWI_MANIFEST, asset_base),
     )
     style_path = site_data / "style_data.json"
     style_path.write_text(style.model_dump_json(indent=1) + "\n")
