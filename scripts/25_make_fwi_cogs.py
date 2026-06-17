@@ -21,9 +21,9 @@ hardcoded. Credentials (security): the EWDS key is read from ``CDSAPI_KEY`` or
 
 Usage::
 
-    uv run python scripts/23_make_fwi_cogs.py                 # live pull, latest date
-    uv run python scripts/23_make_fwi_cogs.py --date 2026-06-12
-    uv run python scripts/23_make_fwi_cogs.py --smoke         # offline config check, exit 0
+    uv run python scripts/25_make_fwi_cogs.py                 # live pull, latest date
+    uv run python scripts/25_make_fwi_cogs.py --date 2026-06-12
+    uv run python scripts/25_make_fwi_cogs.py --smoke         # offline config check, exit 0
 """
 
 from __future__ import annotations

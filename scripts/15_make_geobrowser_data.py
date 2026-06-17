@@ -79,7 +79,7 @@ _FIRE_WEATHER_CONFIG = _ROOT / "config" / "fire_weather.yaml"
 _AOI_PILOT = _ROOT / "data" / "aoi" / "pilot.geojson"
 _AOI_SMOKE = _ROOT / "data" / "aoi" / "smoke.geojson"
 
-#: Manifest written by scripts/23_make_fwi_cogs.py (current-season EWDS FWI COGs).
+#: Manifest written by scripts/25_make_fwi_cogs.py (current-season EWDS FWI COGs).
 _FWI_MANIFEST = _GEOBROWSER_DIR / "fwi_overlay_manifest.json"
 
 #: Human labels for the FWI overlay components (display order is the manifest's).
@@ -270,7 +270,7 @@ def validation_headline(run_id: str, metrics: dict[str, Any]) -> ValidationHeadl
 def build_fwi_overlay(manifest_path: Path, asset_base: str) -> FwiOverlay | None:
     """Read the EWDS FWI COG manifest → :class:`FwiOverlay`, or ``None`` if absent.
 
-    The manifest is written by ``scripts/23_make_fwi_cogs.py`` (the live EWDS
+    The manifest is written by ``scripts/25_make_fwi_cogs.py`` (the live EWDS
     pull). When it is missing the overlay is simply omitted from the bundle —
     the geobrowser then renders without the operational second axis rather than
     referencing COGs that were never produced. Each component's R2 href is built
