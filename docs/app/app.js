@@ -329,9 +329,16 @@ async function main() {
    * field reads clearly. Terminology guard (non-negotiable #6): these are
    * OBSERVED reanalysis danger indices (~2-day lag, regional grid), never a
    * per-asset score, probability, or forecast. The overlay block is optional —
-   * absent in bundles built before the EWDS pull. */
+   * absent in bundles built before the EWDS pull.
+   *
+   * Honesty bar (non-negotiable #6): the field is genuinely a coarse 0.25°
+   * (~28 km) grid. It is painted at a LOW default opacity so it reads as
+   * de-emphasised regional context (the validated assets are the star), the
+   * raster layer uses NEAREST display resampling (see fwiAddComponent) so the
+   * discrete cells stay crisp rather than being blurred into a smooth blob, and
+   * the whole overlay group defaults OFF (toggle-on). */
   const fwiOverlay = style.fwi_overlay || null;
-  const FWI_OPACITY = 0.65;
+  const FWI_OPACITY = 0.35;
   const magmaLut = buildMagmaLut();
   /* component token -> {comp def, added flag}; the active component id is the
    * one currently rendered (single-COG-at-a-time keeps R2 reads bounded). */
@@ -586,6 +593,146 @@ async function main() {
     burnsAdded = true;
   }
 
+  /* Wave-2 validation study areas (the four AOIs beyond the pilot). Each is a
+   * separately scored region (its own exposure_<aoi>_<run>.geojson) shown with
+   * the SAME viridis exposure_rank styling as the pilot, plus its AOI outline.
+   * The exposure rank is AOI-relative (rank 1 = most exposed WITHIN that AOI),
+   * so each study area gets its own colour expression keyed on its own n_assets
+   * — scores are not comparable across AOIs (scope note). model_version is read
+   * verbatim from the bundle (these are v0.3.0 runs, honestly labelled — never
+   * relabelled to the pilot's v0.3.1).
+   *
+   * Layers are added lazily on first reveal: committed GeoJSON loads from
+   * docs/app/data; the oversized one (monchique) streams from Cloudflare R2 like
+   * the burns layer. Each study area's exposure layers are inserted below "aoi"
+   * so the pilot AOI outline (and the hover/click vector handlers) stay on top. */
+  const studyAreas = style.study_areas || [];
+  const studyAreaByName = new Map(studyAreas.map((s) => [s.name, s]));
+  const studyAreaAdded = new Set();
+
+  function saExposureLayerIds(name) {
+    return [`sa-${name}-line`, `sa-${name}-fill`, `sa-${name}-point`];
+  }
+  function saOutlineLayerId(name) { return `sa-${name}-outline`; }
+
+  function saPopupHtml(sa, props) {
+    const osmUrl = `https://www.openstreetmap.org/${props.osm_type}/${props.osm_id}`;
+    return `<h4>${props.asset_class}</h4>
+      <em>${sa.label} study area · model v${sa.model_version}</em><br>
+      exposure rank <strong>${props.exposure_rank}</strong> of ${sa.n_assets.toLocaleString("en")}
+      (score ${Number(props.exposure_score).toFixed(3)} — relative rank within this AOI,
+      not a probability, not comparable across AOIs)<br>
+      criticality weight ${props.criticality_weight}<br>
+      <a href="${osmUrl}" target="_blank" rel="noopener">${props.asset_id}</a>`;
+  }
+
+  async function saAdd(name) {
+    const sa = studyAreaByName.get(name);
+    if (!sa) throw new Error(`unknown study area ${name}`);
+    /* Outline source (committed, small). */
+    const outlineResp = await fetch(sa.outline_href);
+    if (!outlineResp.ok) {
+      throw new Error(`HTTP ${outlineResp.status} fetching ${sa.label} AOI outline`);
+    }
+    map.addSource(`sa-${name}-outline-src`, { type: "geojson", data: await outlineResp.json() });
+    map.addLayer(
+      {
+        id: saOutlineLayerId(name),
+        type: "line",
+        source: `sa-${name}-outline-src`,
+        paint: { "line-color": "#444444", "line-width": 1.6, "line-dasharray": [3, 2] },
+      },
+      "aoi",
+    );
+
+    /* Exposure source: committed GeoJSON href is loaded directly; the R2 one is
+     * fetched first (a no-Referer GET so Cloudflare hotlink protection allows it,
+     * per the page-level no-referrer meta). */
+    let exposureData;
+    if (sa.committed) {
+      exposureData = sa.exposure_href;
+    } else {
+      const resp = await fetch(sa.exposure_href);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status} fetching ${sa.label} exposure from Cloudflare R2`);
+      }
+      exposureData = await resp.json();
+    }
+    map.addSource(`sa-${name}-src`, { type: "geojson", data: exposureData });
+
+    const rankColor = rankColorExpression(style.viridis_lut, sa.n_assets);
+    map.addLayer(
+      {
+        id: `sa-${name}-line`,
+        type: "line",
+        source: `sa-${name}-src`,
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": rankColor, "line-width": 2.2 },
+      },
+      "aoi",
+    );
+    map.addLayer(
+      {
+        id: `sa-${name}-fill`,
+        type: "fill",
+        source: `sa-${name}-src`,
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-color": rankColor, "fill-opacity": 0.75, "fill-outline-color": "#333" },
+      },
+      "aoi",
+    );
+    map.addLayer(
+      {
+        id: `sa-${name}-point`,
+        type: "circle",
+        source: `sa-${name}-src`,
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-color": rankColor, "circle-radius": 4.5,
+          "circle-stroke-color": "#333", "circle-stroke-width": 0.6,
+        },
+      },
+      "aoi",
+    );
+    for (const layerId of saExposureLayerIds(name)) {
+      map.on("click", layerId, (e) => {
+        new maplibregl.Popup({ maxWidth: "320px" })
+          .setLngLat(e.lngLat)
+          .setHTML(saPopupHtml(sa, e.features[0].properties))
+          .addTo(map);
+      });
+      map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
+    }
+    studyAreaAdded.add(name);
+  }
+
+  /* Show/hide one study area's exposure + outline layers, lazily adding them on
+   * first reveal. Returns a promise (the R2-hosted monchique fetch is async). */
+  async function saSetVisible(name, on) {
+    if (on && !studyAreaAdded.has(name)) {
+      await saAdd(name);
+      return;
+    }
+    if (studyAreaAdded.has(name)) {
+      setVisibility([...saExposureLayerIds(name), saOutlineLayerId(name)], on);
+    }
+  }
+
+  /* Fly to a study area (or the pilot) and reveal its exposure layer. */
+  async function flyToArea(name) {
+    if (name === "pilot") {
+      map.fitBounds(bounds, { padding: 32, duration: 900 });
+      return;
+    }
+    const sa = studyAreaByName.get(name);
+    if (!sa) return;
+    const [minx, miny, maxx, maxy] = sa.bbox_4326;
+    map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 32, duration: 900 });
+    document.getElementById("toggle-study-areas").checked = true;
+    await saSetVisible(name, true);
+  }
+
   /* FWI operational overlay: one raster source per component, added lazily and
    * shown one-at-a-time (the component <select> swaps which is visible). Each is
    * inserted below "aoi" so the AOI outline and the vector layers stay on top. */
@@ -595,8 +742,18 @@ async function main() {
     const c = fwiByToken.get(token);
     const srcId = fwiLayerId(token);
     map.addSource(srcId, { type: "raster", url: `cog://${c.href}`, tileSize: 256 });
+    /* raster-resampling "nearest": the FWI field is a genuine 0.25° (~28 km)
+     * grid; MapLibre's default "linear" resampling would interpolate it into a
+     * smooth surface that misleadingly reads as fine — non-negotiable #6 forbids
+     * making coarse data look finer than it is. Per-cell opacity is already baked
+     * into the colour function's alpha (FWI_OPACITY), so raster-opacity stays 1. */
     map.addLayer(
-      { id: srcId, type: "raster", source: srcId, paint: { "raster-opacity": 1 } },
+      {
+        id: srcId,
+        type: "raster",
+        source: srcId,
+        paint: { "raster-opacity": 1, "raster-resampling": "nearest" },
+      },
       "aoi",
     );
     fwiAdded.add(token);
@@ -652,6 +809,20 @@ async function main() {
       fwiSetActive(sel.value, on);
       document.getElementById("fwi-component-row").hidden = !on;
     },
+    /* All four validation study areas at once. Committed AOIs load from
+     * docs/app/data; monchique streams from R2 — both lazily on first reveal.
+     * Failures on one AOI are surfaced but do not abort the others. */
+    "toggle-study-areas": async (on) => {
+      const errors = [];
+      for (const sa of studyAreas) {
+        try {
+          await saSetVisible(sa.name, on);
+        } catch (err) {
+          errors.push(`${sa.label}: ${err.message}`);
+        }
+      }
+      if (errors.length) throw new Error(errors.join("; "));
+    },
   };
   for (const [id, fn] of Object.entries(toggles)) {
     document.getElementById(id).addEventListener("change", async (e) => {
@@ -685,6 +856,34 @@ async function main() {
     row.hidden = false;
   }
 
+  /* Study-area UI: only revealed when the bundle carries study_areas. Populate
+   * the fly-to selector (pilot first, then the four validation AOIs) and the
+   * per-AOI legend list (honest per-AOI model_version + asset count). Flying to
+   * an AOI reveals its exposure layer and turns the bulk toggle on. */
+  if (studyAreas.length) {
+    const flySel = document.getElementById("aoi-fly");
+    flySel.innerHTML =
+      `<option value="pilot">Pilot — Sever do Vouga (v0.3.1)</option>` +
+      studyAreas
+        .map((s) => `<option value="${s.name}">${s.label} (v${s.model_version})</option>`)
+        .join("");
+    flySel.addEventListener("change", async (e) => {
+      try {
+        await flyToArea(e.target.value);
+      } catch (err) {
+        showError(`Could not load ${e.target.value}: ${err.message}`);
+      }
+    });
+    document.getElementById("study-areas-list").innerHTML = studyAreas
+      .map(
+        (s) =>
+          `<li><strong>${s.label}</strong> — ${s.n_assets.toLocaleString("en")} assets, ` +
+          `model v${s.model_version}${s.committed ? "" : " (streamed from R2)"}</li>`,
+      )
+      .join("");
+    document.getElementById("study-areas-row").hidden = false;
+  }
+
   /* Hover labels are wired separately (not in the toggles object) because they
    * gate a flag rather than a layer's visibility. Default off. */
   document.getElementById("toggle-hover").addEventListener("change", (e) => {
@@ -702,6 +901,10 @@ async function main() {
       map.setLayoutProperty("basemap-sat", "visibility", sat ? "visible" : "none");
     });
   }
+
+  /* Headless-render hook (no effect in normal use): exposes the map instance so
+   * an automated visual-validation run can wait on "idle" and drive layers. */
+  window.__mapForTest = map;
 }
 
 main().catch((e) => showError(`Initialisation failed: ${e.message}`));

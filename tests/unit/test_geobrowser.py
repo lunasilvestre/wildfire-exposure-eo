@@ -17,6 +17,7 @@ from wildfire_exposure_eo.schemas import (
     FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
+    StudyAreaLayer,
     ValidationHeadline,
 )
 
@@ -224,6 +225,77 @@ def test_build_fwi_overlay_reads_manifest(tmp_path: Path) -> None:
     assert overlay.components[1].label == "Fine Fuel Moisture Code (FFMC)"
     # Attribution is read from config/fire_weather.yaml (no invented identifiers).
     assert "CEMS" in overlay.attribution
+
+
+# --------------------------------------------------------------------------- #
+# Study-area (Wave-2 validation AOI) schema
+# --------------------------------------------------------------------------- #
+
+
+def _study_area(**overrides: object) -> StudyAreaLayer:
+    base: dict[str, object] = {
+        "name": "monchique",
+        "label": "Monchique",
+        "exposure_href": "https://wildfire.cheias.pt/exposure_monchique_20260616T185021Z.geojson",
+        "exposure_crs": "EPSG:4326",
+        "outline_href": "app/data/aoi_monchique.geojson",
+        "outline_crs": "EPSG:4326",
+        "run_id": "20260616T185021Z",
+        "model_version": "0.3.0",
+        "n_assets": 4178,
+        "committed": False,
+        "bbox_4326": (-8.75, 37.1, -8.3, 37.5),
+    }
+    base.update(overrides)
+    return StudyAreaLayer.model_validate(base)
+
+
+def test_study_area_keeps_model_version_verbatim() -> None:
+    # The honesty bar: a v0.3.0 study area must not be relabelled to the pilot's
+    # v0.3.1 — the schema simply carries whatever the parquet provenance held.
+    sa = _study_area(model_version="0.3.0")
+    assert sa.model_version == "0.3.0"
+
+
+def test_study_area_rejects_empty_model_version() -> None:
+    with pytest.raises(ValidationError):
+        _study_area(model_version="")
+
+
+def test_study_areas_round_trip_in_style_data() -> None:
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+        study_areas=[
+            _study_area(),
+            _study_area(name="peneda_geres", label="Peneda-Gerês", committed=True, n_assets=1920),
+        ],
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert [s.name for s in parsed.study_areas] == ["monchique", "peneda_geres"]
+    assert parsed.study_areas[1].committed is True
+    assert parsed.study_areas[0].model_version == "0.3.0"
+
+
+def test_style_data_study_areas_default_empty() -> None:
+    """Bundles built before the Wave-2 wiring omit study areas; default is []."""
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+    )
+    assert style.study_areas == []
 
 
 # --------------------------------------------------------------------------- #

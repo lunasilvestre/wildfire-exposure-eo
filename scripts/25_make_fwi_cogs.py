@@ -4,11 +4,15 @@ The geobrowser's second axis is CURRENT OBSERVED fire weather alongside the
 VALIDATED STRUCTURAL exposure rank. This script pulls the latest available CEMS
 EWDS ``cems-fire-historical-v1`` reanalysis day (intermediate_dataset, ~2-day
 lag) for the Canadian Fire Weather Index system — FWI + FFMC/DMC/DC/ISI/BUI —
-over a BROAD extent (the union of all canonical AOIs + a 0.5° margin), so the
-coarse 0.25° grid shows real spatial variation across mainland Portugal.
+over the TIGHT union of the canonical AOIs plus a SMALL margin, so the overlay
+reads as honest coarse regional context over the study areas without blanketing
+Spain or the Atlantic. The grid is genuinely 0.25° (~28 km cells); it is shown
+as discrete cells (NEAREST, see ``write_fwi_component_cog``), never blurred to
+look finer than it is.
 
-Each component is reprojected EPSG:4326 -> EPSG:3857 (BILINEAR; continuous
-danger indices) and written as ``fwi_<comp>_3857_<validdate>.tif`` under
+Each component is reprojected EPSG:4326 -> EPSG:3857 (NEAREST; discrete 0.25°
+cells — the field is genuinely coarse and is shown as such, never interpolated
+to look finer) and written as ``fwi_<comp>_3857_<validdate>.tif`` under
 ``outputs/geobrowser/`` (uploaded to Cloudflare R2 by the operator / wiring
 step; too large/transient to commit).
 
@@ -67,9 +71,12 @@ _CANONICAL_AOIS = (
     "serra_da_estrela",
 )
 
-#: Margin (degrees) added around the AOI union so the 0.25° EWDS grid shows
-#: regional variation, not a single near-uniform cell over each AOI.
-_MARGIN_DEG = 0.5
+#: Margin (degrees) added around the AOI union. Kept SMALL (a fraction of the
+#: 0.25° grid step) so the overlay covers the study areas with a thin border of
+#: regional context, NOT a wide blanket spilling into Spain and the Atlantic.
+#: A larger margin previously (0.5°) pushed the extent to [-9.25,-6.87] lon —
+#: blanketing Galicia and ocean and dominating the pilot-centred view.
+_MARGIN_DEG = 0.1
 
 #: Geobrowser overlay components, in display order: the headline FWI plus its
 #: five Canadian-system sub-components. Maps the feature column (config) to the

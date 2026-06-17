@@ -50,6 +50,7 @@ from typing import Any
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import rasterio
 import rasterio.shutil
 import yaml
@@ -65,6 +66,7 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserArtifact,
     GeobrowserStyleData,
     ScoredAsset,
+    StudyAreaLayer,
     ValidationHeadline,
 )
 from wildfire_exposure_eo.stac import code_commit_sha
@@ -108,6 +110,28 @@ _EXPORT_PROPS = [
     "exposure_score",
     "exposure_rank",
 ]
+
+#: Wave-2 validation study areas beyond the pilot, in display order. Each is
+#: scored independently (its own ``exposure_<aoi>_<run>.parquet``) and shown as
+#: a toggleable exposure layer + AOI outline. The model_version is read from the
+#: parquet provenance, never hardcoded (non-negotiable #1 / #3): these are
+#: v0.3.0 runs and are labelled as such.
+_STUDY_AREAS: tuple[tuple[str, str], ...] = (
+    ("pedrogao_grande", "Pedrógão Grande"),
+    ("serra_da_estrela", "Serra da Estrela"),
+    ("peneda_geres", "Peneda-Gerês"),
+    ("monchique", "Monchique"),
+)
+
+#: Coordinate precision (decimal degrees) for study-area exposure GeoJSON. 6 dp
+#: is ≈0.1 m — finer than the asset geometry warrants, but keeps committed files
+#: small. A study-area GeoJSON that still exceeds the 2 000 kB committed-file cap
+#: after trimming is published to Cloudflare R2 instead (loads lazily on toggle).
+_STUDY_AREA_COORD_PRECISION = 6
+
+#: Committed-file cap (kB) enforced by the repo's check-added-large-files hook.
+#: Study-area exposure GeoJSONs at or above this go to R2, not docs/app/data.
+_COMMITTED_FILE_CAP_KB = 2000
 
 
 #: Canonical published-artefact run-id: an ISO-ish UTC stamp YYYYMMDDTHHMMSSZ.
@@ -170,6 +194,44 @@ def export_exposure_geojson(parquet_path: Path, out_path: Path) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out.to_file(out_path, driver="GeoJSON")
     return len(out)
+
+
+def export_study_area_geojson(parquet_path: Path, out_path: Path, *, coord_precision: int) -> int:
+    """Scored study-area parquet → display GeoJSON (same props as the pilot).
+
+    Identical schema-validation and column subset as
+    :func:`export_exposure_geojson`, but writes with a fixed coordinate
+    precision so the committed file stays under the repo's large-file cap.
+    """
+    gdf = gpd.read_parquet(parquet_path)
+    if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+        raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
+    for row in gdf.drop(columns="geometry").to_dict(orient="records"):
+        ScoredAsset.model_validate(row)
+    out = gpd.GeoDataFrame(gdf.sort_values("exposure_rank")[[*_EXPORT_PROPS, "geometry"]])
+    for props in out.drop(columns="geometry").to_dict(orient="records"):
+        ExposureFeatureProperties.model_validate(props)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_file(out_path, driver="GeoJSON", COORDINATE_PRECISION=coord_precision)
+    return len(out)
+
+
+def study_area_provenance_model_version(parquet_path: Path) -> str:
+    """Read ``model_version`` VERBATIM from the parquet provenance (#1 / #3).
+
+    These study areas are v0.3.0 runs; the value is surfaced as-is and never
+    relabelled. Raises if the provenance column or key is missing.
+    """
+    # pandas (not geopandas) so we can read the lone provenance column without
+    # pulling the geometry — geopandas requires a geometry column be present.
+    df = pd.read_parquet(parquet_path, columns=["provenance"])
+    if "provenance" not in df.columns or len(df) == 0:
+        raise ValueError(f"{parquet_path.name}: no provenance column")
+    prov = json.loads(str(df["provenance"].iloc[0]))
+    version = prov.get("model_version")
+    if not version:
+        raise ValueError(f"{parquet_path.name}: provenance missing model_version")
+    return str(version)
 
 
 def export_burns_geojson(parquet_path: Path, out_path: Path) -> int:
@@ -311,6 +373,85 @@ def build_fwi_overlay(manifest_path: Path, asset_base: str) -> FwiOverlay | None
     return overlay
 
 
+def build_study_areas(
+    *,
+    site_data: Path,
+    release_dir: Path,
+    asset_base: str,
+    smoke: bool,
+) -> list[StudyAreaLayer]:
+    """Export each Wave-2 study area → committed (or R2) layer descriptors.
+
+    For each AOI in :data:`_STUDY_AREAS`: pick the latest ``exposure_<aoi>_*``
+    parquet, export the scored GeoJSON (committed under ``docs/app/data`` when it
+    fits the large-file cap, else written to ``release_dir`` for R2 upload),
+    copy the AOI outline, and read ``model_version`` verbatim from provenance.
+    Returns the descriptors in display order. Skipped entirely in smoke mode and
+    for AOIs without a scored parquet (the geobrowser then just omits them).
+    """
+    if smoke:
+        return []
+    layers: list[StudyAreaLayer] = []
+    for name, label in _STUDY_AREAS:
+        cands = sorted(_PARQUET_DIR.glob(f"exposure_{name}_*.parquet"))
+        cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"exposure_{name}_", ""))]
+        if not cands:
+            print(f"study area {name!r}: no exposure parquet — skipped")
+            continue
+        parquet = cands[-1]
+        run_id = parquet.stem.replace(f"exposure_{name}_", "")
+        model_version = study_area_provenance_model_version(parquet)
+
+        # Export to a staging path first so we can size-check before deciding
+        # committed (docs/app/data) vs R2 (release_dir).
+        fname = f"exposure_{name}_{run_id}.geojson"
+        staged = release_dir / fname
+        n_assets = export_study_area_geojson(
+            parquet, staged, coord_precision=_STUDY_AREA_COORD_PRECISION
+        )
+        size_kb = staged.stat().st_size / 1024
+        committed = size_kb < _COMMITTED_FILE_CAP_KB
+        if committed:
+            dst = site_data / fname
+            dst.write_bytes(staged.read_bytes())
+            staged.unlink()
+            exposure_href = f"app/data/{fname}"
+            where = f"committed ({size_kb:.0f} kB)"
+        else:
+            exposure_href = f"{asset_base}/{fname}"
+            where = f"R2 ({size_kb:.0f} kB, over {_COMMITTED_FILE_CAP_KB} kB cap)"
+
+        # AOI outline is always small — committed under docs/app/data.
+        outline_src = _ROOT / "data" / "aoi" / f"{name}.geojson"
+        aoi_gdf = gpd.read_file(outline_src)
+        if aoi_gdf.crs is None or aoi_gdf.crs.to_epsg() != 4326:
+            raise ValueError(f"{outline_src.name}: expected explicit EPSG:4326, got {aoi_gdf.crs}")
+        outline_fname = f"aoi_{name}.geojson"
+        aoi_gdf.to_file(site_data / outline_fname, driver="GeoJSON")
+        minx, miny, maxx, maxy = (float(v) for v in aoi_gdf.total_bounds)
+
+        layers.append(
+            StudyAreaLayer(
+                name=name,
+                label=label,
+                exposure_href=exposure_href,
+                exposure_crs="EPSG:4326",
+                outline_href=f"app/data/{outline_fname}",
+                outline_crs="EPSG:4326",
+                run_id=run_id,
+                model_version=model_version,
+                n_assets=n_assets,
+                committed=committed,
+                bbox_4326=(minx, miny, maxx, maxy),
+            )
+        )
+        print(
+            f"study area {name!r}: {n_assets} assets, model v{model_version}, "
+            f"run {run_id} — {where}"
+        )
+    return layers
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true", help="smoke AOI, outputs/logs only")
@@ -367,6 +508,11 @@ def main() -> int:
     print(f"burns GeoJSON: {n_burns} perimeters → {burns_geojson.name}")
 
     asset_base = args.asset_base_url
+    study_areas = build_study_areas(
+        site_data=site_data, release_dir=release_dir, asset_base=asset_base, smoke=smoke
+    )
+    print(f"study areas: {len(study_areas)} wired ({', '.join(s.name for s in study_areas)})")
+
     style = GeobrowserStyleData(
         generated_by=f"scripts/15_make_geobrowser_data.py at {code_commit_sha(cwd=_ROOT)}",
         code_commit_sha=code_commit_sha(cwd=_ROOT),
@@ -420,6 +566,7 @@ def main() -> int:
                 description="ICNF Áreas Ardidas perimeters (1990–2025 vintages inside the AOI)",
             ),
         },
+        study_areas=study_areas,
         fwi_overlay=build_fwi_overlay(_FWI_MANIFEST, asset_base),
     )
     style_path = site_data / "style_data.json"

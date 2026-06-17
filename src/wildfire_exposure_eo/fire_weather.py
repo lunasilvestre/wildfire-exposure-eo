@@ -792,12 +792,13 @@ def write_fwi_component_cog(
     """Reproject one EWDS FWI component to EPSG:3857 and write a display COG.
 
     The component arrives in EPSG:4326 (explicit CRS asserted at fetch). It is
-    reprojected to :data:`FWI_DISPLAY_CRS` with BILINEAR resampling — these are
-    continuous fire-weather *indices*, so bilinear is appropriate (unlike the
-    NEAREST used for categorical fuel codes), and ``NaN`` nodata is preserved so
-    the client paints out-of-grid pixels transparent. Output is a
-    GoogleMapsCompatible COG (DEFLATE). Source CRS must be explicit
-    (non-negotiable #2).
+    reprojected to :data:`FWI_DISPLAY_CRS` with NEAREST resampling — the FWI
+    field is genuinely a coarse 0.25° (~28 km) grid, and the honesty bar
+    (non-negotiable #6) forbids interpolating it to look finer than it is, so we
+    keep the cells discrete rather than bilinearly smoothing them across the
+    warp. ``NaN`` nodata is preserved so the client paints out-of-grid pixels
+    transparent. Output is a GoogleMapsCompatible COG (DEFLATE). Source CRS must
+    be explicit (non-negotiable #2).
     """
     import rioxarray  # noqa: F401  (registers the .rio accessor)
     from rasterio.enums import Resampling
@@ -805,7 +806,7 @@ def write_fwi_component_cog(
     da = surface.components[feature_name]
     if da.rio.crs is None:
         raise ValueError(f"component {feature_name!r} has no CRS (cannot reproject)")
-    da3857 = da.rio.reproject(FWI_DISPLAY_CRS, resampling=Resampling.bilinear, nodata=np.nan)
+    da3857 = da.rio.reproject(FWI_DISPLAY_CRS, resampling=Resampling.nearest, nodata=np.nan)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     da3857.rio.to_raster(
         dst_path,

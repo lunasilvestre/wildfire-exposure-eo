@@ -1,6 +1,6 @@
 {
- "generated_by": "scripts/15_make_geobrowser_data.py at 71681fe0508ce459728b9deb8232d8f80fa8c26b",
- "code_commit_sha": "71681fe0508ce459728b9deb8232d8f80fa8c26b",
+ "generated_by": "scripts/15_make_geobrowser_data.py at 2c94eadb27d7cbc566066fc535bfb25bd328d836-dirty",
+ "code_commit_sha": "2c94eadb27d7cbc566066fc535bfb25bd328d836-dirty",
  "viridis_lut": [
   [
    68,
@@ -2676,65 +2676,139 @@
    "description": "Burn-scar inference-probability COG display copy (warped from the authoritative EPSG:4326 STAC/R2 asset, NEAREST)"
   },
   "icnf_burns": {
-   "href": "https://wildfire.cheias.pt/icnf_burns_20260610T164453Z.geojson",
+   "href": "https://wildfire.cheias.pt/icnf_burns_20260616T184344Z.geojson",
    "crs": "EPSG:4326",
-   "run_id": "20260610T164453Z",
+   "run_id": "20260616T184344Z",
    "role": "display",
-   "description": "ICNF \u00c1reas Ardidas perimeters (1990\u20132025 vintages inside the AOI)"
+   "description": "ICNF Áreas Ardidas perimeters (1990–2025 vintages inside the AOI)"
   }
  },
+ "study_areas": [
+  {
+   "name": "pedrogao_grande",
+   "label": "Pedrógão Grande",
+   "exposure_href": "app/data/exposure_pedrogao_grande_20260616T185352Z.geojson",
+   "exposure_crs": "EPSG:4326",
+   "outline_href": "app/data/aoi_pedrogao_grande.geojson",
+   "outline_crs": "EPSG:4326",
+   "run_id": "20260616T185352Z",
+   "model_version": "0.3.0",
+   "n_assets": 4153,
+   "committed": true,
+   "bbox_4326": [
+    -8.3,
+    39.8,
+    -7.7,
+    40.3
+   ]
+  },
+  {
+   "name": "serra_da_estrela",
+   "label": "Serra da Estrela",
+   "exposure_href": "app/data/exposure_serra_da_estrela_20260616T190233Z.geojson",
+   "exposure_crs": "EPSG:4326",
+   "outline_href": "app/data/aoi_serra_da_estrela.geojson",
+   "outline_crs": "EPSG:4326",
+   "run_id": "20260616T190233Z",
+   "model_version": "0.3.0",
+   "n_assets": 3350,
+   "committed": true,
+   "bbox_4326": [
+    -7.85,
+    40.15,
+    -7.37,
+    40.52
+   ]
+  },
+  {
+   "name": "peneda_geres",
+   "label": "Peneda-Gerês",
+   "exposure_href": "app/data/exposure_peneda_geres_20260616T185712Z.geojson",
+   "exposure_crs": "EPSG:4326",
+   "outline_href": "app/data/aoi_peneda_geres.geojson",
+   "outline_crs": "EPSG:4326",
+   "run_id": "20260616T185712Z",
+   "model_version": "0.3.0",
+   "n_assets": 1920,
+   "committed": true,
+   "bbox_4326": [
+    -8.52,
+    41.68,
+    -8.05,
+    41.99
+   ]
+  },
+  {
+   "name": "monchique",
+   "label": "Monchique",
+   "exposure_href": "https://wildfire.cheias.pt/exposure_monchique_20260616T185021Z.geojson",
+   "exposure_crs": "EPSG:4326",
+   "outline_href": "app/data/aoi_monchique.geojson",
+   "outline_crs": "EPSG:4326",
+   "run_id": "20260616T185021Z",
+   "model_version": "0.3.0",
+   "n_assets": 4178,
+   "committed": false,
+   "bbox_4326": [
+    -8.75,
+    37.1,
+    -8.3,
+    37.5
+   ]
+  }
+ ],
  "fwi_overlay": {
-  "valid_date": "2026-06-11",
+  "valid_date": "2026-06-12",
   "lag_note": "~2-day lag",
-  "attribution": "Source: CEMS Early Warning Data Store \u2014 Copernicus / ECMWF (CC-BY-4.0)",
+  "attribution": "Source: CEMS Early Warning Data Store — Copernicus / ECMWF (CC-BY-4.0)",
   "components": [
    {
     "component": "fwi",
     "label": "Fire Weather Index (FWI)",
-    "href": "https://wildfire.cheias.pt/fwi_fwi_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_fwi_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 6.6677,
-    "value_max": 51.3572
+    "value_min": 12.9463,
+    "value_max": 76.6973
    },
    {
     "component": "ffmc",
     "label": "Fine Fuel Moisture Code (FFMC)",
-    "href": "https://wildfire.cheias.pt/fwi_ffmc_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_ffmc_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 80.4512,
-    "value_max": 96.7837
+    "value_min": 83.8689,
+    "value_max": 96.521
    },
    {
     "component": "dmc",
     "label": "Duff Moisture Code (DMC)",
-    "href": "https://wildfire.cheias.pt/fwi_dmc_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_dmc_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 17.0664,
-    "value_max": 247.5742
+    "value_min": 35.0684,
+    "value_max": 263.6465
    },
    {
     "component": "dc",
     "label": "Drought Code (DC)",
-    "href": "https://wildfire.cheias.pt/fwi_dc_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_dc_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 171.8263,
-    "value_max": 513.381
+    "value_min": 175.5967,
+    "value_max": 532.8311
    },
    {
     "component": "isi",
     "label": "Initial Spread Index (ISI)",
-    "href": "https://wildfire.cheias.pt/fwi_isi_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_isi_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 1.9088,
-    "value_max": 17.0584
+    "value_min": 4.7305,
+    "value_max": 30.3116
    },
    {
     "component": "bui",
     "label": "Build-Up Index (BUI)",
-    "href": "https://wildfire.cheias.pt/fwi_bui_3857_2026-06-11.tif",
+    "href": "https://wildfire.cheias.pt/fwi_bui_3857_2026-06-12.tif",
     "crs": "EPSG:3857",
-    "value_min": 27.4979,
-    "value_max": 246.8377
+    "value_min": 46.6616,
+    "value_max": 262.7242
    }
   ]
  }
