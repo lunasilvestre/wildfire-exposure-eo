@@ -41,7 +41,7 @@ flowchart TD
     S2 -->|"NBR delta via stac.py resolver"| FEAT
     DEM -->|"slope via stac.py resolver"| FEAT
 
-    FEAT -->|"score (scoring.py +<br>config/exposure_score.yaml v0.2.0)"| EXP["exposure_&lt;run_id&gt;.parquet<br>(GeoParquet, ScoredAsset schema,<br>full per-row provenance)"]
+    FEAT -->|"score (scoring.py +<br>config/exposure_score.yaml v0.3.1)"| EXP["exposure_&lt;run_id&gt;.parquet<br>(GeoParquet, ScoredAsset schema,<br>full per-row provenance)"]
     EXP -->|"scripts/11_validate.py (validation.py:<br>leakage gate, lift, Spearman, ablation)"| VAL["docs/validation_report.md +<br>metrics_&lt;run_id&gt;.json"]
     EXP --> STAC["stac/ catalog<br>(exposure-assets, fuel-layer,<br>burn-scar-recent)"]
     FUEL --> STAC
@@ -79,17 +79,17 @@ flowchart TD
 
 ## 3. Provenance / lineage (one scored row → its exact inputs)
 
-Field values shown are from the published run `20260611T170549Z` (the
+Field values shown are from the published run `20260617T035233Z` (the
 backdated pilot run the committed validation report describes — STAC item
-`exposure-assets-20260611T170549Z`).
+`exposure-assets-20260617T035233Z`).
 
 ```mermaid
 flowchart LR
     ROW["ScoredAsset row<br>(any of the 3045 assets)"] --> PROV["provenance dict<br>(per-row, schema-enforced)"]
 
-    PROV --> RID["run_id<br>20260611T170549Z"]
-    PROV --> SHA["code_commit_sha<br>988e59f2eab0…"]
-    PROV --> MV["model_version 0.2.0 + config_sha<br>→ config/exposure_score.yaml"]
+    PROV --> RID["run_id<br>20260617T035233Z"]
+    PROV --> SHA["code_commit_sha<br>71681fe0508c…"]
+    PROV --> MV["model_version 0.3.1 + config_sha<br>→ config/exposure_score.yaml"]
     PROV --> XWALK["crosswalk_sha<br>→ config/fuel_crosswalk.yaml"]
     PROV --> WIN["window_start..window_end<br>2023-12-31..2024-12-31"]
     PROV --> AOI["aoi_geometry_sha<br>→ data/aoi/pilot.geojson"]
@@ -103,5 +103,5 @@ flowchart LR
     PROV --> S2IDS["s2_item_ids<br>(56 Sentinel-2 L2A STAC ids)"]
     PROV --> DEMIDS["dem_item_ids<br>Copernicus_DSM_COG_10_N40_00_W009_00_DEM"]
 
-    SHA --> REPRO["git checkout 988e59f2 +<br>re-run score → byte-identical row"]
+    SHA --> REPRO["git checkout 71681fe0 +<br>re-run score → byte-identical row"]
 ```
