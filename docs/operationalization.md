@@ -322,4 +322,133 @@ boxes are thinner — check before relying on them for asset counts).
    merge is painful. The §4/§5 rule (build features in parallel, land weight
    bumps serially) must be honoured or the "kraken" eats itself.
 
+---
+
+## 8. Operational refresh cadence — the "assets to watch" decision product
+
+> **Shipped (WU-26).** A single orchestrator, `scripts/26_operational_refresh.py`,
+> crosses the repo's two axes and republishes the fast one every two days (matching
+> the ~2-day EWDS reanalysis lag). It is the planner-facing decision layer
+> [`docs/strategy.md`](strategy.md) calls for, kept inside the non-negotiables.
+
+### 8.1 What it does (the two-axis join)
+
+The watch list is the product of the two axes the project already owns:
+
+- **Axis 1 — validated structural exposure** (`exposure_score`, the AOI-relative
+  screening rank in [0, 1], validated against ICNF burns; v0.3.1, FWI unweighted).
+  This is the *slow* axis — it does not change between refreshes.
+- **Axis 2 — current observed fire weather** (CEMS EWDS FWI reanalysis sampled at
+  each asset's 0.25° grid cell; ~2-day lag). This is the *fast* axis — it is what
+  makes the list "current".
+
+```
+watch_priority = exposure_score × fwi_norm
+fwi_norm       = clip(fwi_current / 50, 0, 1)
+```
+
+The FWI normalisation reference (50) is the lower bound of the EFFIS **Extreme**
+fire-danger class (FWI 50–70); `fwi_norm` reaches 1.0 exactly when current fire
+weather enters the extreme band, and saturates above. (EFFIS class scheme:
+<https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/fire-danger-forecast>,
+accessed 2026-06-17.) Both factors live in [0, 1], so `watch_priority` does too:
+an asset surfaces only when it is *both* structurally exposed *and* under elevated
+current fire weather. Assets whose cell the EWDS surface does not cover carry
+`watch_priority = null` — **never imputed**.
+
+**Honest framing (non-negotiables #6 + #9).** The watch list is *operational
+triage* — "validated high-exposure assets currently under elevated **observed**
+fire weather, prioritise monitoring." It is **not** a forecast, **not** a
+probability, **not** a prediction of ignition. FWI is observed reanalysis, not a
+forecast. No production / operationally-validated claims attach to it.
+
+### 8.2 What it emits
+
+Per run (anchored on the FWI valid date), under `outputs/watch_list/` (gitignored
+— generated, not an input):
+
+| Artefact | Format | Contents |
+|---|---|---|
+| `watch_list_<aoi>_<run_id>.parquet` | GeoParquet (EPSG:4326) | full join, one row per asset, schema `WatchListItem` |
+| `watch_list_<aoi>_<run_id>.json` | JSON | `run` header (formula + provenance) + every item |
+| `watch_list_<aoi>_<run_id>.md` | Markdown | top-N human-readable brief (class, location, structural rank, current FWI, `watch_priority`) |
+
+It also (unless `--no-upload` / `--no-style`): regenerates the six EWDS FWI display
+COGs via `scripts/25_make_fwi_cogs.py` (imported, not duplicated), uploads them to
+Cloudflare R2, and patches **only** the `fwi_overlay` block of
+`docs/app/data/style_data.json` with the new `valid_date` — the validated
+structural blocks of that file are untouched.
+
+Every artefact carries the run provenance (`run_id`, `code_commit_sha`,
+`fwi_valid_date`, FWI DOI `10.24381/cds.0e89c522`, `model_version`, `seed=42`).
+The EWDS API key is read from `~/.cdsapirc` / `CDSAPI_KEY` and is **never** logged
+or written to any artefact.
+
+**Graceful failure.** If EWDS is down or the latest day is not yet published, the
+orchestrator keeps the last-good artefacts, publishes nothing, logs the reason,
+and exits non-zero. The walk-back tolerates the variable EWDS lag (it tries up to
+8 days back from the requested date).
+
+### 8.3 Cadence — install instructions (DO NOT install without sign-off)
+
+The refresh is **gated on a human**: the cron is not installed by the build. Two
+paths, primary first.
+
+**PRIMARY — local system crontab (secrets stay on the machine).**
+Run every two days; the EWDS key lives only in `~/.cdsapirc`, never on GitHub.
+Edit your crontab (`crontab -e`) and add (adjust the absolute repo path):
+
+```cron
+# Operational refresh — assets to watch (every 2 days at 06:17 UTC).
+# Secrets: ~/.cdsapirc (never on the command line). Logs: outputs/logs/operational_refresh/.
+17 6 */2 * * /ABSOLUTE/PATH/TO/wildfire-exposure-eo/scripts/run_operational_refresh.sh >/dev/null 2>&1
+```
+
+The wrapper `scripts/run_operational_refresh.sh` resolves the repo root from its
+own location, `cd`s there, runs `uv run python scripts/26_operational_refresh.py`
+(passing through any extra args), and tees a timestamped log to
+`outputs/logs/operational_refresh/`. Exit 0 = published; non-zero = failed and
+last-good kept. Verify once by hand before trusting the cron:
+
+```bash
+scripts/run_operational_refresh.sh --no-upload --no-style   # dry run, no live writes
+scripts/run_operational_refresh.sh                          # full run (uploads + patches)
+```
+
+**FALLBACK — GitHub Actions light-path (no GPU).**
+Only if a hosted schedule is required. The EWDS key must first be **rotated into a
+repo secret** (`CDSAPI_KEY`) — do not reuse a long-lived personal key; mint a
+dedicated one. The job is CPU-only (no model inference): it pulls FWI, builds the
+watch list, and commits the refreshed `style_data.json` fwi_overlay + the
+committed-size watch-list artefacts. Sketch (`.github/workflows/operational-refresh.yml`,
+**not committed by this WU** — install deliberately):
+
+```yaml
+on:
+  schedule:
+    - cron: "17 6 */2 * *"   # every 2 days
+  workflow_dispatch:
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked --extra dev
+      - name: Refresh (CDS key from repo secret; R2 creds from rclone secrets)
+        env:
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+        run: uv run python scripts/26_operational_refresh.py --aoi pilot
+      # Upload to R2 + commit the refreshed overlay/watch-list — wire rclone or the
+      # repo's existing publish path here; keep the bucket creds in repo secrets.
+```
+
+Caveats for the light-path: (a) the 0.25° EWDS grid + small COGs are cheap, so the
+free runner is adequate; (b) the R2 upload needs the bucket credentials as repo
+secrets (rclone `r2:` remote config or S3-compatible env); (c) prefer the local
+crontab when a always-on machine exists — it keeps the EWDS key off GitHub
+entirely, which is the stricter posture.
+
+<!-- generated by: scripts/26_operational_refresh.py at <commit> (WU-26 operational refresh spine) -->
+
 <!-- maintained alongside docs/strategy.md and docs/roadmap.md; pillar 6 keeps the three consistent -->

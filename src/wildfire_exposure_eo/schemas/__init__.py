@@ -44,6 +44,7 @@ from wildfire_exposure_eo.schemas.static_raster_manifest import (
     FetchRecord,
     StaticRasterManifest,
 )
+from wildfire_exposure_eo.schemas.watch_list import WatchListItem, WatchListRun
 
 __all__ = [
     "FEATURE_NAMES",
@@ -79,5 +80,7 @@ __all__ = [
     "StacWindow",
     "StaticRasterManifest",
     "ValidationHeadline",
+    "WatchListItem",
+    "WatchListRun",
     "source_health_from_check",
 ]
