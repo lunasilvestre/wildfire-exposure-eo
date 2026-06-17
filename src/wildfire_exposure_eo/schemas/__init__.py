@@ -27,6 +27,7 @@ from wildfire_exposure_eo.schemas.geobrowser import (
     FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
+    StudyAreaLayer,
     ValidationHeadline,
 )
 from wildfire_exposure_eo.schemas.osm_asset import OsmAsset, OsmAssetProvenance
@@ -79,6 +80,7 @@ __all__ = [
     "StacManifest",
     "StacWindow",
     "StaticRasterManifest",
+    "StudyAreaLayer",
     "ValidationHeadline",
     "WatchListItem",
     "WatchListRun",

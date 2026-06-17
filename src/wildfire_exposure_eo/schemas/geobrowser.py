@@ -139,6 +139,44 @@ class FwiOverlay(BaseModel):
     components: list[FwiOverlayComponent] = Field(..., min_length=1)
 
 
+class StudyAreaLayer(BaseModel):
+    """One Wave-2 validation study area shown as a toggleable geobrowser layer.
+
+    Each study area carries its own scored-exposure GeoJSON (same viridis
+    ``exposure_rank`` styling as the pilot) plus its AOI outline. The honesty
+    bar (non-negotiable #3, #1): ``model_version`` is read VERBATIM from the
+    scored parquet's provenance — these are v0.3.0 runs and are labelled as
+    such, never relabelled. ``bbox_4326`` drives the fly-to control.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Canonical AOI slug (``monchique``, ``pedrogao_grande`` …); matches
+    #: ``data/aoi/<name>.geojson`` (non-negotiable #10 — no hardcoded coords).
+    name: str = Field(..., min_length=1)
+    #: Human label shown in the AOI selector (e.g. "Monchique").
+    label: str = Field(..., min_length=1)
+    #: Scored-exposure display GeoJSON (EPSG:4326). When ``committed`` is False
+    #: the href points at Cloudflare R2 and the layer loads lazily on toggle.
+    exposure_href: str = Field(..., min_length=1)
+    exposure_crs: str = Field(..., min_length=1)
+    #: AOI outline GeoJSON (EPSG:4326), committed under ``docs/app/data``.
+    outline_href: str = Field(..., min_length=1)
+    outline_crs: str = Field(..., min_length=1)
+    #: Scoring run id of the exposure parquet this layer was exported from.
+    run_id: str = Field(..., min_length=1)
+    #: Model version read VERBATIM from the parquet provenance (e.g. "0.3.0").
+    model_version: str = Field(..., min_length=1)
+    #: Assets in this study area (drives the legend/popup denominator).
+    n_assets: int = Field(..., ge=1)
+    #: ``True`` when the exposure GeoJSON is committed under ``docs/app/data``
+    #: (loads eagerly); ``False`` when it is too large and hosted on R2 (loads
+    #: lazily on toggle, like the burn-scar / ICNF layers).
+    committed: bool
+    #: AOI bbox ``[minlon, minlat, maxlon, maxlat]`` for the fly-to control.
+    bbox_4326: tuple[float, float, float, float]
+
+
 class GeobrowserStyleData(BaseModel):
     """``docs/app/data/style_data.json`` — everything the site needs that is
     derived from pipeline artefacts or repo config (nothing hand-made)."""
@@ -153,6 +191,9 @@ class GeobrowserStyleData(BaseModel):
     fuel_legend: list[FuelLegendEntry]
     validation: ValidationHeadline
     artifacts: dict[str, GeobrowserArtifact]
+    #: Wave-2 validation study areas (the four AOIs beyond the pilot), each a
+    #: toggleable exposure layer + outline with its own honest model_version.
+    study_areas: list[StudyAreaLayer] = Field(default_factory=list)
     #: Current-season FWI operational overlay; ``None`` when no EWDS COGs are
     #: wired (e.g. the smoke bundle or a tree built before the FWI pull).
     fwi_overlay: FwiOverlay | None = None
