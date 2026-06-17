@@ -4,11 +4,12 @@ The geobrowser's second axis is CURRENT OBSERVED fire weather alongside the
 VALIDATED STRUCTURAL exposure rank. This script pulls the latest available CEMS
 EWDS ``cems-fire-historical-v1`` reanalysis day (intermediate_dataset, ~2-day
 lag) for the Canadian Fire Weather Index system — FWI + FFMC/DMC/DC/ISI/BUI —
-over the TIGHT union of the canonical AOIs plus a SMALL margin, so the overlay
-reads as honest coarse regional context over the study areas without blanketing
-Spain or the Atlantic. The grid is genuinely 0.25° (~28 km cells); it is shown
-as discrete cells (NEAREST, see ``write_fwi_component_cog``), never blurred to
-look finer than it is.
+over the WHOLE IBERIAN PENINSULA (mainland Portugal + Spain; see
+:data:`IBERIA_BBOX`), so the overlay reads as honest coarse REGIONAL CONTEXT for
+the study areas rather than a tight strip clipped to the AOIs. The grid is
+genuinely 0.25° (~28 km cells, ~56×32 over Iberia); it is shown as discrete
+cells (NEAREST, see ``write_fwi_component_cog``), never blurred to look finer
+than it is, and the client paints ocean / no-coverage cells fully transparent.
 
 Each component is reprojected EPSG:4326 -> EPSG:3857 (NEAREST; discrete 0.25°
 cells — the field is genuinely coarse and is shown as such, never interpolated
@@ -19,9 +20,12 @@ step; too large/transient to commit).
 Terminology guard (CLAUDE.md non-negotiable #6): these are OBSERVED REANALYSIS
 danger *indices* (relative regional context, ~2-day lag, 0.25° grid), NEVER a
 forecast or a probability of fire. CRS (#2): explicit at every step. AOI (#10):
-the extent is the union of ``data/aoi/*.geojson`` read at runtime, never
-hardcoded. Credentials (security): the EWDS key is read from ``CDSAPI_KEY`` or
-``~/.cdsapirc`` and is NEVER printed or written to any artefact.
+:data:`IBERIA_BBOX` is the FWI regional-context DISPLAY extent, NOT an AOI — the
+frozen pilot/validation AOIs in ``data/aoi/*.geojson`` are unchanged and still
+govern all scoring; a context-layer display bbox is a documented design choice,
+not a magic number. Credentials (security): the EWDS key is read from
+``CDSAPI_KEY`` or ``~/.cdsapirc`` and is NEVER printed or written to any
+artefact.
 
 Usage::
 
@@ -39,7 +43,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from shapely.geometry import box
-from shapely.ops import unary_union
 
 # Repo-root import shim so the script runs from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -53,30 +56,25 @@ from wildfire_exposure_eo.fire_weather import (
     load_ewds_key,
     write_fwi_component_cog,
 )
-from wildfire_exposure_eo.stac import load_aoi_geometry
 
 _ROOT = Path(__file__).resolve().parents[1]
-_AOI_DIR = _ROOT / "data" / "aoi"
 _CONFIG_PATH = _ROOT / "config" / "fire_weather.yaml"
 _OUT_DIR = _ROOT / "outputs" / "geobrowser"
 
-#: Canonical source AOIs (pilot + the four Wave-2 validation AOIs). The ``alt_``
-#: and ``smoke_`` variants are working copies, not extent definitions, so they
-#: are excluded — the broad overlay extent is the union of these five.
-_CANONICAL_AOIS = (
-    "pilot",
-    "monchique",
-    "pedrogao_grande",
-    "peneda_geres",
-    "serra_da_estrela",
-)
-
-#: Margin (degrees) added around the AOI union. Kept SMALL (a fraction of the
-#: 0.25° grid step) so the overlay covers the study areas with a thin border of
-#: regional context, NOT a wide blanket spilling into Spain and the Atlantic.
-#: A larger margin previously (0.5°) pushed the extent to [-9.25,-6.87] lon —
-#: blanketing Galicia and ocean and dominating the pilot-centred view.
-_MARGIN_DEG = 0.1
+#: FWI regional-context DISPLAY extent — the WHOLE Iberian Peninsula (mainland
+#: Portugal + Spain), as ``(minlon, minlat, maxlon, maxlat)`` in EPSG:4326.
+#:
+#: PROVENANCE / non-negotiable #10: this is the FWI overlay's display bbox, NOT
+#: an AOI. The frozen pilot + validation AOIs in ``data/aoi/*.geojson`` are
+#: unchanged and still govern all scoring; this constant only sets how wide a
+#: regional fire-weather backdrop is drawn behind them. It is a deliberate,
+#: documented context-layer extent (not a magic number): mainland-Iberia bounds
+#: rounded to the 0.25° EWDS grid — westernmost Cabo da Roca ≈ -9.5°E, easternmost
+#: Cap de Creus ≈ 3.3°E, Punta de Tarifa ≈ 36.0°N, Punta de Estaca de Bares
+#: ≈ 43.8°N — padded a little so coastal cells are not clipped. At 0.25° this is
+#: ~56×32 cells, a small request. Atlantic / Mediterranean / no-coverage cells
+#: render fully transparent client-side (NaN nodata; see docs/app/app.js).
+IBERIA_BBOX: tuple[float, float, float, float] = (-9.8, 35.9, 3.5, 44.0)
 
 #: Geobrowser overlay components, in display order: the headline FWI plus its
 #: five Canadian-system sub-components. Maps the feature column (config) to the
@@ -93,26 +91,6 @@ _OVERLAY_COMPONENTS: tuple[tuple[str, str], ...] = (
 #: How many days back from ``--date`` (or today) to try before giving up when
 #: the most recent day is not yet published (EWDS lags ~2 days, sometimes more).
 _MAX_LOOKBACK_DAYS = 8
-
-
-def union_bbox_with_margin() -> tuple[float, float, float, float]:
-    """Union bbox of the canonical AOIs, expanded by :data:`_MARGIN_DEG`.
-
-    Reads each ``data/aoi/<name>.geojson`` at runtime (non-negotiable #10 — no
-    hardcoded coordinates). Returns ``(minlon, minlat, maxlon, maxlat)``.
-    """
-    geoms = []
-    for name in _CANONICAL_AOIS:
-        geom, _ = load_aoi_geometry(_AOI_DIR / f"{name}.geojson")
-        geoms.append(geom)
-    union = unary_union(geoms)
-    minx, miny, maxx, maxy = union.bounds
-    return (
-        float(minx) - _MARGIN_DEG,
-        float(miny) - _MARGIN_DEG,
-        float(maxx) + _MARGIN_DEG,
-        float(maxy) + _MARGIN_DEG,
-    )
 
 
 def latest_available_surface(
@@ -187,22 +165,20 @@ def main() -> int:
         raise ValueError(f"overlay components missing from ewds config: {missing}")
 
     if args.smoke:
-        bbox = union_bbox_with_margin()
         print(
             "[smoke] ewds overlay OK: components="
             + ",".join(tok for _, tok in _OVERLAY_COMPONENTS),
             file=sys.stderr,
         )
         print(
-            f"[smoke] union bbox (minlon,minlat,maxlon,maxlat) = "
-            f"{tuple(round(c, 4) for c in bbox)}",
+            f"[smoke] iberia display bbox (minlon,minlat,maxlon,maxlat) = {IBERIA_BBOX}",
             file=sys.stderr,
         )
         return 0
 
-    bbox = union_bbox_with_margin()
+    bbox = IBERIA_BBOX
     print(
-        f"[fwi-cogs] union+{_MARGIN_DEG}deg bbox = {tuple(round(c, 4) for c in bbox)}",
+        f"[fwi-cogs] iberia display bbox = {bbox}",
         file=sys.stderr,
     )
     key = load_ewds_key()  # CDSAPI_KEY env or ~/.cdsapirc; never printed
@@ -237,8 +213,11 @@ def main() -> int:
         "fwi_valid_date": valid,
         "requested_date": surface.requested_date.isoformat(),
         "extent_bbox_4326": [round(c, 6) for c in bbox],
-        "extent_source_aois": list(_CANONICAL_AOIS),
-        "extent_margin_deg": _MARGIN_DEG,
+        "extent_kind": "iberia_regional_context_display",
+        "extent_note": (
+            "FWI regional-context display extent over mainland Iberia (PT+Spain); "
+            "NOT an AOI — frozen AOIs in data/aoi/ govern scoring (non-negotiable #10)"
+        ),
         "display_crs": "EPSG:3857",
         "components": written,
         "provenance": provenance,

@@ -332,11 +332,14 @@ async function main() {
    * absent in bundles built before the EWDS pull.
    *
    * Honesty bar (non-negotiable #6): the field is genuinely a coarse 0.25°
-   * (~28 km) grid. It is painted at a LOW default opacity so it reads as
-   * de-emphasised regional context (the validated assets are the star), the
-   * raster layer uses NEAREST display resampling (see fwiAddComponent) so the
-   * discrete cells stay crisp rather than being blurred into a smooth blob, and
-   * the whole overlay group defaults OFF (toggle-on). */
+   * (~28 km) grid covering the whole Iberian Peninsula (mainland PT+Spain) as
+   * REGIONAL CONTEXT — ocean / no-coverage cells are NaN nodata and paint fully
+   * transparent (see the colour function below), so the basemap shows through
+   * and only the landmass carries cells. It is painted at a LOW default opacity
+   * so it reads as de-emphasised regional context (the validated assets are the
+   * star), the raster layer uses NEAREST display resampling (see fwiAddComponent)
+   * so the discrete cells stay crisp rather than being blurred into a smooth
+   * blob, and the whole overlay group defaults OFF (toggle-on). */
   const fwiOverlay = style.fwi_overlay || null;
   const FWI_OPACITY = 0.35;
   const magmaLut = buildMagmaLut();
@@ -349,7 +352,13 @@ async function main() {
       const span = Math.max(1e-6, c.value_max - c.value_min);
       MaplibreCOGProtocol.setColorFunction(c.href, (pixel, color, metadata) => {
         const val = pixel[0];
-        if (val === metadata.noData || isNaN(val)) {
+        /* EMPTY / NODATA -> FULLY TRANSPARENT. Over the wide Iberia display
+         * extent most cells are ocean or outside the FWI grid; those arrive as
+         * NaN (the COG carries a NaN nodata tag) or match metadata.noData. ANY
+         * non-finite value, or a value equal to the nodata sentinel, paints
+         * alpha 0 so the basemap shows through — never a white/filled blanket.
+         * Only a finite, in-grid FWI value paints a (low-opacity) magma cell. */
+        if (!Number.isFinite(val) || val === metadata.noData) {
           color.set([0, 0, 0, 0]);
         } else {
           const t = Math.max(0, Math.min(1, (val - c.value_min) / span));
@@ -778,7 +787,7 @@ async function main() {
     document.getElementById("ramp-fwi-high").textContent = c.value_max.toFixed(1);
     document.getElementById("legend-fwi-caption").textContent =
       `Observed reanalysis, valid ${fwiOverlay.valid_date} (${fwiOverlay.lag_note}, ` +
-      `0.25° regional grid). ${fwiOverlay.attribution}`;
+      `0.25° grid over the Iberian Peninsula). ${fwiOverlay.attribution}`;
   }
 
   function setVisibility(ids, on) {

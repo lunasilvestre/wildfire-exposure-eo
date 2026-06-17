@@ -796,9 +796,13 @@ def write_fwi_component_cog(
     field is genuinely a coarse 0.25° (~28 km) grid, and the honesty bar
     (non-negotiable #6) forbids interpolating it to look finer than it is, so we
     keep the cells discrete rather than bilinearly smoothing them across the
-    warp. ``NaN`` nodata is preserved so the client paints out-of-grid pixels
-    transparent. Output is a GoogleMapsCompatible COG (DEFLATE). Source CRS must
-    be explicit (non-negotiable #2).
+    warp. ``NaN`` nodata is set on the array AND written into the COG's nodata
+    tag (``nodata=np.nan`` below) so maplibre-cog-protocol sees ``metadata.noData``
+    and the client paints every out-of-grid / ocean / no-coverage pixel FULLY
+    TRANSPARENT — over the wide Iberia display extent most cells outside the
+    landmass are nodata and must show the basemap through, never a filled blanket.
+    Output is a GoogleMapsCompatible COG (DEFLATE). Source CRS must be explicit
+    (non-negotiable #2).
     """
     import rioxarray  # noqa: F401  (registers the .rio accessor)
     from rasterio.enums import Resampling
@@ -807,11 +811,13 @@ def write_fwi_component_cog(
     if da.rio.crs is None:
         raise ValueError(f"component {feature_name!r} has no CRS (cannot reproject)")
     da3857 = da.rio.reproject(FWI_DISPLAY_CRS, resampling=Resampling.nearest, nodata=np.nan)
+    da3857 = da3857.rio.write_nodata(np.nan, encoded=False)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     da3857.rio.to_raster(
         dst_path,
         driver="COG",
         compress="DEFLATE",
         dtype="float32",
+        nodata=float("nan"),
         BIGTIFF="IF_SAFER",
     )

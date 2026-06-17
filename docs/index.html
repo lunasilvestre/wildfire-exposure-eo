@@ -90,10 +90,12 @@
         </label>
         <p class="caption">The <strong>operational second axis</strong>: current observed reanalysis
           fire weather from the CEMS Early Warning Data Store (Canadian FWI system). This is
-          <strong>regional context</strong> on a coarse 0.25° grid (≈25 km cells), with a ~2-day lag —
-          <em>not</em> a per-asset score, <em>not</em> a probability, <em>not</em> a forecast. Read it
-          alongside the exposure rank: the rank is the <strong>validated structural</strong> axis, this
-          is the <strong>current weather</strong> axis. Streamed from Cloudflare R2 (loads on toggle).</p>
+          <strong>regional context over the Iberian Peninsula</strong> (mainland Portugal + Spain)
+          on a coarse 0.25° grid (≈25 km cells), with a ~2-day lag —
+          <em>not</em> a per-asset score, <em>not</em> a probability, <em>not</em> a forecast. Ocean and
+          no-coverage cells are transparent. Read it alongside the exposure rank: the rank is the
+          <strong>validated structural</strong> axis, this is the <strong>current weather</strong> axis.
+          Streamed from Cloudflare R2 (loads on toggle).</p>
       </div>
       <div class="layer-row" id="study-areas-row" hidden>
         <label><input type="checkbox" id="toggle-study-areas"> Validation study areas <span class="tag output">output</span></label>

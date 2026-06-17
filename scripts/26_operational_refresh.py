@@ -116,10 +116,10 @@ def refresh_fwi_cogs(
 ) -> tuple[EwdsFwiSurface, list[dict[str, object]], dict[str, Any]]:
     """Pull the latest EWDS FWI day and (re)write the six display COGs + manifest.
 
-    Delegates to scripts/25 for the AOI-union bbox, the latest-available-day walk,
-    and the per-component COG writer (no duplication). Raises on EWDS-down / no
-    data so the caller can fail gracefully WITHOUT having touched live artefacts.
-    Returns ``(surface, written_components, manifest_dict)``.
+    Delegates to scripts/25 for the Iberia display bbox, the latest-available-day
+    walk, and the per-component COG writer (no duplication). Raises on EWDS-down /
+    no data so the caller can fail gracefully WITHOUT having touched live
+    artefacts. Returns ``(surface, written_components, manifest_dict)``.
     """
     s25 = _load_script_25()
     config = load_ewds_fwi_config(_CONFIG_PATH)
@@ -128,9 +128,9 @@ def refresh_fwi_cogs(
     if missing:
         raise ValueError(f"overlay components missing from ewds config: {missing}")
 
-    bbox = s25.union_bbox_with_margin()
+    bbox = s25.IBERIA_BBOX
     print(
-        f"[refresh] EWDS union+{s25._MARGIN_DEG}deg bbox = {tuple(round(c, 4) for c in bbox)}",
+        f"[refresh] EWDS iberia display bbox = {bbox}",
         file=sys.stderr,
     )
     # latest_available_surface raises (EWDS down / unpublished) or returns a
@@ -166,8 +166,11 @@ def refresh_fwi_cogs(
         "fwi_valid_date": valid,
         "requested_date": surface.requested_date.isoformat(),
         "extent_bbox_4326": [round(c, 6) for c in bbox],
-        "extent_source_aois": list(s25._CANONICAL_AOIS),
-        "extent_margin_deg": s25._MARGIN_DEG,
+        "extent_kind": "iberia_regional_context_display",
+        "extent_note": (
+            "FWI regional-context display extent over mainland Iberia (PT+Spain); "
+            "NOT an AOI — frozen AOIs in data/aoi/ govern scoring (non-negotiable #10)"
+        ),
         "display_crs": "EPSG:3857",
         "components": written,
         "provenance": provenance,
