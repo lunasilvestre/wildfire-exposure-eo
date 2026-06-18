@@ -148,6 +148,56 @@ class FwiOverlay(BaseModel):
     components: list[FwiOverlayComponent] = Field(..., min_length=1)
 
 
+class InputRasterLayer(BaseModel):
+    """One per-AOI model-INPUT display COG shown as a toggleable raster layer.
+
+    These are the relative model INPUT rasters (canopy height, slope, NBR-delta,
+    fuel NFFL class) warped to EPSG:3857 for client-side rendering and hosted on
+    Cloudflare R2. Honesty bar (non-negotiable #6): an input raster, never a
+    probability, score, or forecast. ``kind`` selects the colour ramp / legend
+    (see :class:`InputRampSpec`); ``href`` points at the R2 display COG (loads
+    lazily on toggle, like the burn-scar / ICNF layers).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Input type token; matches an :class:`InputRampSpec` key.
+    kind: Literal["canopy_height", "slope", "nbr_delta", "fuel_class"]
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    #: Run id of the display COG (the warp run stamp in the filename).
+    run_id: str = Field(..., min_length=1)
+
+
+class InputRampSpec(BaseModel):
+    """Display ramp + legend metadata for one model-INPUT raster *kind*.
+
+    A continuous input (canopy / slope / NBR-delta) paints a value→colour ramp
+    stretched between ``value_min`` and ``value_max`` (measured from the COGs,
+    not invented — non-negotiable #1); the fuel class reuses the categorical
+    ``fuel_legend`` and so carries no continuous ramp here. The values are the
+    relative model INPUTS, never probabilities or forecasts (non-negotiable #6).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["canopy_height", "slope", "nbr_delta", "fuel_class"]
+    label: str = Field(..., min_length=1)
+    #: Legend unit suffix shown after the value (e.g. "m", "°"); empty for the
+    #: unitless NBR-delta / categorical fuel.
+    unit: str = ""
+    #: Matplotlib colormap name the LUT was sampled from (provenance; the LUT
+    #: itself is carried in ``lut`` so the client needs no matplotlib).
+    cmap: str = Field(..., min_length=1)
+    #: 256-step RGB LUT sampled from ``cmap`` (None for the categorical fuel).
+    lut: list[Rgb] | None = None
+    #: Continuous display range driving the ramp (None for the categorical fuel).
+    value_min: float | None = None
+    value_max: float | None = None
+    #: Short honest legend caption (terminology guard).
+    caption: str = Field(..., min_length=1)
+
+
 class StudyAreaLayer(BaseModel):
     """One Wave-2 validation study area shown as a toggleable geobrowser layer.
 
@@ -193,6 +243,10 @@ class StudyAreaLayer(BaseModel):
     icnf_crs: str | None = Field(default=None, min_length=1)
     #: Count of ICNF perimeters in ``icnf_href`` (drives the legend/caption).
     icnf_n_perimeters: int | None = Field(default=None, ge=0)
+    #: Per-AOI model-INPUT display COGs (canopy / slope / NBR-delta / fuel),
+    #: each toggleable and shown WITH this AOI. Empty when none were published.
+    #: Honest scope (#6): inputs, never probabilities or forecasts.
+    input_layers: list[InputRasterLayer] = Field(default_factory=list)
 
 
 class GeobrowserStyleData(BaseModel):
@@ -212,6 +266,14 @@ class GeobrowserStyleData(BaseModel):
     #: Wave-2 validation study areas (the four AOIs beyond the pilot), each a
     #: toggleable exposure layer + outline with its own honest model_version.
     study_areas: list[StudyAreaLayer] = Field(default_factory=list)
+    #: Pilot AOI model-INPUT display COGs (canopy / slope / NBR-delta). The
+    #: pilot's FUEL input keeps its dedicated ``artifacts["fuel_class"]`` entry,
+    #: so it is NOT duplicated here. Empty when none were published.
+    pilot_input_layers: list[InputRasterLayer] = Field(default_factory=list)
+    #: Display ramp + legend metadata per model-INPUT *kind*, shared by the pilot
+    #: and every study area (the per-AOI layers reuse one ramp per kind so the
+    #: legend reads consistently across AOIs). Empty when no input layers wired.
+    input_ramps: list[InputRampSpec] = Field(default_factory=list)
     #: Current-season FWI operational overlay; ``None`` when no EWDS COGs are
     #: wired (e.g. the smoke bundle or a tree built before the FWI pull).
     fwi_overlay: FwiOverlay | None = None

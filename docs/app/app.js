@@ -366,6 +366,30 @@ function fillFuelLegend(legend) {
     .join("");
 }
 
+/* Draw the continuous-input legend ramps (canopy / slope / NBR-delta) into
+ * their per-kind canvases and set the min/max + unit labels and honest caption.
+ * Driven by style.input_ramps (LUT + display range measured from the COGs). The
+ * categorical FUEL input has no continuous ramp — it reuses #fuel-legend-list. */
+function fillInputLegends(ramps) {
+  for (const r of ramps || []) {
+    if (!r.lut) continue; // fuel: categorical, no ramp
+    const canvas = document.getElementById(`ramp-input-${r.kind}`);
+    if (!canvas) continue;
+    const ctx = canvas.getContext("2d");
+    for (let x = 0; x < canvas.width; x++) {
+      ctx.fillStyle = rgb(r.lut[Math.round((x / (canvas.width - 1)) * 255)]);
+      ctx.fillRect(x, 0, 1, canvas.height);
+    }
+    const u = r.unit ? ` ${r.unit}` : "";
+    const lo = document.getElementById(`ramp-input-${r.kind}-low`);
+    const hi = document.getElementById(`ramp-input-${r.kind}-high`);
+    if (lo) lo.textContent = `${r.value_min}${u}`;
+    if (hi) hi.textContent = `${r.value_max}${u}`;
+    const cap = document.getElementById(`legend-input-${r.kind}-caption`);
+    if (cap) cap.textContent = r.caption;
+  }
+}
+
 async function renderDiagrams() {
   const el = document.getElementById("diagrams");
   try {
@@ -911,6 +935,7 @@ async function main() {
   fillValidation(v);
   fillDownloads(style);
   fillFuelLegend(style.fuel_legend);
+  fillInputLegends(style.input_ramps);
   fillSymbolLegend();
   renderDiagrams();
 
@@ -1100,6 +1125,61 @@ async function main() {
         }
       });
     }
+  }
+
+  /* ----------------------------------------------------------------------- *
+   * Per-AOI model-INPUT raster layers (canopy height, slope, NBR-delta, fuel
+   * NFFL class) — the relative model INPUTS, hosted as EPSG:3857 display COGs
+   * on Cloudflare R2 (cog://https://wildfire.cheias.pt/...). One toggle per
+   * INPUT KIND drives whichever AOI is currently shown: the active AOI's COG
+   * for that kind is added lazily + made visible; switching AOIs swaps the COG
+   * under the same toggle. Honesty bar (non-negotiable #6): inputs, never a
+   * probability, score, or forecast.
+   *
+   * Continuous kinds (canopy / slope / NBR-delta) paint a value→colour ramp
+   * (the LUT + display range come from style.input_ramps, measured from the
+   * COGs — not invented); the categorical FUEL input reuses the existing fuel
+   * colour function (per-code tab10 + grey non-fuel), registered per-href.
+   * nodata (uint8 255 for canopy, NaN for slope / NBR-delta, the COG nodata tag
+   * for fuel) paints transparent so the basemap shows through. ----------- */
+  const inputRamps = new Map((style.input_ramps || []).map((r) => [r.kind, r]));
+  const INPUT_OPACITY = 0.8;
+  /* Track which input-COG hrefs already have a registered colour function so a
+   * lazily-added layer never double-registers (idempotent across AOI swaps). */
+  const inputColorRegistered = new Set();
+
+  function registerInputColor(kind, href) {
+    if (inputColorRegistered.has(href)) return;
+    inputColorRegistered.add(href);
+    if (kind === "fuel_class") {
+      /* Reuse the pilot fuel colour function verbatim: per-code tab10 fill,
+       * grey non-fuel, transparent nodata / unknown / code 255. */
+      MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
+        const code = pixel[0];
+        if (code === metadata.noData || code === 255 || fuelColor.get(code) === undefined) {
+          color.set([0, 0, 0, 0]);
+        } else {
+          color.set([...fuelColor.get(code), 255]);
+        }
+      });
+      return;
+    }
+    const ramp = inputRamps.get(kind);
+    if (!ramp || !ramp.lut) return;
+    const span = Math.max(1e-6, ramp.value_max - ramp.value_min);
+    MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
+      const val = pixel[0];
+      /* Transparent nodata: NaN (slope / NBR-delta carry a NaN tag) or the
+       * COG's nodata sentinel (uint8 255 for canopy). Any in-range value paints
+       * the ramp colour at the input opacity. */
+      if (!Number.isFinite(val) || val === metadata.noData) {
+        color.set([0, 0, 0, 0]);
+      } else {
+        const t = Math.max(0, Math.min(1, (val - ramp.value_min) / span));
+        const idx = Math.round(t * 255);
+        color.set([...ramp.lut[idx], Math.round(255 * INPUT_OPACITY)]);
+      }
+    });
   }
 
   map.on("load", () => {
@@ -1598,6 +1678,8 @@ async function main() {
     await saSetVisible(name, true);
     const icnfOn = document.getElementById("toggle-study-icnf");
     if (icnfOn && icnfOn.checked) await saSetIcnfVisible(name, true);
+    // Follow the active AOI with whichever input-raster toggles are on.
+    inputSyncActiveAoi();
   }
 
   /* Fly to a study area (or the pilot) and DRIVE map visibility: a study area is
@@ -1609,6 +1691,8 @@ async function main() {
       saHideAll();
       activeStudyArea = null;
       studyToggle.checked = false;
+      // Follow back to the pilot with whichever input-raster toggles are on.
+      inputSyncActiveAoi();
       map.fitBounds(bounds, { padding: 32, duration: 900 });
       return;
     }
@@ -1678,6 +1762,115 @@ async function main() {
     }
   }
 
+  /* ----------------------------------------------------------------------- *
+   * Per-AOI model-INPUT raster layers, synced to the AOI selector.
+   *
+   * ONE toggle per input KIND (canopy / slope / NBR-delta / fuel) drives
+   * whichever AOI is currently shown. The pilot's input COGs come from
+   * style.pilot_input_layers; each study area's from its own input_layers list
+   * — keyed by `kind`. A toggle-on adds (lazily) + shows the ACTIVE AOI's COG
+   * for that kind; switching AOIs (saShowOnly / flyToArea) re-runs the sync so
+   * the toggled-on kinds follow the new AOI. Each (kind, AOI) gets its own map
+   * layer id + raster source, inserted below "aoi" so the AOI outline and the
+   * vector layers stay on top.
+   *
+   * Note: the PILOT FUEL input is the dedicated `fuel` layer (toggle-fuel),
+   * not an input_layer here — so the pilot has no fuel entry and the canopy /
+   * slope / NBR-delta toggles cover its three input COGs. The per-study-area
+   * fuel COGs ARE wired here (the study areas have no dedicated fuel layer).
+   * Per-AOI BURN-SCAR is intentionally absent: those COGs are not yet produced
+   * (see the PENDING note in the UI); the pilot burn-scar layer is unchanged. */
+  const INPUT_KINDS = ["canopy_height", "slope", "nbr_delta", "fuel_class"];
+  const pilotInputLayers = style.pilot_input_layers || [];
+  const inputToggleOn = new Set(); // kinds currently toggled on
+  const inputAdded = new Set(); // (kind, aoi) layer ids already added to the map
+
+  // Active AOI key for the input layers: the active study area, or "pilot".
+  const activeInputAoi = () => activeStudyArea || "pilot";
+
+  // Descriptor (or null) for `kind` in `aoiName`. Pilot fuel is intentionally
+  // absent (the dedicated `fuel` layer covers it).
+  function inputLayerDesc(kind, aoiName) {
+    const list =
+      aoiName === "pilot"
+        ? pilotInputLayers
+        : (studyAreaByName.get(aoiName)?.input_layers ?? []);
+    return list.find((l) => l.kind === kind) || null;
+  }
+  function inputLayerId(kind, aoiName) {
+    return `input-${kind}-${aoiName}`;
+  }
+
+  // Add one (kind, AOI) input COG layer lazily (idempotent). Inserts below "aoi".
+  function inputAddLayer(kind, aoiName) {
+    const id = inputLayerId(kind, aoiName);
+    if (inputAdded.has(id)) return true;
+    const desc = inputLayerDesc(kind, aoiName);
+    if (!desc) return false;
+    registerInputColor(kind, desc.href);
+    map.addSource(id, { type: "raster", url: `cog://${desc.href}`, tileSize: 256 });
+    map.addLayer(
+      { id, type: "raster", source: id, paint: { "raster-opacity": 1 } },
+      map.getLayer("aoi") ? "aoi" : undefined,
+    );
+    inputAdded.add(id);
+    return true;
+  }
+
+  // Hide every added layer of `kind` across all AOIs (used before showing one).
+  function inputHideKind(kind) {
+    for (const aoiName of ["pilot", ...studyAreaByName.keys()]) {
+      const id = inputLayerId(kind, aoiName);
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
+    }
+  }
+
+  // Sync toggled-on input kinds to the ACTIVE AOI: for each on-kind, hide all
+  // its layers, then add+show the active AOI's COG (if that AOI has it). Called
+  // on toggle and whenever the active AOI changes.
+  function inputSyncActiveAoi() {
+    const aoiName = activeInputAoi();
+    for (const kind of INPUT_KINDS) {
+      inputHideKind(kind);
+      if (!inputToggleOn.has(kind)) continue;
+      if (inputAddLayer(kind, aoiName)) {
+        map.setLayoutProperty(inputLayerId(kind, aoiName), "visibility", "visible");
+      }
+      inputUpdateLegend(kind);
+    }
+  }
+
+  // Show/hide one input legend block, reflecting whether the kind is on AND the
+  // active AOI actually carries that COG (so e.g. pilot fuel-via-inputs, which
+  // does not exist, shows an honest "not published for this AOI" note instead).
+  function inputUpdateLegend(kind) {
+    const on = inputToggleOn.has(kind);
+    if (kind === "fuel_class") {
+      /* The fuel input reuses the categorical #legend-fuel block (per-code
+       * tab10). Keep it visible while EITHER the pilot fuel layer or the fuel
+       * INPUT toggle is on, so toggling one off does not hide the other's
+       * legend. The per-AOI "not published" note still applies (pilot has no
+       * fuel input — its fuel is the dedicated layer). */
+      const fuelLayerOn = document.getElementById("toggle-fuel")?.checked;
+      document.getElementById("legend-fuel").hidden = !(on || fuelLayerOn);
+    }
+    const block = document.getElementById(`legend-input-${kind}`);
+    if (block) block.hidden = !on;
+    const note = document.getElementById(`legend-input-${kind}-aoinote`);
+    if (note) {
+      const has = !!inputLayerDesc(kind, activeInputAoi());
+      note.hidden = has;
+    }
+  }
+
+  // Toggle one input KIND on/off, then sync the active AOI's COG for it.
+  function inputSetKind(kind, on) {
+    if (on) inputToggleOn.add(kind);
+    else inputToggleOn.delete(kind);
+    if (!on) inputHideKind(kind);
+    inputSyncActiveAoi();
+  }
+
   const toggles = {
     "toggle-exposure": (on) =>
       setVisibility(["exposure-point", "exposure-fill", "exposure-line"], on),
@@ -1685,8 +1878,17 @@ async function main() {
     "toggle-assets": (on) => setVisibility(["assets-point", "assets-fill", "assets-line"], on),
     "toggle-fuel": (on) => {
       setVisibility(["fuel"], on);
-      document.getElementById("legend-fuel").hidden = !on;
+      // Keep the categorical fuel legend visible if EITHER the pilot fuel layer
+      // or the per-AOI fuel INPUT toggle is on (they share #legend-fuel).
+      document.getElementById("legend-fuel").hidden = !(on || inputToggleOn.has("fuel_class"));
     },
+    /* Per-AOI model-INPUT raster toggles (synced to the AOI selector): each
+     * shows the ACTIVE AOI's display COG for that input kind. Pilot fuel is the
+     * dedicated `fuel` layer above; the per-study-area fuel COG is wired here. */
+    "toggle-input-canopy_height": (on) => inputSetKind("canopy_height", on),
+    "toggle-input-slope": (on) => inputSetKind("slope", on),
+    "toggle-input-nbr_delta": (on) => inputSetKind("nbr_delta", on),
+    "toggle-input-fuel_class": (on) => inputSetKind("fuel_class", on),
     "toggle-burnscar": (on) => {
       if (on && !burnScarAdded) addBurnScar();
       else if (burnScarAdded) setVisibility(["burnscar"], on);
