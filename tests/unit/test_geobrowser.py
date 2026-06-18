@@ -11,7 +11,10 @@ from pydantic import ValidationError
 from shapely.geometry import Point
 
 from wildfire_exposure_eo.schemas import (
+    BurnHistoryLayer,
+    BurnHistorySourceStyle,
     ExposureFeatureProperties,
+    FirescopeLayer,
     FuelLegendEntry,
     FwiOverlay,
     FwiOverlayComponent,
@@ -19,6 +22,7 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    ProvenanceSummary,
     StudyAreaLayer,
     ValidationHeadline,
 )
@@ -715,3 +719,153 @@ def test_validation_headline_from_degenerate_metrics() -> None:
     v = geobrowser_mod.validation_headline("rid", metrics)
     assert v.degenerate is True
     assert v.spearman_rho is None
+
+
+# --------------------------------------------------------------------------- #
+# Thematic Iberia layers (firescope / burn-history / provenance summary)
+# --------------------------------------------------------------------------- #
+
+
+def test_firescope_layer_round_trips_in_style_data() -> None:
+    lut = [(0, 0, 0)] * 256
+    fs = FirescopeLayer(
+        href="https://wildfire.cheias.pt/firescope_iberia_3857_20260618T122124Z.tif",
+        crs="EPSG:3857",
+        run_id="20260618T122124Z",
+        value_min=0.0,
+        value_max=254.0,
+        cmap="magma",
+        lut=lut,
+        attribution="FireScope (CC-BY-4.0) — INSAIT-Institute + ETH, arXiv:2511.17171",
+        caption="Relative wildfire-risk RANK (SOTA reference), not a probability.",
+    )
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+        firescope=fs,
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert parsed.firescope is not None
+    assert parsed.firescope.value_max == 254.0
+    assert "arXiv:2511.17171" in parsed.firescope.attribution
+
+
+def test_burn_history_layer_round_trips_by_source() -> None:
+    bh = BurnHistoryLayer(
+        href="https://wildfire.cheias.pt/iberia_burn_history_20260618T131535Z.geojson",
+        crs="EPSG:4326",
+        run_id="20260618T131535Z",
+        sources=[
+            BurnHistorySourceStyle(
+                source="ICNF",
+                label="ICNF (Portugal — fine, 1990–2025)",
+                color=(179, 0, 0),
+                vintage_min=1990,
+                vintage_max=2025,
+                n_perimeters=25117,
+            ),
+            BurnHistorySourceStyle(
+                source="EFFIS",
+                label="EFFIS (Spain — coarse, 2016–2025)",
+                color=(230, 159, 0),
+                vintage_min=2016,
+                vintage_max=2025,
+                n_perimeters=10284,
+            ),
+        ],
+        caption="Observed history, not a forecast; PT/ES temporal+resolution asymmetry.",
+    )
+    parsed = BurnHistoryLayer.model_validate_json(bh.model_dump_json())
+    assert [s.source for s in parsed.sources] == ["ICNF", "EFFIS"]
+    assert parsed.sources[0].vintage_min == 1990
+    assert parsed.sources[1].vintage_min == 2016
+
+
+def test_burn_history_source_rejects_unknown_source() -> None:
+    with pytest.raises(ValidationError):
+        BurnHistorySourceStyle(
+            source="NASA",  # type: ignore[arg-type]
+            label="x",
+            color=(1, 2, 3),
+            vintage_min=2000,
+            vintage_max=2020,
+            n_perimeters=1,
+        )
+
+
+def test_provenance_summary_truncates_commit_sha() -> None:
+    ps = ProvenanceSummary(
+        run_id="20260617T035233Z",
+        model_version="0.3.1",
+        code_commit_sha="71681fe0508ce459728b9deb8232d8f80fa8c26b",
+        window_start="2023-12-31",
+        window_end="2024-12-31",
+        validation_years=[2025],
+        s2_item_count=56,
+        fwi_valid_date="2026-06-12",
+    )
+    assert len(ps.code_commit_sha) == 40
+    assert ps.s2_item_count == 56
+
+
+def test_provenance_summary_fwi_date_optional() -> None:
+    ps = ProvenanceSummary(
+        run_id="x",
+        model_version="0.3.1",
+        code_commit_sha="deadbeef",
+        window_start="2023-12-31",
+        window_end="2024-12-31",
+        validation_years=[2025],
+        s2_item_count=0,
+    )
+    assert ps.fwi_valid_date is None
+
+
+def test_style_data_thematic_fields_default_none_or_empty() -> None:
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+    )
+    assert style.iberia_inputs == []
+    assert style.firescope is None
+    assert style.burn_history is None
+    assert style.provenance_summary is None
+
+
+def test_build_iberia_inputs_uses_published_filenames() -> None:
+    layers = geobrowser_mod.build_iberia_inputs("https://wildfire.cheias.pt")
+    kinds = {layer.kind for layer in layers}
+    assert kinds == {"fuel_class", "slope", "canopy_height"}
+    for layer in layers:
+        assert layer.crs == "EPSG:3857"
+        assert layer.href.startswith("https://wildfire.cheias.pt/")
+        # run-id parsed from the published filename (canonical YYYYMMDDThhmmssZ)
+        assert geobrowser_mod._RUN_ID_RE.match(layer.run_id)
+
+
+def test_build_firescope_carries_attribution_and_range() -> None:
+    fs = geobrowser_mod.build_firescope("https://wildfire.cheias.pt")
+    assert fs.value_min == 0.0
+    assert fs.value_max == 254.0
+    assert fs.cmap == "magma"
+    assert len(fs.lut) == 256
+    assert "arXiv:2511.17171" in fs.attribution
+
+
+def test_build_full_nffl_fuel_legend_covers_all_codes() -> None:
+    legend = geobrowser_mod.full_nffl_fuel_legend()
+    codes = {e.code for e in legend}
+    # Non-fuel 0 plus every NFFL code in the crosswalk (1..13).
+    assert 0 in codes
+    assert {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}.issubset(codes)

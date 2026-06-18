@@ -21,7 +21,10 @@ from wildfire_exposure_eo.schemas.fuel_layer import (
     GridSpec,
 )
 from wildfire_exposure_eo.schemas.geobrowser import (
+    BurnHistoryLayer,
+    BurnHistorySourceStyle,
     ExposureFeatureProperties,
+    FirescopeLayer,
     FuelLegendEntry,
     FwiOverlay,
     FwiOverlayComponent,
@@ -29,6 +32,7 @@ from wildfire_exposure_eo.schemas.geobrowser import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    ProvenanceSummary,
     StudyAreaLayer,
     ValidationHeadline,
 )
@@ -55,6 +59,8 @@ __all__ = [
     "SCORE_FEATURE_NAMES",
     "TOPOLOGY_FEATURE_NAMES",
     "AssetFeatures",
+    "BurnHistoryLayer",
+    "BurnHistorySourceStyle",
     "BurnPerimeter",
     "BurnPerimeterProvenance",
     "BurnScarConfig",
@@ -65,6 +71,7 @@ __all__ = [
     "CrosswalkEntry",
     "ExposureFeatureProperties",
     "FetchRecord",
+    "FirescopeLayer",
     "FuelLayerProvenance",
     "FuelLegendEntry",
     "FwiOverlay",
@@ -77,6 +84,7 @@ __all__ = [
     "InputRasterLayer",
     "OsmAsset",
     "OsmAssetProvenance",
+    "ProvenanceSummary",
     "ScoredAsset",
     "ScoredAssetProvenance",
     "SourceHealth",

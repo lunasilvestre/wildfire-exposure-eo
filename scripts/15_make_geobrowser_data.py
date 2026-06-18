@@ -74,7 +74,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wildfire_exposure_eo.schemas import (
+    BurnHistoryLayer,
+    BurnHistorySourceStyle,
     ExposureFeatureProperties,
+    FirescopeLayer,
     FuelLegendEntry,
     FwiOverlay,
     FwiOverlayComponent,
@@ -82,6 +85,7 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    ProvenanceSummary,
     ScoredAsset,
     StudyAreaLayer,
     ValidationHeadline,
@@ -177,7 +181,7 @@ _INPUT_RAMPS: tuple[tuple[str, str, str, str, float, float, str], ...] = (
         "m",
         "YlGn",
         0.0,
-        25.0,
+        35.0,
         "Sentinel-2 / GEDI canopy height (metres). Taller, denser canopy is more "
         "fuel-loaded — a relative model input, not a probability.",
     ),
@@ -187,7 +191,7 @@ _INPUT_RAMPS: tuple[tuple[str, str, str, str, float, float, str], ...] = (
         "°",
         "YlOrBr",
         0.0,
-        35.0,
+        45.0,
         "Terrain slope (degrees, from the Copernicus DEM). Steeper slopes carry "
         "fire faster uphill — a relative model input, not a probability.",
     ),
@@ -212,6 +216,56 @@ _INPUT_PREFIX = {
     "nbr_delta": "nbr_delta",
     "fuel_class": "fuel_class",
 }
+
+#: Full-Iberia thematic display COGs published on Cloudflare R2 (the thematic
+#: pivot: first-class layers at Iberia extent, no per-AOI input swap). Each is
+#: warped to EPSG:3857. The display range is the measured value spread (canopy /
+#: slope verified at coarse overview; FireScope is a documented 0–254 rank). The
+#: dict is the canonical manifest so a regen reproduces the SAME bundle even when
+#: the source COGs are absent locally (they live on R2); a full regen WITH the
+#: local source COGs would re-warp + re-measure to the same names. Non-negotiable
+#: #1: these exact filenames are the published artefacts, never fabricated.
+_IBERIA_INPUT_COGS: tuple[tuple[str, str], ...] = (
+    ("fuel_class", "fuel_class_iberia_3857_20260618T123103Z.tif"),
+    ("slope", "slope_iberia_3857_20260618T124721Z.tif"),
+    ("canopy_height", "canopy_height_iberia_3857_20260618T124520Z.tif"),
+)
+
+#: FireScope relative wildfire-risk RANK reference COG (full Iberia, R2). uint8
+#: 0–254 (nodata 255). CC-BY-4.0 (INSAIT-Institute + ETH, arXiv:2511.17171) —
+#: attribution REQUIRED in the caption (non-negotiable #1).
+_FIRESCOPE_COG = "firescope_iberia_3857_20260618T122124Z.tif"
+_FIRESCOPE_VALUE_MIN = 0.0
+_FIRESCOPE_VALUE_MAX = 254.0
+_FIRESCOPE_CMAP = "magma"
+_FIRESCOPE_ATTRIBUTION = (
+    "FireScope relative wildfire-risk rank (CC-BY-4.0) — INSAIT-Institute + ETH, arXiv:2511.17171"
+)
+_FIRESCOPE_CAPTION = (
+    "Relative wildfire-risk RANK (SOTA reference): a 0–254 relative-risk rank over "
+    "Iberia. A reference layer to read the exposure rank against — NOT a "
+    "probability and NOT a forecast. " + _FIRESCOPE_ATTRIBUTION
+)
+
+#: Iberia historical burned-area perimeters (ICNF-PT + EFFIS-ES) on R2. Observed
+#: history, never a forecast (non-negotiable #6). The per-source vintages +
+#: counts are MEASURED from the GeoJSON at build time (see build_burn_history).
+_BURN_HISTORY_GEOJSON = "iberia_burn_history_20260618T131535Z.geojson"
+#: Distinct per-source display colours (ICNF PT vs EFFIS ES).
+_BURN_HISTORY_COLORS: dict[str, tuple[int, int, int]] = {
+    "ICNF": (179, 0, 0),  # deep red (Portugal, fine)
+    "EFFIS": (230, 159, 0),  # amber (Spain, coarse)
+}
+_BURN_HISTORY_LABELS: dict[str, str] = {
+    "ICNF": "ICNF (Portugal — fine, 1990–2025)",
+    "EFFIS": "EFFIS (Spain — coarse, 2016–2025)",
+}
+_BURN_HISTORY_CAPTION = (
+    "Observed historical burned-area perimeters across Iberia, styled by source. "
+    "Portugal (ICNF) is fine-resolution and goes back to 1990; Spain (EFFIS) is "
+    "coarser and only from 2016 — a real PT/ES temporal + resolution asymmetry, "
+    "not a modelling artefact. Observed history, not a probability or forecast."
+)
 
 
 #: Canonical published-artefact run-id: an ISO-ish UTC stamp YYYYMMDDTHHMMSSZ.
@@ -490,13 +544,9 @@ def _lut(cmap_name: str) -> list[tuple[int, int, int]]:
     ]
 
 
-def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
-    """Fuel legend matching fig2: tab10 over the codes present, grey non-fuel."""
+def _fuel_legend_for_codes(codes_present: list[int]) -> list[FuelLegendEntry]:
+    """Build the fuel legend (tab10 over *codes_present*, grey non-fuel) from a code set."""
     crosswalk = {int(e["effis_code"]): e for e in yaml.safe_load(_CROSSWALK.read_text())["entries"]}
-    with rasterio.open(fuel_cog_path) as src:
-        band = src.read(1)
-        nodata = src.nodata if src.nodata is not None else 255
-    codes_present = sorted({int(c) for c in np.unique(band) if c not in (0, nodata)})
     cmap_base = plt.get_cmap("tab10", max(len(codes_present), 1))
     entries = [FuelLegendEntry(code=0, label="Non-fuel (0)", color=(204, 204, 204))]
     for i, code in enumerate(codes_present):
@@ -505,6 +555,28 @@ def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
         rgb = tuple(round(c * 255) for c in cmap_base(i)[:3])
         entries.append(FuelLegendEntry(code=code, label=label, color=rgb))  # type: ignore[arg-type]
     return entries
+
+
+def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
+    """Fuel legend matching fig2: tab10 over the codes present, grey non-fuel."""
+    with rasterio.open(fuel_cog_path) as src:
+        band = src.read(1)
+        nodata = src.nodata if src.nodata is not None else 255
+    codes_present = sorted({int(c) for c in np.unique(band) if c not in (0, nodata)})
+    return _fuel_legend_for_codes(codes_present)
+
+
+def full_nffl_fuel_legend() -> list[FuelLegendEntry]:
+    """Fuel legend covering EVERY NFFL code in the crosswalk (codes 1..13).
+
+    The full-Iberia fuel COG carries a wider code set than the pilot tile, so the
+    thematic bundle's legend must cover all NFFL classes (else an Iberia pixel
+    with a code absent from the pilot legend would paint transparent). Built from
+    the crosswalk codes (non-negotiable #1: real NFFL labels, never invented).
+    """
+    crosswalk = yaml.safe_load(_CROSSWALK.read_text())["entries"]
+    codes = sorted({int(e["effis_code"]) for e in crosswalk})
+    return _fuel_legend_for_codes(codes)
 
 
 def build_input_ramps() -> list[InputRampSpec]:
@@ -530,6 +602,130 @@ def build_input_ramps() -> list[InputRampSpec]:
             )
         )
     return ramps
+
+
+def build_iberia_inputs(asset_base: str) -> list[InputRasterLayer]:
+    """Full-Iberia model-INPUT display COGs (fuel / slope / canopy) → descriptors.
+
+    The thematic pivot: each is a first-class layer at Iberia extent (no per-AOI
+    swap). The run-id is parsed from the published filename
+    (``<prefix>_iberia_3857_<run_id>.tif``); CRS is explicit EPSG:3857 (#2). The
+    fuel layer reuses the categorical ``fuel_legend``; slope / canopy reuse the
+    continuous ``input_ramps``. Relative model inputs, never a probability (#6).
+    """
+    layers: list[InputRasterLayer] = []
+    for kind, fname in _IBERIA_INPUT_COGS:
+        prefix = _INPUT_PREFIX[kind]
+        run_id = fname.replace(f"{prefix}_iberia_3857_", "").replace(".tif", "")
+        if not _RUN_ID_RE.match(run_id):
+            raise ValueError(f"Iberia input {fname!r}: filename lacks a canonical run-id")
+        layers.append(
+            InputRasterLayer(
+                kind=kind,  # type: ignore[arg-type]
+                href=f"{asset_base}/{fname}",
+                crs="EPSG:3857",
+                run_id=run_id,
+            )
+        )
+    return layers
+
+
+def build_firescope(asset_base: str) -> FirescopeLayer:
+    """FireScope relative-risk RANK reference COG → :class:`FirescopeLayer`.
+
+    Full-Iberia uint8 0–254 rank (nodata 255) on R2, painted with the magma LUT.
+    CC-BY-4.0 attribution is carried verbatim (non-negotiable #1) and the caption
+    keeps the honesty bar (#6): a relative RANK, not a probability or forecast.
+    """
+    run_id = _FIRESCOPE_COG.replace("firescope_iberia_3857_", "").replace(".tif", "")
+    if not _RUN_ID_RE.match(run_id):
+        raise ValueError(f"FireScope COG {_FIRESCOPE_COG!r}: filename lacks a canonical run-id")
+    return FirescopeLayer(
+        href=f"{asset_base}/{_FIRESCOPE_COG}",
+        crs="EPSG:3857",
+        run_id=run_id,
+        value_min=_FIRESCOPE_VALUE_MIN,
+        value_max=_FIRESCOPE_VALUE_MAX,
+        cmap=_FIRESCOPE_CMAP,
+        lut=_lut(_FIRESCOPE_CMAP),
+        attribution=_FIRESCOPE_ATTRIBUTION,
+        caption=_FIRESCOPE_CAPTION,
+    )
+
+
+def build_burn_history(asset_base: str, geojson_path: Path | None) -> BurnHistoryLayer:
+    """Iberia burn-history layer → :class:`BurnHistoryLayer`, styled by source.
+
+    Per-source vintage range + perimeter count are MEASURED from *geojson_path*
+    when available (a local copy of the published GeoJSON), so the legend is not
+    invented (non-negotiable #1); when it is absent, the script falls back to the
+    documented vintages (ICNF 1990–2025, EFFIS 2016–2025) and leaves the counts
+    at 0 with a ``# TODO(provenance)`` so the gap is surfaced, never fabricated.
+    """
+    run_id = _BURN_HISTORY_GEOJSON.replace("iberia_burn_history_", "").replace(".geojson", "")
+    if not _RUN_ID_RE.match(run_id):
+        raise ValueError(
+            f"burn-history {_BURN_HISTORY_GEOJSON!r}: filename lacks a canonical run-id"
+        )
+
+    measured: dict[str, tuple[int, int, int]] = {}
+    if geojson_path is not None and geojson_path.exists():
+        gdf = gpd.read_file(geojson_path)
+        for src in ("ICNF", "EFFIS"):
+            sub = gdf[gdf["source"] == src]
+            if len(sub) == 0:
+                continue
+            years = [int(y) for y in pd.Series(sub["vintage_year"]).dropna()]
+            measured[src] = (min(years), max(years), int(len(sub)))
+
+    # Documented fallback vintages (only used when the GeoJSON is not local; the
+    # counts then stay 0 — surfaced as TODO(provenance), never invented).
+    fallback = {"ICNF": (1990, 2025, 0), "EFFIS": (2016, 2025, 0)}
+    sources: list[BurnHistorySourceStyle] = []
+    for src in ("ICNF", "EFFIS"):
+        vmin, vmax, n = measured.get(src, fallback[src])
+        if src not in measured:
+            print(f"  # TODO(provenance): burn-history {src} count not measured (not local)")
+        sources.append(
+            BurnHistorySourceStyle(
+                source=src,  # type: ignore[arg-type]
+                label=_BURN_HISTORY_LABELS[src],
+                color=_BURN_HISTORY_COLORS[src],
+                vintage_min=vmin,
+                vintage_max=vmax,
+                n_perimeters=n,
+            )
+        )
+    return BurnHistoryLayer(
+        href=f"{asset_base}/{_BURN_HISTORY_GEOJSON}",
+        crs="EPSG:4326",
+        run_id=run_id,
+        sources=sources,
+        caption=_BURN_HISTORY_CAPTION,
+    )
+
+
+def build_provenance_summary(
+    parquet_path: Path, metrics: dict[str, Any], fwi_overlay: FwiOverlay | None
+) -> ProvenanceSummary:
+    """Temporal methodology summary from the scored-parquet provenance + metrics.
+
+    Powers the process panel ("the process as a deliverable, framed temporally").
+    Everything is read from the scored run's provenance and the WU-7 metrics —
+    nothing invented (non-negotiable #1 / #3).
+    """
+    df = pd.read_parquet(parquet_path, columns=["provenance"])
+    prov = json.loads(str(df["provenance"].iloc[0]))
+    return ProvenanceSummary(
+        run_id=str(prov["run_id"]),
+        model_version=str(prov["model_version"]),
+        code_commit_sha=str(prov["code_commit_sha"])[:40],
+        window_start=str(prov["window_start"]),
+        window_end=str(prov["window_end"]),
+        validation_years=[int(y) for y in metrics["validation_years"]],
+        s2_item_count=len(prov.get("s2_item_ids", [])),
+        fwi_valid_date=fwi_overlay.valid_date if fwi_overlay is not None else None,
+    )
 
 
 def _input_cog_run(prefix: str, aoi: str) -> Path | None:
@@ -906,6 +1102,33 @@ def main() -> int:
     input_ramps = [] if smoke else build_input_ramps()
     print(f"pilot input layers: {len(pilot_input_layers)} wired")
 
+    # FWI overlay built once so it can feed BOTH the style bundle and the
+    # provenance summary's fwi_valid_date.
+    fwi_overlay = build_fwi_overlay(_FWI_MANIFEST, asset_base)
+
+    # Thematic full-Iberia layers (the pivot): first-class layers at Iberia
+    # extent, no per-AOI swap. Skipped in smoke (the smoke tile has no Iberia
+    # COGs). A local copy of the published burn-history GeoJSON lets the legend
+    # measure per-source counts/vintages; absent, it falls back to documented
+    # vintages (see build_burn_history).
+    iberia_inputs = [] if smoke else build_iberia_inputs(asset_base)
+    firescope = None if smoke else build_firescope(asset_base)
+    bh_local = _GEOBROWSER_DIR / _BURN_HISTORY_GEOJSON
+    burn_history = None if smoke else build_burn_history(asset_base, bh_local)
+    provenance_summary = (
+        None if smoke else build_provenance_summary(exposure_pq, metrics, fwi_overlay)
+    )
+    print(
+        f"thematic Iberia layers: {len(iberia_inputs)} inputs, "
+        f"firescope={'yes' if firescope else 'no'}, "
+        f"burn_history={'yes' if burn_history else 'no'}"
+    )
+
+    # The thematic bundle's fuel legend must cover EVERY NFFL code (the full-Iberia
+    # fuel COG carries a wider code set than the pilot tile); the smoke bundle
+    # keeps the pilot-tile legend.
+    fuel_legend_entries = fuel_legend(fuel_cog) if smoke else full_nffl_fuel_legend()
+
     artifacts: dict[str, GeobrowserArtifact] = {
         "exposure_assets": GeobrowserArtifact(
             href=f"app/data/exposure_assets_{run_id}.geojson",
@@ -941,7 +1164,7 @@ def main() -> int:
         code_commit_sha=code_commit_sha(cwd=_ROOT),
         viridis_lut=_lut("viridis"),
         ylorrd_lut=_lut("YlOrRd"),
-        fuel_legend=fuel_legend(fuel_cog),
+        fuel_legend=fuel_legend_entries,
         validation=validation_headline(run_id, metrics),
         artifacts={
             **artifacts,
@@ -989,7 +1212,11 @@ def main() -> int:
         study_areas=study_areas,
         pilot_input_layers=pilot_input_layers,
         input_ramps=input_ramps,
-        fwi_overlay=build_fwi_overlay(_FWI_MANIFEST, asset_base),
+        fwi_overlay=fwi_overlay,
+        iberia_inputs=iberia_inputs,
+        firescope=firescope,
+        burn_history=burn_history,
+        provenance_summary=provenance_summary,
     )
     style_path = site_data / "style_data.json"
     style_path.write_text(style.model_dump_json(indent=1) + "\n")
