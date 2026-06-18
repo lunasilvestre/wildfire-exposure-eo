@@ -132,6 +132,13 @@ _EXPORT_PROPS = [
     "historical_burn_share",
 ]
 
+#: GeoJSON feature properties for the MERGED full-extent (Iberia) exposure layer.
+#: Carries the per-AOI props plus ``aoi_name`` (which study area the row came
+#: from — the per-AOI rank stays AOI-relative) and ``impact_severity`` (the
+#: cross-AOI-comparable triage axis = score × criticality, normalised across the
+#: pooled assets of all AOIs). See :func:`export_merged_iberia_geojson`.
+_MERGED_EXPORT_PROPS = [*_EXPORT_PROPS, "aoi_name", "impact_severity"]
+
 #: Wave-2 validation study areas beyond the pilot, in display order. Each is
 #: scored independently (its own ``exposure_<aoi>_<run>.parquet``) and shown as
 #: a toggleable exposure layer + AOI outline. The model_version is read from the
@@ -322,6 +329,87 @@ def export_study_area_geojson(parquet_path: Path, out_path: Path, *, coord_preci
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out.to_file(out_path, driver="GeoJSON", COORDINATE_PRECISION=coord_precision)
     return len(out)
+
+
+def _impact_severity_raw(gdf: gpd.GeoDataFrame) -> pd.Series:  # type: ignore[type-arg]
+    """Per-row raw triage severity = ``exposure_score`` × ``criticality_weight``.
+
+    Both inputs are in [0, 1] (validated by ScoredAsset), so the product is too.
+    This is the UN-normalised severity; the cross-AOI-comparable
+    ``impact_severity`` divides it by the pooled global max (see
+    :func:`export_merged_iberia_geojson`). NO re-score — derived from the
+    existing scored parquet columns (non-negotiable #1 / #3).
+    """
+    return gdf["exposure_score"].astype(float) * gdf["criticality_weight"].astype(float)
+
+
+def pooled_impact_severity_max(parquet_paths: list[Path]) -> float:
+    """Global max of ``exposure_score`` × ``criticality_weight`` across all AOIs.
+
+    The normaliser for the cross-AOI ``impact_severity`` axis: pooling every
+    published AOI's assets and taking the single global max → 1 makes the
+    full-extent (Iberia) layer's severity comparable across study areas (while
+    the per-AOI ``exposure_rank`` stays AOI-relative — non-negotiable #6). Raises
+    if no positive severity is found (a degenerate pool would make the axis
+    meaningless).
+    """
+    gmax = 0.0
+    for p in parquet_paths:
+        gdf = gpd.read_parquet(p)
+        m = float(_impact_severity_raw(gdf).max())
+        gmax = max(gmax, m)
+    if not (gmax > 0.0):
+        raise ValueError(
+            f"pooled impact-severity max is {gmax} "
+            f"(no positive severity in {len(parquet_paths)} AOIs)"
+        )
+    return gmax
+
+
+def export_merged_iberia_geojson(
+    aoi_parquets: list[tuple[str, Path]],
+    out_path: Path,
+    *,
+    global_sev_max: float,
+    coord_precision: int,
+) -> int:
+    """Concatenate every AOI's scored assets → one full-extent (Iberia) GeoJSON.
+
+    Each row carries the per-AOI display props (AOI-relative ``exposure_rank``
+    untouched) plus ``aoi_name`` and ``impact_severity`` — the latter computed as
+    ``exposure_score`` × ``criticality_weight`` then divided by *global_sev_max*
+    (the pooled cross-AOI max), so the full-extent OUTPUT layer is coloured by a
+    single cross-AOI-comparable triage axis. Every source row is validated
+    against ``ScoredAsset`` first, and every merged feature against
+    ``ExposureFeatureProperties`` (so ``impact_severity`` stays in [0, 1]).
+    Honest scope (non-negotiable #6): a relative within-AOI exposure × asset
+    criticality, normalised across study areas — NOT an absolute cross-region
+    risk or probability.
+    """
+    parts: list[gpd.GeoDataFrame] = []
+    for aoi_name, parquet_path in aoi_parquets:
+        gdf = gpd.read_parquet(parquet_path)
+        if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+            raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
+        for row in gdf.drop(columns="geometry").to_dict(orient="records"):
+            ScoredAsset.model_validate(row)
+        gdf = _with_historical_burn_share(gdf)
+        gdf["aoi_name"] = aoi_name
+        # Cross-AOI severity, clipped to [0, 1] against float round-off at the max.
+        gdf["impact_severity"] = (_impact_severity_raw(gdf) / global_sev_max).clip(0.0, 1.0)
+        parts.append(gpd.GeoDataFrame(gdf[[*_MERGED_EXPORT_PROPS, "geometry"]], crs="EPSG:4326"))
+    merged = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs="EPSG:4326").sort_values(
+        "impact_severity", ascending=False
+    )
+    for props in merged.drop(columns="geometry").to_dict(orient="records"):
+        ExposureFeatureProperties.model_validate(
+            {k: v for k, v in props.items() if k != "aoi_name"}
+        )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    gpd.GeoDataFrame(merged, crs="EPSG:4326").to_file(
+        out_path, driver="GeoJSON", COORDINATE_PRECISION=coord_precision
+    )
+    return len(merged)
 
 
 def study_area_provenance_model_version(parquet_path: Path) -> str:
@@ -560,6 +648,29 @@ def build_fwi_overlay(manifest_path: Path, asset_base: str) -> FwiOverlay | None
     return overlay
 
 
+def _latest_study_area_parquet(name: str) -> Path | None:
+    """Latest canonical ``exposure_<name>_<run_id>.parquet`` (or None)."""
+    cands = sorted(_PARQUET_DIR.glob(f"exposure_{name}_*.parquet"))
+    cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"exposure_{name}_", ""))]
+    return cands[-1] if cands else None
+
+
+def resolve_aoi_parquets(pilot_parquet: Path) -> list[tuple[str, Path]]:
+    """Ordered ``[(aoi_name, parquet)]`` for the pilot + every study area present.
+
+    The pilot is first (``aoi_name == "pilot"``), then each study area in
+    :data:`_STUDY_AREAS` display order that has a scored parquet. This is the
+    pool the merged full-extent (Iberia) layer concatenates and the
+    cross-AOI ``impact_severity`` normaliser ranges over.
+    """
+    pairs: list[tuple[str, Path]] = [("pilot", pilot_parquet)]
+    for name, _label in _STUDY_AREAS:
+        pq = _latest_study_area_parquet(name)
+        if pq is not None:
+            pairs.append((name, pq))
+    return pairs
+
+
 def build_study_areas(
     *,
     site_data: Path,
@@ -580,12 +691,10 @@ def build_study_areas(
         return []
     layers: list[StudyAreaLayer] = []
     for name, label in _STUDY_AREAS:
-        cands = sorted(_PARQUET_DIR.glob(f"exposure_{name}_*.parquet"))
-        cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"exposure_{name}_", ""))]
-        if not cands:
+        parquet = _latest_study_area_parquet(name)
+        if parquet is None:
             print(f"study area {name!r}: no exposure parquet — skipped")
             continue
-        parquet = cands[-1]
         run_id = parquet.stem.replace(f"exposure_{name}_", "")
         model_version = study_area_provenance_model_version(parquet)
 
@@ -745,6 +854,42 @@ def main() -> int:
     )
     print(f"study areas: {len(study_areas)} wired ({', '.join(s.name for s in study_areas)})")
 
+    # MERGED full-extent (Iberia) exposure layer — the OUTPUT theme. Concatenates
+    # the pilot + every study area, each row carrying aoi_name + the cross-AOI
+    # impact_severity (score × criticality, normalised across the pooled assets of
+    # all AOIs → global max 1). Skipped in smoke (only the smoke tile is scored).
+    # Written to release_dir (R2) when it exceeds the committed-file cap — the
+    # repo's large-geodata pattern; committed under docs/app/data otherwise.
+    merged_href: str | None = None
+    merged_n = 0
+    if not smoke:
+        aoi_parquets = resolve_aoi_parquets(exposure_pq)
+        sev_max = pooled_impact_severity_max([p for _name, p in aoi_parquets])
+        merged_fname = f"exposure_assets_all_iberia_{run_id}.geojson"
+        merged_staged = release_dir / merged_fname
+        merged_n = export_merged_iberia_geojson(
+            aoi_parquets,
+            merged_staged,
+            global_sev_max=sev_max,
+            coord_precision=_STUDY_AREA_COORD_PRECISION,
+        )
+        merged_kb = merged_staged.stat().st_size / 1024
+        if merged_kb < _COMMITTED_FILE_CAP_KB:
+            (site_data / merged_fname).write_bytes(merged_staged.read_bytes())
+            merged_staged.unlink()
+            merged_href = f"app/data/{merged_fname}"
+            print(
+                f"merged Iberia exposure: {merged_n} assets across {len(aoi_parquets)} AOIs "
+                f"(sev_max {sev_max:.4f}) → committed ({merged_kb:.0f} kB)"
+            )
+        else:
+            merged_href = f"{asset_base}/{merged_fname}"
+            print(
+                f"merged Iberia exposure: {merged_n} assets across {len(aoi_parquets)} AOIs "
+                f"(sev_max {sev_max:.4f}) → R2 ({merged_kb:.0f} kB, "
+                f"over {_COMMITTED_FILE_CAP_KB} kB cap)"
+            )
+
     # Pilot model-INPUT display COGs: canopy / slope / NBR-delta (the pilot FUEL
     # input keeps its dedicated artifacts["fuel_class"] entry, so it is NOT
     # duplicated here). Warped to EPSG:3857 for R2 like the study-area inputs.
@@ -761,6 +906,36 @@ def main() -> int:
     input_ramps = [] if smoke else build_input_ramps()
     print(f"pilot input layers: {len(pilot_input_layers)} wired")
 
+    artifacts: dict[str, GeobrowserArtifact] = {
+        "exposure_assets": GeobrowserArtifact(
+            href=f"app/data/exposure_assets_{run_id}.geojson",
+            crs="EPSG:4326",
+            run_id=run_id,
+            role="display",
+            description=(
+                "Scored assets (subset of the ScoredAsset columns; authoritative "
+                "GeoParquet with full per-row provenance is the STAC asset)"
+            ),
+        ),
+    }
+    # Merged full-extent (Iberia) exposure layer — the OUTPUT theme. Coloured by
+    # the cross-AOI impact_severity (score × criticality, normalised across the
+    # pooled assets of all AOIs). Present only for the real (non-smoke) bundle.
+    if merged_href is not None:
+        artifacts["exposure_assets_iberia"] = GeobrowserArtifact(
+            href=merged_href,
+            crs="EPSG:4326",
+            run_id=run_id,
+            role="display",
+            description=(
+                f"Merged full-extent exposure assets across {merged_n} rows / all "
+                "study areas; coloured by impact_severity = within-AOI exposure × "
+                "asset criticality, normalised across study areas (NOT an absolute "
+                "cross-region risk or probability). Per-AOI exposure_rank stays "
+                "AOI-relative."
+            ),
+        )
+
     style = GeobrowserStyleData(
         generated_by=f"scripts/15_make_geobrowser_data.py at {code_commit_sha(cwd=_ROOT)}",
         code_commit_sha=code_commit_sha(cwd=_ROOT),
@@ -769,16 +944,7 @@ def main() -> int:
         fuel_legend=fuel_legend(fuel_cog),
         validation=validation_headline(run_id, metrics),
         artifacts={
-            "exposure_assets": GeobrowserArtifact(
-                href=f"app/data/exposure_assets_{run_id}.geojson",
-                crs="EPSG:4326",
-                run_id=run_id,
-                role="display",
-                description=(
-                    "Scored assets (subset of the ScoredAsset columns; authoritative "
-                    "GeoParquet with full per-row provenance is the STAC asset)"
-                ),
-            ),
+            **artifacts,
             "aoi": GeobrowserArtifact(
                 href="app/data/aoi.geojson",
                 crs="EPSG:4326",

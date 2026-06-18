@@ -50,6 +50,17 @@ class ExposureFeatureProperties(BaseModel):
     #: ``None`` when the feature was not present for that run (the field is
     #: optional so display copies exported before this column existed stay valid).
     historical_burn_share: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: Cross-AOI-comparable triage severity in [0, 1] = ``exposure_score`` ×
+    #: ``criticality_weight``, then NORMALISED across the POOLED assets of every
+    #: published AOI (global max → 1). Drives the full-extent (Iberia) OUTPUT
+    #: layer's colour so the most-exposed important assets across all study areas
+    #: are comparable on one ramp. Honest scope (non-negotiable #6): "relative
+    #: within-AOI exposure × asset criticality, normalised across study areas" —
+    #: NOT an absolute cross-region risk or probability, NOT a forecast. The
+    #: per-AOI ``exposure_rank`` stays AOI-relative; this is the only cross-AOI
+    #: axis. ``None`` for display copies exported before this column existed (the
+    #: field is optional for back-compat).
+    impact_severity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class FuelLegendEntry(BaseModel):

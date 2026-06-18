@@ -124,6 +124,26 @@ def test_exposure_feature_properties_rejects_burn_share_above_one() -> None:
         ExposureFeatureProperties.model_validate(_exposure_props(historical_burn_share=1.2))
 
 
+def test_exposure_feature_properties_accepts_impact_severity() -> None:
+    # The merged full-extent (Iberia) layer carries the cross-AOI impact_severity.
+    p = ExposureFeatureProperties.model_validate(_exposure_props(impact_severity=0.42))
+    assert p.impact_severity == 0.42
+
+
+def test_exposure_feature_properties_impact_severity_optional() -> None:
+    # Per-AOI display copies omit it (the analyser derives score × weight client
+    # side); only the merged Iberia layer bakes in the normalised value.
+    props = _exposure_props()
+    assert "impact_severity" not in props
+    p = ExposureFeatureProperties.model_validate(props)
+    assert p.impact_severity is None
+
+
+def test_exposure_feature_properties_rejects_impact_severity_above_one() -> None:
+    with pytest.raises(ValidationError):
+        ExposureFeatureProperties.model_validate(_exposure_props(impact_severity=1.2))
+
+
 def test_style_data_round_trip() -> None:
     lut = [(0, 0, 0)] * 256
     style = GeobrowserStyleData(
@@ -560,6 +580,129 @@ def test_with_historical_burn_share_writes_json_null(tmp_path: Path) -> None:
     feats = {f["properties"]["asset_id"]: f["properties"] for f in _json.loads(text)["features"]}
     assert feats["osm:way/1"]["historical_burn_share"] == 1.0
     assert feats["osm:node/2"]["historical_burn_share"] is None
+
+
+def _scored_parquet(tmp_path: Path, name: str, rows: list[dict[str, object]]) -> Path:
+    """Write a ScoredAsset-valid scored GeoParquet (EPSG:4326) for merged-export.
+
+    Each ``rows`` entry overrides ``exposure_score`` / ``criticality_weight`` on
+    a complete, schema-valid base row (features + provenance serialised as JSON
+    strings, exactly as the real ``exposure_<run>.parquet`` stores them).
+    """
+    import json as _json
+
+    sha = "a" * 64
+    prov = {
+        "model_version": "0.3.0",
+        "config_sha": sha,
+        "crosswalk_sha": sha,
+        "run_id": "x",
+        "code_commit_sha": "deadbeef",
+        "aoi_path": "data/aoi/smoke.geojson",
+        "aoi_geometry_sha": sha,
+        "window_start": "2025-06-16",
+        "window_end": "2026-06-16",
+        "osm_parquet_sha": sha,
+        "burns_parquet_sha": sha,
+        "fuel_cog_sha": sha,
+        "gch_cache_sha": sha,
+        "burn_share_threshold": 0.5,
+    }
+    full_rows = []
+    geoms = []
+    for i, r in enumerate(rows):
+        pt = Point(-8.0 + i * 0.01, 40.0 + i * 0.01)
+        geoms.append(pt)
+        base: dict[str, object] = {
+            "asset_id": f"osm:node/{i + 1}",
+            "osm_type": "node",
+            "osm_id": i + 1,
+            "asset_class": "power.substation",
+            "criticality_weight": 1.0,
+            "centroid_lon": pt.x,
+            "centroid_lat": pt.y,
+            "geometry_wkb": pt.wkb,
+            "features": _json.dumps({"historical_burn_share": 0.0}),
+            "features_present": ["historical_burn_share"],
+            "exposure_score": 0.5,
+            "exposure_rank": i + 1,
+            "provenance": _json.dumps(prov),
+        }
+        base.update(r)
+        full_rows.append(base)
+    gdf = gpd.GeoDataFrame(full_rows, geometry=geoms, crs="EPSG:4326")
+    dst = tmp_path / f"exposure_{name}.parquet"
+    gdf.to_parquet(dst)
+    return dst
+
+
+def test_pooled_impact_severity_max_is_global(tmp_path: Path) -> None:
+    # Two AOIs; the pool's max severity (score × weight) is the global maximum.
+    a = _scored_parquet(
+        tmp_path,
+        "a",
+        [{"exposure_score": 0.8, "criticality_weight": 0.5}],  # 0.40
+    )
+    b = _scored_parquet(
+        tmp_path,
+        "b",
+        [{"exposure_score": 0.9, "criticality_weight": 0.9}],  # 0.81
+    )
+    gmax = geobrowser_mod.pooled_impact_severity_max([a, b])
+    assert abs(gmax - 0.81) < 1e-9
+
+
+def test_pooled_impact_severity_max_rejects_degenerate(tmp_path: Path) -> None:
+    z = _scored_parquet(tmp_path, "z", [{"exposure_score": 0.0, "criticality_weight": 1.0}])
+    with pytest.raises(ValueError, match="pooled impact-severity"):
+        geobrowser_mod.pooled_impact_severity_max([z])
+
+
+def test_export_merged_iberia_normalises_against_global_max(tmp_path: Path) -> None:
+    import json as _json
+
+    # pilot raw severity 1.0 × 0.8 = 0.80 (the global max); sa raw 0.5 × 0.8 = 0.40.
+    pilot = _scored_parquet(tmp_path, "pilot", [{"exposure_score": 1.0, "criticality_weight": 0.8}])
+    sa = _scored_parquet(tmp_path, "sa", [{"exposure_score": 0.5, "criticality_weight": 0.8}])
+    out = tmp_path / "merged.geojson"
+    n = geobrowser_mod.export_merged_iberia_geojson(
+        [("pilot", pilot), ("monchique", sa)],
+        out,
+        global_sev_max=0.80,
+        coord_precision=6,
+    )
+    assert n == 2
+    feats = {
+        f["properties"]["aoi_name"]: f["properties"]
+        for f in _json.loads(out.read_text())["features"]
+    }
+    # Global max row normalises to 1.0; the half-score row to 0.40/0.80 = 0.5.
+    assert abs(feats["pilot"]["impact_severity"] - 1.0) < 1e-9
+    assert abs(feats["monchique"]["impact_severity"] - 0.5) < 1e-9
+    # aoi_name is carried; the per-AOI rank is preserved verbatim.
+    assert feats["pilot"]["aoi_name"] == "pilot"
+    assert feats["monchique"]["exposure_rank"] == 1
+
+
+def test_export_merged_iberia_requires_explicit_crs(tmp_path: Path) -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "asset_id": ["osm:node/1"],
+            "osm_type": ["node"],
+            "osm_id": [1],
+            "asset_class": ["power.substation"],
+            "criticality_weight": [1.0],
+            "exposure_score": [0.5],
+            "exposure_rank": [1],
+        },
+        geometry=[Point(0, 0)],
+    )  # no CRS
+    src = tmp_path / "exposure_nocrs.parquet"
+    gdf.to_parquet(src)
+    with pytest.raises(ValueError, match="EPSG:4326"):
+        geobrowser_mod.export_merged_iberia_geojson(
+            [("pilot", src)], tmp_path / "m.geojson", global_sev_max=1.0, coord_precision=6
+        )
 
 
 def test_validation_headline_from_degenerate_metrics() -> None:
