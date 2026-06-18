@@ -66,7 +66,28 @@
       <div class="layer-row">
         <label><input type="checkbox" id="toggle-fuel"> Fuel classes <span class="tag input">input</span></label>
         <p class="caption">EFFIS NFFL-13 fuel classes refined by DGT COSc land cover. EFFIS native
-          resolution is 250 m — neighbourhood fuel character, not parcel-level precision.</p>
+          resolution is 250 m — neighbourhood fuel character, not parcel-level precision.
+          The <strong>pilot</strong> fuel layer; each <em>validation study area</em> has its own fuel
+          input below (shown with the selected AOI).</p>
+      </div>
+      <div class="layer-row" id="input-rasters-row">
+        <strong>Model input rasters <span class="tag input">input</span></strong>
+        <p class="caption">The relative model <strong>input</strong> rasters per AOI — what the exposure
+          rank is built from — served as EPSG:3857 display COGs from Cloudflare R2 (load on toggle).
+          Each follows the <strong>AOI selector</strong> below: the toggle shows the input for whichever
+          AOI is currently displayed. Relative inputs — <em>not</em> a probability, <em>not</em> a forecast.</p>
+        <label><input type="checkbox" id="toggle-input-canopy_height"> Canopy height <span class="tag input">input</span></label>
+        <label><input type="checkbox" id="toggle-input-slope"> Slope <span class="tag input">input</span></label>
+        <label><input type="checkbox" id="toggle-input-nbr_delta"> NBR-delta (ΔNBR) <span class="tag input">input</span></label>
+        <label><input type="checkbox" id="toggle-input-fuel_class"> Fuel class (per study area) <span class="tag input">input</span></label>
+        <p class="caption">Canopy height (m), terrain slope (°), and ΔNBR (spectral burn-severity change)
+          for the <strong>pilot</strong> and every study area; per-study-area <strong>fuel NFFL class</strong>
+          (the pilot fuel is the dedicated layer above). NEAREST-warped display copies — no resolution loss;
+          nodata is transparent.</p>
+        <p class="caption" id="input-burnscar-pending"><strong>Per-AOI burn-scar: pending.</strong>
+          Burn-scar inference for the four study areas has <em>not</em> yet been produced (the run was
+          incomplete). Only the <strong>pilot</strong> burn-scar layer is available (below). This note
+          will go away once the per-AOI burn-scar COGs are published.</p>
       </div>
       <div class="layer-row">
         <label><input type="checkbox" id="toggle-burnscar"> Burn-scar inference <span class="tag input">input</span></label>
@@ -151,6 +172,29 @@
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>
         <ul id="fuel-legend-list"></ul>
+        <p class="caption" id="legend-input-fuel_class-aoinote" hidden>No fuel input published for the
+          selected AOI (the pilot fuel is the dedicated "Fuel classes" layer).</p>
+      </div>
+      <div id="legend-input-canopy_height" hidden>
+        <h3>Canopy height <span class="legend-axis">colour</span></h3>
+        <canvas id="ramp-input-canopy_height" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span id="ramp-input-canopy_height-low">min</span><span id="ramp-input-canopy_height-high">max</span></div>
+        <p class="caption" id="legend-input-canopy_height-caption"></p>
+        <p class="caption" id="legend-input-canopy_height-aoinote" hidden>Not published for the selected AOI.</p>
+      </div>
+      <div id="legend-input-slope" hidden>
+        <h3>Slope <span class="legend-axis">colour</span></h3>
+        <canvas id="ramp-input-slope" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span id="ramp-input-slope-low">min</span><span id="ramp-input-slope-high">max</span></div>
+        <p class="caption" id="legend-input-slope-caption"></p>
+        <p class="caption" id="legend-input-slope-aoinote" hidden>Not published for the selected AOI.</p>
+      </div>
+      <div id="legend-input-nbr_delta" hidden>
+        <h3>NBR-delta (ΔNBR) <span class="legend-axis">colour</span></h3>
+        <canvas id="ramp-input-nbr_delta" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span id="ramp-input-nbr_delta-low">min</span><span id="ramp-input-nbr_delta-high">max</span></div>
+        <p class="caption" id="legend-input-nbr_delta-caption"></p>
+        <p class="caption" id="legend-input-nbr_delta-aoinote" hidden>Not published for the selected AOI.</p>
       </div>
       <div id="legend-fwi" hidden>
         <h3 id="legend-fwi-title">Fire weather (FWI)</h3>

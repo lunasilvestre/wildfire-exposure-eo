@@ -27,6 +27,13 @@ pipeline artefacts — nothing hand-made:
   Cloudflare R2 and shown with its AOI. Reuses the
   ``outputs/parquet/icnf_burns_<aoi>_<run_id>.parquet`` fetched via
   ``wildfire-exposure-eo fetch-burns --aoi data/aoi/<aoi>.geojson``.
+* ``outputs/geobrowser/{canopy_height,slope,nbr_delta,fuel_class}_<aoi>_3857_<run_id>.tif``
+  — per-AOI model-INPUT display COGs warped to EPSG:3857 (NEAREST, no resolution
+  loss) from ``outputs/cogs/{prefix}_<aoi>_<run_id>.tif``; uploaded to Cloudflare
+  R2 and shown as toggleable per-AOI input layers synced to the AOI selector.
+  The pilot gets canopy / slope / NBR-delta (its FUEL input is the dedicated
+  ``fuel_class`` artefact); each study area gets all four. Relative model
+  INPUTS, never a probability or forecast (non-negotiable #6).
 * ``docs/app/data/style_data.json`` — colour LUTs sampled from the same
   matplotlib colormaps the WU-8 figures use (viridis rank / YlOrRd burn-scar /
   tab10 fuel classes), the fuel legend from ``config/fuel_crosswalk.yaml``,
@@ -73,6 +80,8 @@ from wildfire_exposure_eo.schemas import (
     FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
+    InputRampSpec,
+    InputRasterLayer,
     ScoredAsset,
     StudyAreaLayer,
     ValidationHeadline,
@@ -144,6 +153,58 @@ _STUDY_AREA_COORD_PRECISION = 6
 #: Committed-file cap (kB) enforced by the repo's check-added-large-files hook.
 #: Study-area exposure GeoJSONs at or above this go to R2, not docs/app/data.
 _COMMITTED_FILE_CAP_KB = 2000
+
+#: Continuous model-INPUT raster kinds shown as toggleable per-AOI layers, with
+#: the matplotlib colormap and FIXED display range each is stretched between.
+#: Ranges are anchored to the measured COG value spread across the published
+#: AOIs (canopy ~0-27 m, slope ~0-50°, NBR-delta ~-0.6..+1.1) and rounded to
+#: readable bounds so one ramp reads consistently across every AOI. NEAREST
+#: warp preserves raw values; nodata paints transparent client-side. Honest
+#: scope (non-negotiable #6): these are relative model INPUTS, never
+#: probabilities or forecasts. ``fuel_class`` is categorical and reuses the
+#: existing ``fuel_legend`` — it carries no continuous ramp here.
+_INPUT_RAMPS: tuple[tuple[str, str, str, str, float, float, str], ...] = (
+    (
+        "canopy_height",
+        "Canopy height",
+        "m",
+        "YlGn",
+        0.0,
+        25.0,
+        "Sentinel-2 / GEDI canopy height (metres). Taller, denser canopy is more "
+        "fuel-loaded — a relative model input, not a probability.",
+    ),
+    (
+        "slope",
+        "Slope",
+        "°",
+        "YlOrBr",
+        0.0,
+        35.0,
+        "Terrain slope (degrees, from the Copernicus DEM). Steeper slopes carry "
+        "fire faster uphill — a relative model input, not a probability.",
+    ),
+    (
+        "nbr_delta",
+        "NBR-delta (ΔNBR)",
+        "",
+        "RdYlGn_r",
+        -0.3,
+        0.9,
+        "Change in Normalized Burn Ratio over the window: positive (red) = "
+        "vegetation loss / burn-severity signal, negative (green) = regrowth. A "
+        "relative spectral input, not a probability and not a fire forecast.",
+    ),
+)
+
+#: Input-kind → R2 display-COG filename prefix. The fuel input keeps the legacy
+#: ``fuel_class`` prefix; the per-AOI fuel COGs are ``fuel_class_<aoi>_3857_*``.
+_INPUT_PREFIX = {
+    "canopy_height": "canopy_height",
+    "slope": "slope",
+    "nbr_delta": "nbr_delta",
+    "fuel_class": "fuel_class",
+}
 
 
 #: Canonical published-artefact run-id: an ISO-ish UTC stamp YYYYMMDDTHHMMSSZ.
@@ -358,6 +419,74 @@ def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
     return entries
 
 
+def build_input_ramps() -> list[InputRampSpec]:
+    """Display ramp + legend metadata per continuous model-INPUT kind.
+
+    Each ramp carries the 256-step LUT sampled from its matplotlib colormap so
+    the client paints the COG without matplotlib, plus the FIXED display range
+    (:data:`_INPUT_RAMPS`) and an honest caption. The categorical ``fuel_class``
+    kind is NOT included — it reuses the existing ``fuel_legend`` instead.
+    """
+    ramps: list[InputRampSpec] = []
+    for kind, label, unit, cmap, vmin, vmax, caption in _INPUT_RAMPS:
+        ramps.append(
+            InputRampSpec(
+                kind=kind,  # type: ignore[arg-type]
+                label=label,
+                unit=unit,
+                cmap=cmap,
+                lut=_lut(cmap),
+                value_min=vmin,
+                value_max=vmax,
+                caption=caption,
+            )
+        )
+    return ramps
+
+
+def _input_cog_run(prefix: str, aoi: str) -> Path | None:
+    """Latest source COG ``outputs/cogs/{prefix}_{aoi}_<run_id>.tif`` (or None)."""
+    cands = sorted(_COG_DIR.glob(f"{prefix}_{aoi}_*.tif"))
+    cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"{prefix}_{aoi}_", ""))]
+    return cands[-1] if cands else None
+
+
+def build_input_layers(
+    aoi: str, *, release_dir: Path, asset_base: str, kinds: tuple[str, ...]
+) -> list[InputRasterLayer]:
+    """Warp + emit one AOI's model-INPUT display COGs (canopy / slope / NBR / fuel).
+
+    For each requested *kind* with a source COG under ``outputs/cogs`` named
+    ``{prefix}_{aoi}_<run_id>.tif``, warp it to an EPSG:3857 display COG in
+    ``release_dir`` (NEAREST, no resolution loss — :func:`warp_to_3857_cog`) for
+    Cloudflare R2 upload, and return its :class:`InputRasterLayer` descriptor
+    (href on the R2 base, CRS explicit per non-negotiable #2). Kinds without a
+    source COG are simply skipped — the AOI then ships without that input layer.
+    The fuel display COG keeps the legacy ``fuel_class_<aoi>_3857_<run>.tif``
+    naming so it shares the burn-scar/fuel R2 convention.
+    """
+    layers: list[InputRasterLayer] = []
+    for kind in kinds:
+        prefix = _INPUT_PREFIX[kind]
+        src = _input_cog_run(prefix, aoi)
+        if src is None:
+            continue
+        run_id = src.stem.replace(f"{prefix}_{aoi}_", "")
+        fname = f"{prefix}_{aoi}_3857_{run_id}.tif"
+        dst = release_dir / fname
+        warp_to_3857_cog(src, dst)
+        layers.append(
+            InputRasterLayer(
+                kind=kind,  # type: ignore[arg-type]
+                href=f"{asset_base}/{fname}",
+                crs="EPSG:3857",
+                run_id=run_id,
+            )
+        )
+        print(f"  input {kind!r} {aoi!r}: {fname} ({dst.stat().st_size / 1e6:.2f} MB) → R2")
+    return layers
+
+
 def validation_headline(run_id: str, metrics: dict[str, Any]) -> ValidationHeadline:
     """Headline numbers read from the WU-7 metrics JSON — never re-derived."""
     full = metrics["full"]
@@ -515,6 +644,15 @@ def build_study_areas(
         else:
             print(f"  ICNF perimeters {name!r}: no parquet — overlay omitted")
 
+        # Per-AOI model-INPUT display COGs (canopy / slope / NBR-delta / fuel),
+        # warped to EPSG:3857 for R2. Each is toggleable and shown WITH this AOI.
+        input_layers = build_input_layers(
+            name,
+            release_dir=release_dir,
+            asset_base=asset_base,
+            kinds=("canopy_height", "slope", "nbr_delta", "fuel_class"),
+        )
+
         layers.append(
             StudyAreaLayer(
                 name=name,
@@ -531,6 +669,7 @@ def build_study_areas(
                 icnf_href=icnf_href,
                 icnf_crs=icnf_crs,
                 icnf_n_perimeters=icnf_n,
+                input_layers=input_layers,
             )
         )
         print(
@@ -606,6 +745,22 @@ def main() -> int:
     )
     print(f"study areas: {len(study_areas)} wired ({', '.join(s.name for s in study_areas)})")
 
+    # Pilot model-INPUT display COGs: canopy / slope / NBR-delta (the pilot FUEL
+    # input keeps its dedicated artifacts["fuel_class"] entry, so it is NOT
+    # duplicated here). Warped to EPSG:3857 for R2 like the study-area inputs.
+    pilot_input_layers = (
+        []
+        if smoke
+        else build_input_layers(
+            "pilot",
+            release_dir=release_dir,
+            asset_base=asset_base,
+            kinds=("canopy_height", "slope", "nbr_delta"),
+        )
+    )
+    input_ramps = [] if smoke else build_input_ramps()
+    print(f"pilot input layers: {len(pilot_input_layers)} wired")
+
     style = GeobrowserStyleData(
         generated_by=f"scripts/15_make_geobrowser_data.py at {code_commit_sha(cwd=_ROOT)}",
         code_commit_sha=code_commit_sha(cwd=_ROOT),
@@ -666,6 +821,8 @@ def main() -> int:
             ),
         },
         study_areas=study_areas,
+        pilot_input_layers=pilot_input_layers,
+        input_ramps=input_ramps,
         fwi_overlay=build_fwi_overlay(_FWI_MANIFEST, asset_base),
     )
     style_path = site_data / "style_data.json"

@@ -27,6 +27,8 @@ from wildfire_exposure_eo.schemas.geobrowser import (
     FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
+    InputRampSpec,
+    InputRasterLayer,
     StudyAreaLayer,
     ValidationHeadline,
 )
@@ -71,6 +73,8 @@ __all__ = [
     "GeobrowserStyleData",
     "GridSpec",
     "IcnfLayerDescriptor",
+    "InputRampSpec",
+    "InputRasterLayer",
     "OsmAsset",
     "OsmAssetProvenance",
     "ScoredAsset",

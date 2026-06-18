@@ -17,6 +17,8 @@ from wildfire_exposure_eo.schemas import (
     FwiOverlayComponent,
     GeobrowserArtifact,
     GeobrowserStyleData,
+    InputRampSpec,
+    InputRasterLayer,
     StudyAreaLayer,
     ValidationHeadline,
 )
@@ -358,6 +360,129 @@ def test_style_data_study_areas_default_empty() -> None:
         artifacts={},
     )
     assert style.study_areas == []
+
+
+# --------------------------------------------------------------------------- #
+# Per-AOI model-INPUT raster layers
+# --------------------------------------------------------------------------- #
+
+
+def _input_layer(**overrides: object) -> InputRasterLayer:
+    base: dict[str, object] = {
+        "kind": "canopy_height",
+        "href": "https://wildfire.cheias.pt/canopy_height_pilot_3857_20260617T222204Z.tif",
+        "crs": "EPSG:3857",
+        "run_id": "20260617T222204Z",
+    }
+    base.update(overrides)
+    return InputRasterLayer.model_validate(base)
+
+
+def test_input_raster_layer_requires_known_kind() -> None:
+    # The kind drives the legend/ramp lookup; an unknown token is a bug.
+    with pytest.raises(ValidationError):
+        _input_layer(kind="elevation")
+
+
+def test_input_raster_layer_carries_explicit_crs() -> None:
+    layer = _input_layer(kind="slope")
+    assert layer.crs == "EPSG:3857"
+    assert layer.kind == "slope"
+
+
+def test_input_ramp_spec_continuous_carries_lut_and_range() -> None:
+    ramp = InputRampSpec(
+        kind="canopy_height",
+        label="Canopy height",
+        unit="m",
+        cmap="YlGn",
+        lut=[(0, 0, 0)] * 256,
+        value_min=0.0,
+        value_max=25.0,
+        caption="relative input, not a probability",
+    )
+    assert ramp.value_min == 0.0
+    assert ramp.value_max == 25.0
+    assert ramp.lut is not None and len(ramp.lut) == 256
+
+
+def test_input_ramp_spec_fuel_omits_continuous_ramp() -> None:
+    # The categorical fuel kind reuses the existing fuel_legend → no LUT/range.
+    ramp = InputRampSpec(
+        kind="fuel_class",
+        label="Fuel NFFL class",
+        cmap="tab10",
+        caption="categorical fuel input",
+    )
+    assert ramp.lut is None
+    assert ramp.value_min is None and ramp.value_max is None
+
+
+def test_study_area_carries_input_layers() -> None:
+    sa = _study_area(
+        input_layers=[
+            _input_layer(
+                kind="fuel_class",
+                href="https://wildfire.cheias.pt/fuel_class_monchique_3857_20260617T222932Z.tif",
+                run_id="20260617T222932Z",
+            ),
+        ],
+    )
+    assert len(sa.input_layers) == 1
+    assert sa.input_layers[0].kind == "fuel_class"
+
+
+def test_study_area_input_layers_default_empty() -> None:
+    # A study area published before the input-layer wiring carries none.
+    assert _study_area().input_layers == []
+
+
+def test_input_layers_round_trip_in_style_data() -> None:
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+        pilot_input_layers=[_input_layer(kind="canopy_height"), _input_layer(kind="slope")],
+        input_ramps=geobrowser_mod.build_input_ramps(),
+        study_areas=[_study_area(input_layers=[_input_layer(kind="nbr_delta")])],
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert [layer.kind for layer in parsed.pilot_input_layers] == ["canopy_height", "slope"]
+    assert parsed.study_areas[0].input_layers[0].kind == "nbr_delta"
+    assert {r.kind for r in parsed.input_ramps} == {"canopy_height", "slope", "nbr_delta"}
+
+
+def test_build_input_ramps_continuous_only_with_measured_ranges() -> None:
+    # The helper emits the three continuous kinds (fuel is categorical, excluded),
+    # each with a 256-step LUT and a non-degenerate measured display range.
+    ramps = geobrowser_mod.build_input_ramps()
+    assert {r.kind for r in ramps} == {"canopy_height", "slope", "nbr_delta"}
+    for ramp in ramps:
+        assert ramp.lut is not None and len(ramp.lut) == 256
+        assert ramp.value_min is not None
+        assert ramp.value_max is not None
+        assert ramp.value_max > ramp.value_min
+
+
+def test_style_data_input_layers_default_empty() -> None:
+    """Bundles built before the input-layer wiring omit them; defaults are []."""
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+    )
+    assert style.pilot_input_layers == []
+    assert style.input_ramps == []
 
 
 # --------------------------------------------------------------------------- #
