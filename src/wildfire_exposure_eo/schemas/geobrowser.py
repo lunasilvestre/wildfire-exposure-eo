@@ -209,6 +209,38 @@ class InputRampSpec(BaseModel):
     caption: str = Field(..., min_length=1)
 
 
+class MosaicTile(BaseModel):
+    """One AOI tile of an INTERIM mosaic (burn-scar or NBR-delta) display COG."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: AOI slug the tile covers (``pilot`` / ``monchique`` / …).
+    aoi_name: str = Field(..., min_length=1)
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    run_id: str = Field(..., min_length=1)
+
+
+class MosaicLayer(BaseModel):
+    """An INTERIM raster mosaic shown as ONE toggle over ALL its AOI tiles.
+
+    The thematic pivot for the interim rasters: instead of a per-AOI swap, every
+    tile is shown at once under a single toggle (burn-scar inference, or
+    NBR-delta). Honesty bar (non-negotiable #6): burn-scar is recent-scar
+    DETECTION (spectral signatures of fires that already happened), never a
+    forecast or ignition prediction; NBR-delta is a relative spectral change
+    input. ``kind`` selects the colour ramp the client paints these COGs with.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["burn_scar", "nbr_delta"]
+    #: AOI tiles composing the mosaic (display order; pilot first by convention).
+    tiles: list[MosaicTile] = Field(..., min_length=1)
+    #: Honest caption (terminology guard #6).
+    caption: str = Field(..., min_length=1)
+
+
 class FirescopeLayer(BaseModel):
     """FireScope relative wildfire-risk RANK reference COG (a SOTA validation layer).
 
@@ -392,6 +424,9 @@ class GeobrowserStyleData(BaseModel):
     #: Iberia historical burned-area perimeters (ICNF-PT + EFFIS-ES), styled by
     #: source; ``None`` when not wired. Observed history, never a forecast.
     burn_history: BurnHistoryLayer | None = None
+    #: INTERIM raster mosaics (burn-scar, NBR-delta), each shown as ONE toggle
+    #: over all its AOI tiles at once (no per-AOI swap). Empty when none wired.
+    mosaics: list[MosaicLayer] = Field(default_factory=list)
     #: Temporal methodology summary powering the process panel; ``None`` when the
     #: scored-run provenance was unavailable (e.g. a smoke bundle).
     provenance_summary: ProvenanceSummary | None = None

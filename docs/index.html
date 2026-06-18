@@ -14,9 +14,9 @@
        (and maplibre-cog-protocol range reads) keep working. -->
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>wildfire-exposure-eo — exposure-ranked critical infrastructure (pilot AOI)</title>
+  <title>wildfire-exposure-eo — exposure-ranked critical infrastructure (Iberia)</title>
   <meta name="description"
-        content="Which schools, substations, water plants and fire stations in a Portuguese fire district are most exposed to wildfire? A relative exposure rank from open EO data — reproducible, with per-asset provenance. Not a fire probability.">
+        content="A layer-centric, thematic wildfire-exposure geobrowser over Iberia: open-EO model inputs, interim burn-scar / ΔNBR detections, exposure-ranked critical infrastructure, and observed burn history — reproducible, with per-asset provenance. Not a fire probability.">
   <link rel="stylesheet"
         href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"
         integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK"
@@ -27,13 +27,12 @@
 <main id="layout">
   <aside id="panel">
     <h1>wildfire-exposure-eo</h1>
-    <p class="lead">Which schools, substations, water plants and fire stations in a
-      Portuguese fire district are most exposed to wildfire? This map ranks
-      <strong id="lead-n-assets">…</strong> OSM-derived critical-infrastructure assets in the
-      Sever do Vouga / Albergaria-a-Velha / Oliveira de Azeméis pilot AOI by
-      <strong>relative wildfire exposure</strong>, built entirely from open data with
-      full per-asset provenance. Built for municípios, civil-protection planners and
-      open-data auditors: every number is reproducible from the
+    <p class="lead">A <strong>layer-centric, thematic</strong> wildfire-exposure browser over
+      <strong>Iberia</strong>. Read it top-to-bottom as a pipeline: open-EO <strong>model
+      inputs</strong> → <strong>interim</strong> spectral detections → the <strong>output</strong>
+      exposure-ranked critical infrastructure → independent <strong>validation</strong> layers →
+      current <strong>operational</strong> fire weather. The pilot ranks
+      <strong id="lead-n-assets">…</strong> OSM-derived assets; every number is reproducible from the
       <a href="https://github.com/lunasilvestre/wildfire-exposure-eo">repository</a>.</p>
     <p class="scope-banner">The exposure score is a <strong>relative, AOI-normalised screening
       rank</strong> — <em>not</em> a fire probability, not a forecast, not an operational
@@ -41,117 +40,160 @@
 
     <section id="layers-section">
       <h2>Layers</h2>
-      <div class="layer-row" id="basemap-switcher">
-        <strong>Basemap</strong>
-        <label class="radio"><input type="radio" name="basemap" id="basemap-osm" value="osm" checked> Streets (OSM)</label>
-        <label class="radio"><input type="radio" name="basemap" id="basemap-sat" value="satellite"> Satellite (Esri)</label>
-        <p class="caption">Esri World Imagery (key-less, attribution-bearing). Highest-value under the
-          fuel-class and burn-scar layers — vegetation texture and forest edges aid interpretation of the
-          exposure rank. Google satellite tiles are not used (no key-less, ToS-compliant path).</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-exposure" checked> Exposure rank <span class="tag output">output</span></label>
-        <p class="caption">Assets coloured by exposure rank (viridis; brightest = rank 1, most exposed
-          within this AOI). Same encoding as the repository's fig1. A screening rank, not a probability.</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-aoi" checked> AOI boundary <span class="tag input">input</span></label>
-        <p class="caption">Pilot AOI, frozen at <code>data/aoi/pilot.geojson</code> (EPSG:4326).</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-assets"> OSM assets (uncoloured) <span class="tag input">input</span></label>
-        <p class="caption">The same critical-infrastructure assets without the rank encoding
-          (frozen OSM taxonomy; © OpenStreetMap contributors).</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-fuel"> Fuel classes <span class="tag input">input</span></label>
-        <p class="caption">EFFIS NFFL-13 fuel classes refined by DGT COSc land cover. EFFIS native
-          resolution is 250 m — neighbourhood fuel character, not parcel-level precision.
-          The <strong>pilot</strong> fuel layer; each <em>validation study area</em> has its own fuel
-          input below (shown with the selected AOI).</p>
-      </div>
-      <div class="layer-row" id="input-rasters-row">
-        <strong>Model input rasters <span class="tag input">input</span></strong>
-        <p class="caption">The relative model <strong>input</strong> rasters per AOI — what the exposure
-          rank is built from — served as EPSG:3857 display COGs from Cloudflare R2 (load on toggle).
-          Each follows the <strong>AOI selector</strong> below: the toggle shows the input for whichever
-          AOI is currently displayed. Relative inputs — <em>not</em> a probability, <em>not</em> a forecast.</p>
-        <label><input type="checkbox" id="toggle-input-canopy_height"> Canopy height <span class="tag input">input</span></label>
-        <label><input type="checkbox" id="toggle-input-slope"> Slope <span class="tag input">input</span></label>
-        <label><input type="checkbox" id="toggle-input-nbr_delta"> NBR-delta (ΔNBR) <span class="tag input">input</span></label>
-        <label><input type="checkbox" id="toggle-input-fuel_class"> Fuel class (per study area) <span class="tag input">input</span></label>
-        <p class="caption">Canopy height (m), terrain slope (°), and ΔNBR (spectral burn-severity change)
-          for the <strong>pilot</strong> and every study area; per-study-area <strong>fuel NFFL class</strong>
-          (the pilot fuel is the dedicated layer above). NEAREST-warped display copies — no resolution loss;
-          nodata is transparent.</p>
-        <p class="caption" id="input-burnscar-pending"><strong>Per-AOI burn-scar: pending.</strong>
-          Burn-scar inference for the four study areas has <em>not</em> yet been produced (the run was
-          incomplete). Only the <strong>pilot</strong> burn-scar layer is available (below). This note
-          will go away once the per-AOI burn-scar COGs are published.</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-burnscar"> Burn-scar inference <span class="tag input">input</span></label>
-        <p class="caption">Prithvi-EO-2.0 burn-scar <em>inference score</em> (de-grid p85 composite,
-          Jun 2025–Jun 2026 Sentinel-2 window): detection of already-burned areas. As a recent-scar
-          detector against ICNF 2023–2025 burns it reaches F1 0.64 (precision 0.81 at the 0.5 threshold).
-          Shown with value-driven opacity — transparent below 0.25, low band lifted so the full recent-scar extent shows — so genuine
-          scars stand out; the underlying COG is a continuous relative score, <em>not</em> a calibrated
-          probability and <em>not</em> a fire forecast. Streamed from Cloudflare R2 (~46 MB COG; loads on toggle).</p>
-      </div>
-      <div class="layer-row">
-        <label><input type="checkbox" id="toggle-burns"> ICNF burn perimeters <span class="tag input">input</span></label>
-        <p class="caption">ICNF Áreas Ardidas 1990–2025 inside the AOI (© ICNF). The 2025 vintage is the
-          validation label set. Fetched from Cloudflare R2 (~8 MB; loads on toggle).</p>
-      </div>
-      <div class="layer-row" id="fwi-row" hidden>
-        <label><input type="checkbox" id="toggle-fwi"> Fire weather (FWI) <span class="tag operational">operational</span></label>
-        <p class="caption" id="fwi-caption">Current observed fire weather.</p>
-        <label class="fwi-select-label" id="fwi-component-row" hidden>Component:
-          <select id="fwi-component"></select>
-        </label>
-        <p class="caption">The <strong>operational second axis</strong>: current observed reanalysis
-          fire weather from the CEMS Early Warning Data Store (Canadian FWI system). This is
-          <strong>regional context over the Iberian Peninsula</strong> (mainland Portugal + Spain)
-          on a coarse 0.25° grid (≈25 km cells), with a ~2-day lag —
-          <em>not</em> a per-asset score, <em>not</em> a probability, <em>not</em> a forecast. Ocean and
-          no-coverage cells are transparent. Read it alongside the exposure rank: the rank is the
-          <strong>validated structural</strong> axis, this is the <strong>current weather</strong> axis.
-          Streamed from Cloudflare R2 (loads on toggle).</p>
-      </div>
-      <div class="layer-row" id="study-areas-row" hidden>
-        <label><input type="checkbox" id="toggle-study-areas"> Validation study area <span class="tag output">output</span></label>
-        <label class="fwi-select-label">Show AOI:
-          <select id="aoi-fly"></select>
-        </label>
-        <p class="caption">Four additional Portuguese AOIs the rank was reproduced on
-          (Pedrógão Grande, Serra da Estrela, Peneda-Gerês, Monchique), each scored
-          <strong>independently</strong> with the same open-data pipeline and shown with the same
-          viridis exposure-rank encoding. The exposure rank is <strong>AOI-relative</strong> — rank 1
-          is the most exposed asset <em>within that AOI</em>, not comparable across AOIs. These are
-          <strong>model v0.3.0</strong> runs (the pilot is v0.3.1; labelled honestly per AOI).
-          Pick an AOI from the selector to fly there and show it on the map — <strong>one study area
-          at a time</strong> (the others hide); pick <em>Pilot</em> to hide all of them. The layer
-          loads on demand (Monchique streams from Cloudflare R2).</p>
-        <label class="study-icnf-label"><input type="checkbox" id="toggle-study-icnf"> ICNF burns for this AOI <span class="tag input">input</span></label>
-        <p class="caption">ICNF <em>Áreas Ardidas</em> perimeters (1990–2025) for the selected study
-          area, shown <strong>with</strong> the chosen AOI (the 2025 vintage is outlined). Observed
-          historical burned-area polygons (© ICNF) — not a probability, not a forecast. Streamed from
-          Cloudflare R2 on demand.</p>
-        <ul id="study-areas-list" class="caption"></ul>
-      </div>
-      <div class="layer-row" id="hover-toggle-row">
-        <label><input type="checkbox" id="toggle-hover"> Hover labels <span class="tag">ui</span></label>
-        <p class="caption">Show a tooltip under the cursor with layer attributes (asset class and rank,
-          fuel class, burn-scar inference score, ICNF vintage). Default off — disable if it competes with
-          click popups or slows the raster layers. Raster reads stream a tile range request per hover.</p>
-      </div>
+
+      <fieldset class="toc-group" id="group-basemap">
+        <legend>Basemap</legend>
+        <div class="layer-row" id="basemap-switcher">
+          <label class="radio"><input type="radio" name="basemap" id="basemap-osm" value="osm" checked> Streets (OSM)</label>
+          <label class="radio"><input type="radio" name="basemap" id="basemap-sat" value="satellite"> Satellite (Esri)</label>
+          <p class="caption">Esri World Imagery (key-less, attribution-bearing). Highest-value under the
+            input and interim raster layers — vegetation texture and forest edges aid interpretation.
+            Google satellite tiles are not used (no key-less, ToS-compliant path).</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-bookmarks">
+        <legend>Fly to AOI</legend>
+        <div class="layer-row">
+          <label class="fwi-select-label" id="aoi-bookmark-label">Bookmark:
+            <select id="aoi-fly"></select>
+          </label>
+          <p class="caption">Camera bookmarks. Pick a scored AOI to fly there, draw its outline, and
+            surface <strong>that AOI's</strong> infrastructure with its <strong>AOI-relative</strong>
+            exposure rank (rank 1 = most exposed <em>within that AOI</em>, not comparable across AOIs);
+            the attribute table scopes to it. Pick <em>Whole Iberia</em> to reset the camera to the full
+            extent. The per-AOI exposure layer is separate from the merged Iberia output below.</p>
+          <label class="study-icnf-label"><input type="checkbox" id="toggle-study-icnf"> ICNF burns for this AOI <span class="tag input">input</span></label>
+          <p class="caption">ICNF <em>Áreas Ardidas</em> perimeters (1990–2025) for the selected AOI,
+            shown <strong>with</strong> it (2025 vintage outlined). Observed historical burned-area
+            polygons (© ICNF) — not a probability, not a forecast. Streamed from Cloudflare R2 on demand.</p>
+          <ul id="study-areas-list" class="caption"></ul>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-inputs">
+        <legend>Inputs <span class="tag input">input</span></legend>
+        <p class="caption group-caption">The relative model <strong>inputs</strong> the exposure rank is
+          built from, as full-Iberia EPSG:3857 display COGs from Cloudflare R2 (load on toggle). Relative
+          / observed inputs — <em>not</em> a probability, <em>not</em> a forecast.</p>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-fuel"> Fuel classes <span class="tag input">input</span></label>
+          <p class="caption">EFFIS NFFL-13 fuel classes refined by DGT COSc land cover (full Iberia).
+            EFFIS native resolution is 250 m — neighbourhood fuel character, not parcel-level precision.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-input-slope"> Slope <span class="tag input">input</span></label>
+          <p class="caption">Terrain slope (°) from the Copernicus DEM (full Iberia). Steeper slopes carry
+            fire faster uphill — a relative model input, not a probability. NEAREST-warped display copy.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-input-canopy"> Canopy height <span class="tag input">input</span></label>
+          <p class="caption">Sentinel-2 / GEDI canopy height (m) over the full Iberia extent. Taller,
+            denser canopy is more fuel-loaded — a relative model input, not a probability.</p>
+        </div>
+        <div class="layer-row" id="fwi-row" hidden>
+          <label><input type="checkbox" id="toggle-fwi"> Fire weather (FWI) <span class="tag operational">operational</span></label>
+          <p class="caption" id="fwi-caption">Current observed fire weather.</p>
+          <label class="fwi-select-label" id="fwi-component-row" hidden>Component:
+            <select id="fwi-component"></select>
+          </label>
+          <p class="caption">The <strong>operational second axis</strong>: current observed reanalysis
+            fire weather from the CEMS Early Warning Data Store (Canadian FWI system). Regional context
+            over the Iberian Peninsula on a coarse 0.25° grid (≈25 km cells), ~2-day lag —
+            <em>not</em> a per-asset score, <em>not</em> a probability, <em>not</em> a forecast. Ocean /
+            no-coverage cells are transparent. Streamed from Cloudflare R2 (loads on toggle).</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-interim">
+        <legend>Interim <span class="tag input">interim</span></legend>
+        <p class="caption group-caption">Intermediate spectral detections across the pilot + 4 study
+          areas (all tiles shown under one toggle). Streamed from Cloudflare R2 on toggle.</p>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-mosaic-burn_scar"> Burn-scar mosaic <span class="tag input">interim</span></label>
+          <p class="caption" id="caption-mosaic-burn_scar">Prithvi-EO-2.0 burn-scar inference — recent-scar
+            <strong>detection</strong>, not a forecast or ignition prediction. A relative model score, not
+            a calibrated probability. Shown with value-driven opacity so genuine scars stand out.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-mosaic-nbr_delta"> NBR-delta (ΔNBR) mosaic <span class="tag input">interim</span></label>
+          <p class="caption" id="caption-mosaic-nbr_delta">Change in Normalized Burn Ratio over the scoring
+            window: positive (red) = vegetation loss / burn-severity signal, negative (green) = regrowth.
+            A relative spectral input, not a probability and not a fire forecast.</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-output">
+        <legend>Output <span class="tag output">output</span></legend>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-exposure-iberia" checked> Exposed infrastructure (Iberia) <span class="tag output">output</span></label>
+          <p class="caption" id="caption-exposure-iberia">The merged full-extent exposed-infrastructure
+            layer, coloured by <strong>impact severity</strong> (viridis; brightest = highest). Loads on
+            first toggle (~9 MB from Cloudflare R2). Relative within-AOI exposure × asset criticality,
+            normalised across study areas — NOT an absolute cross-region risk or probability.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-exposure" checked> Exposure rank (selected AOI) <span class="tag output">output</span></label>
+          <p class="caption">The per-AOI scored assets, coloured by AOI-relative exposure rank (viridis;
+            brightest = rank 1, most exposed within that AOI). Follows the AOI bookmark above. Same
+            encoding as the repository's fig1. A screening rank, not a probability.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-aoi" checked> AOI boundary <span class="tag input">input</span></label>
+          <p class="caption">Selected AOI outline (EPSG:4326). The pilot is frozen at
+            <code>data/aoi/pilot.geojson</code>.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-assets"> OSM assets (uncoloured) <span class="tag input">input</span></label>
+          <p class="caption">The same critical-infrastructure assets without the rank encoding
+            (frozen OSM taxonomy; © OpenStreetMap contributors).</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-validation">
+        <legend>Validation <span class="tag output">validation</span></legend>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-burnhistory"> Burn history (ICNF + EFFIS) <span class="tag input">validation</span></label>
+          <p class="caption" id="caption-burnhistory">Observed historical burned-area perimeters across
+            Iberia, styled by source. Loads on toggle (~MB from Cloudflare R2).</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-firescope"> FireScope risk rank (SOTA reference) <span class="tag output">validation</span></label>
+          <p class="caption" id="caption-firescope">A SOTA relative wildfire-risk rank to read the exposure
+            rank against. Loads on toggle from Cloudflare R2.</p>
+        </div>
+        <div class="layer-row">
+          <label><input type="checkbox" id="toggle-burns"> ICNF burn perimeters (pilot) <span class="tag input">validation</span></label>
+          <p class="caption">ICNF Áreas Ardidas 1990–2025 inside the pilot AOI (© ICNF). The 2025 vintage
+            is the validation label set. Fetched from Cloudflare R2 (~8 MB; loads on toggle).</p>
+        </div>
+      </fieldset>
+
+      <fieldset class="toc-group" id="group-ui">
+        <legend>Display</legend>
+        <div class="layer-row" id="hover-toggle-row">
+          <label><input type="checkbox" id="toggle-hover"> Hover labels <span class="tag">ui</span></label>
+          <p class="caption">Show a tooltip under the cursor with layer attributes (asset class and rank,
+            fuel class, raster score, ICNF vintage). Default off — disable if it competes with click
+            popups or slows the raster layers. Raster reads stream a tile range request per hover.</p>
+        </div>
+      </fieldset>
+
       <p id="layer-error" class="error" hidden></p>
     </section>
 
     <section id="legend-section">
       <h2>Legend</h2>
+      <div id="legend-impact-iberia">
+        <h3>Impact severity (Iberia output) <span class="legend-axis">colour</span></h3>
+        <canvas id="ramp-impact" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span>0 (low)</span><span>1 (high)</span></div>
+        <p class="caption legend-note" id="legend-impact-iberia-caption">Relative within-AOI exposure ×
+          asset criticality, normalised across study areas — NOT an absolute cross-region risk or
+          probability.</p>
+      </div>
       <div id="legend-exposure">
-        <h3>Exposure rank <span class="legend-axis">colour</span></h3>
+        <h3>Exposure rank (selected AOI) <span class="legend-axis">colour</span></h3>
         <canvas id="ramp-viridis" width="220" height="12"></canvas>
         <div class="ramp-labels"><span id="ramp-rank-low">rank n (least exposed)</span><span>rank 1 (most exposed)</span></div>
         <p class="caption legend-note">Relative, AOI-normalised screening rank — not a probability.
@@ -164,7 +206,7 @@
         <p class="caption legend-note">Hand-authored CC0 glyphs (this repository; no third-party icon
           font). Lines/areas keep their geometry; points use the per-class glyph.</p>
       </div>
-      <div id="legend-burnscar" hidden>
+      <div id="legend-mosaic-burn_scar" hidden>
         <h3>Burn-scar inference score</h3>
         <canvas id="ramp-ylorrd" width="220" height="12"></canvas>
         <div class="ramp-labels"><span>0.3 (display floor)</span><span>1 (relative model score)</span></div>
@@ -172,29 +214,35 @@
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>
         <ul id="fuel-legend-list"></ul>
-        <p class="caption" id="legend-input-fuel_class-aoinote" hidden>No fuel input published for the
-          selected AOI (the pilot fuel is the dedicated "Fuel classes" layer).</p>
       </div>
       <div id="legend-input-canopy_height" hidden>
         <h3>Canopy height <span class="legend-axis">colour</span></h3>
         <canvas id="ramp-input-canopy_height" width="220" height="12"></canvas>
         <div class="ramp-labels"><span id="ramp-input-canopy_height-low">min</span><span id="ramp-input-canopy_height-high">max</span></div>
         <p class="caption" id="legend-input-canopy_height-caption"></p>
-        <p class="caption" id="legend-input-canopy_height-aoinote" hidden>Not published for the selected AOI.</p>
       </div>
       <div id="legend-input-slope" hidden>
         <h3>Slope <span class="legend-axis">colour</span></h3>
         <canvas id="ramp-input-slope" width="220" height="12"></canvas>
         <div class="ramp-labels"><span id="ramp-input-slope-low">min</span><span id="ramp-input-slope-high">max</span></div>
         <p class="caption" id="legend-input-slope-caption"></p>
-        <p class="caption" id="legend-input-slope-aoinote" hidden>Not published for the selected AOI.</p>
       </div>
-      <div id="legend-input-nbr_delta" hidden>
+      <div id="legend-mosaic-nbr_delta" hidden>
         <h3>NBR-delta (ΔNBR) <span class="legend-axis">colour</span></h3>
         <canvas id="ramp-input-nbr_delta" width="220" height="12"></canvas>
         <div class="ramp-labels"><span id="ramp-input-nbr_delta-low">min</span><span id="ramp-input-nbr_delta-high">max</span></div>
         <p class="caption" id="legend-input-nbr_delta-caption"></p>
-        <p class="caption" id="legend-input-nbr_delta-aoinote" hidden>Not published for the selected AOI.</p>
+      </div>
+      <div id="legend-firescope" hidden>
+        <h3>FireScope risk rank <span class="legend-axis">colour</span></h3>
+        <canvas id="ramp-firescope" width="220" height="12"></canvas>
+        <div class="ramp-labels"><span id="ramp-firescope-low">0</span><span id="ramp-firescope-high">254</span></div>
+        <p class="caption legend-note" id="legend-firescope-caption"></p>
+      </div>
+      <div id="legend-burnhistory" hidden>
+        <h3>Burn history by source</h3>
+        <ul id="burnhistory-legend-list"></ul>
+        <p class="caption legend-note" id="legend-burnhistory-caption"></p>
       </div>
       <div id="legend-fwi" hidden>
         <h3 id="legend-fwi-title">Fire weather (FWI)</h3>
@@ -202,6 +250,14 @@
         <div class="ramp-labels"><span id="ramp-fwi-low">min</span><span id="ramp-fwi-high">max</span></div>
         <p class="caption" id="legend-fwi-caption"></p>
       </div>
+    </section>
+
+    <section id="process-section">
+      <h2>Process (as a deliverable)</h2>
+      <p class="caption process-intro">The pipeline read <strong>temporally</strong>: the input window,
+        the validation horizon strictly after it, the current fire-weather snapshot, and the exact code
+        commit. Every step is reproducible from the repository.</p>
+      <ol id="process-timeline" class="process-timeline"></ol>
     </section>
 
     <section id="validation-section">

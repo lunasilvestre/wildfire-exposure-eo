@@ -390,6 +390,126 @@ function fillInputLegends(ramps) {
   }
 }
 
+/* Draw an arbitrary 256-step LUT into a legend canvas (low→high left→right). */
+function drawLut(canvasId, lut) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  for (let x = 0; x < canvas.width; x++) {
+    ctx.fillStyle = rgb(lut[Math.round((x / (canvas.width - 1)) * 255)]);
+    ctx.fillRect(x, 0, 1, canvas.height);
+  }
+}
+
+/* FireScope reference legend (magma LUT over 0–254, from style.firescope.lut).
+ * The caption is verbatim the data's caption/attribution (non-negotiable #6 — a
+ * relative rank, never a probability). */
+function fillFirescopeLegend(fs) {
+  if (!fs) return;
+  drawLut("ramp-firescope", fs.lut);
+  const lo = document.getElementById("ramp-firescope-low");
+  const hi = document.getElementById("ramp-firescope-high");
+  if (lo) lo.textContent = String(fs.value_min);
+  if (hi) hi.textContent = String(fs.value_max);
+  const cap = document.getElementById("legend-firescope-caption");
+  if (cap) cap.textContent = fs.caption;
+  const tileCap = document.getElementById("caption-firescope");
+  if (tileCap) tileCap.textContent = fs.caption;
+}
+
+/* Burn-history legend: one swatch per source (ICNF vs EFFIS), coloured by the
+ * data's per-source colour, with vintage range + perimeter count. The caption is
+ * verbatim the data's caption (the PT/ES fine-vs-coarse asymmetry). */
+function fillBurnHistoryLegend(bh) {
+  if (!bh) return;
+  const list = document.getElementById("burnhistory-legend-list");
+  if (list) {
+    list.innerHTML = (bh.sources || [])
+      .map(
+        (s) =>
+          `<li><span class="swatch" style="background:${rgb(s.color)}"></span>` +
+          `${escapeHtml(s.label)} · ${s.n_perimeters.toLocaleString("en")} perimeters</li>`,
+      )
+      .join("");
+  }
+  const cap = document.getElementById("legend-burnhistory-caption");
+  if (cap) cap.textContent = bh.caption;
+  const tileCap = document.getElementById("caption-burnhistory");
+  if (tileCap) tileCap.textContent = bh.caption;
+}
+
+/* Mosaic captions (burn-scar / NBR-delta) into their layer-row caption nodes,
+ * verbatim from the data so the honesty bar (detection ≠ forecast) is exact. */
+function fillMosaicCaptions(mosaics) {
+  for (const m of mosaics || []) {
+    const el = document.getElementById(`caption-mosaic-${m.kind}`);
+    if (el && m.caption) el.textContent = m.caption;
+  }
+}
+
+/* The exposure-iberia (impact severity) ramp + caption. */
+function fillImpactIberiaLegend(style) {
+  drawLut("ramp-impact", style.viridis_lut);
+  const art = style.artifacts && style.artifacts.exposure_assets_iberia;
+  const cap = document.getElementById("caption-exposure-iberia");
+  if (cap && art && art.description) {
+    cap.textContent =
+      "The merged full-extent exposed-infrastructure layer, coloured by impact severity " +
+      "(viridis; brightest = highest). Loads on first toggle (~9 MB from Cloudflare R2). " +
+      "Relative within-AOI exposure × asset criticality, normalised across study areas — " +
+      "NOT an absolute cross-region risk or probability.";
+  }
+}
+
+/* PROCESS / PROVENANCE panel — renders provenance_summary as a temporal
+ * methodology timeline (the process itself as a deliverable). Each step is a
+ * dated/labelled <li>; the code commit links to GitHub at that exact SHA. */
+function fillProcessSection(prov) {
+  const ol = document.getElementById("process-timeline");
+  if (!ol || !prov) return;
+  const sha = prov.code_commit_sha || "";
+  const shortSha = sha.length >= 7 ? sha.slice(0, 7) : sha;
+  const years = (prov.validation_years || []).join(", ");
+  const steps = [
+    [
+      `${prov.window_start} → ${prov.window_end}`,
+      "Sentinel-2 input window",
+      `${prov.s2_item_count} S2 items composited into the model inputs (fuel, slope, canopy, ΔNBR).`,
+    ],
+    [
+      prov.window_end,
+      "Scoring",
+      `model v${prov.model_version} ranks each asset by relative exposure (run ${prov.run_id}). ` +
+        `A relative AOI-normalised rank — not a probability.`,
+    ],
+    [
+      years,
+      "Validation horizon",
+      `ICNF burned-area perimeters of ${years} — strictly after the input window ` +
+        `(hard temporal-leakage gate).`,
+    ],
+    [
+      prov.fwi_valid_date,
+      "Fire-weather snapshot",
+      `CEMS/EWDS reanalysis FWI valid ${prov.fwi_valid_date} — observed regional context, not a forecast.`,
+    ],
+    [
+      "commit",
+      "Reproduce",
+      `code commit <a href="https://github.com/lunasilvestre/wildfire-exposure-eo/commit/${escapeHtml(sha)}" ` +
+        `target="_blank" rel="noopener"><code>${escapeHtml(shortSha)}</code></a>.`,
+    ],
+  ];
+  ol.innerHTML = steps
+    .map(
+      ([when, title, body]) =>
+        `<li><span class="process-when">${escapeHtml(String(when))}</span>` +
+        `<strong class="process-title">${escapeHtml(title)}</strong>` +
+        `<span class="process-body">${body}</span></li>`,
+    )
+    .join("");
+}
+
 async function renderDiagrams() {
   const el = document.getElementById("diagrams");
   try {
@@ -924,7 +1044,12 @@ async function main() {
   setupFloatingTable();
 
   const style = await (await fetch("app/data/style_data.json")).json();
+  window.__styleForTest = style; // headless test hook (alongside __mapForTest)
   const v = style.validation;
+
+  /* Iberia display extent — the map opens framed on the WHOLE peninsula, not on
+   * the pilot AOI. fitBounds corners are [-9.8, 35.9] (SW) .. [3.5, 44.0] (NE). */
+  const IBERIA_BOUNDS = [[-9.8, 35.9], [3.5, 44.0]];
 
   document.getElementById("lead-n-assets").textContent = v.n_assets.toLocaleString("en");
   document.getElementById("ramp-rank-low").textContent = `rank ${v.n_assets.toLocaleString("en")} (least exposed)`;
@@ -936,11 +1061,18 @@ async function main() {
   fillDownloads(style);
   fillFuelLegend(style.fuel_legend);
   fillInputLegends(style.input_ramps);
+  fillImpactIberiaLegend(style);
+  fillFirescopeLegend(style.firescope);
+  fillBurnHistoryLegend(style.burn_history);
+  fillMosaicCaptions(style.mosaics);
+  fillProcessSection(style.provenance_summary);
   fillSymbolLegend();
   renderDiagrams();
 
+  /* The pilot AOI outline is still fetched (for the pilot bookmark + outline),
+   * but its bounds DO NOT drive the initial camera — the map opens on Iberia. */
   const aoiGj = await (await fetch(style.artifacts.aoi.href)).json();
-  const bounds = bboxOfGeojson(aoiGj);
+  const pilotBounds = bboxOfGeojson(aoiGj);
 
   /* Fetch the pilot exposure GeoJSON once so it feeds BOTH the map source and
    * the analyser table (no double download). The analyser is created up front;
@@ -1032,7 +1164,7 @@ async function main() {
         { id: "basemap-sat", type: "raster", source: "satellite", layout: { visibility: "none" } },
       ],
     },
-    bounds: bounds,
+    bounds: IBERIA_BOUNDS,
     fitBoundsOptions: { padding: 24 },
     attributionControl: { compact: false },
   });
@@ -1040,20 +1172,26 @@ async function main() {
   map.addControl(new maplibregl.NavigationControl(), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
 
+  /* Resolves once the map style + the base layers (added in map.on("load")) are
+   * present, so lazy layer adders run after the style is ready. */
+  const mapReady = new Promise((resolve) => {
+    if (map.isStyleLoaded() && map.getLayer("aoi")) resolve();
+    else map.on("load", () => resolve());
+  });
+
+  /* Full-Iberia model INPUT COGs (cog:// on R2), keyed by kind. The INPUTS group
+   * serves these as first-class toggles. All hrefs come from style.iberia_inputs
+   * (never hardcoded). */
+  const iberiaInputs = new Map((style.iberia_inputs || []).map((i) => [i.kind, i]));
+
   /* Custom colour functions for the single-band COGs (values are read raw via
    * HTTP range requests; colours applied per pixel — full fidelity). */
-  const fuelUrl = style.artifacts.fuel_class.href;
   const fuelColor = new Map(style.fuel_legend.map((e) => [e.code, e.color]));
   /* Code → human label, reused by the hover tooltip's raw fuel-pixel read. */
   const fuelCodeToLabel = new Map(style.fuel_legend.map((e) => [e.code, e.label]));
-  MaplibreCOGProtocol.setColorFunction(fuelUrl, (pixel, color, metadata) => {
-    const code = pixel[0];
-    if (code === metadata.noData || code === 255 || fuelColor.get(code) === undefined) {
-      color.set([0, 0, 0, 0]);
-    } else {
-      color.set([...fuelColor.get(code), 255]);
-    }
-  });
+  /* The "Fuel classes" toggle now shows the FULL-IBERIA fuel input (not the
+   * pilot COG). Its colour function is registered by registerInputColor below. */
+  const fuelUrl = iberiaInputs.get("fuel_class") ? iberiaInputs.get("fuel_class").href : null;
 
   /* Burn-scar display: value-driven alpha. The COG stays a continuous
    * inference-score raster in [0, 1]; we only change how it is painted.
@@ -1068,18 +1206,8 @@ async function main() {
   const BURN_ALPHA_FLOOR = 0.25;
   const BURN_ALPHA_BASE = 0.3;
   const BURN_ALPHA_GAMMA = 0.6;
-  const burnScarUrl = style.artifacts.burn_scar.href;
-  MaplibreCOGProtocol.setColorFunction(burnScarUrl, (pixel, color, metadata) => {
-    const p = pixel[0];
-    if (p === metadata.noData || !(p >= BURN_ALPHA_FLOOR)) {
-      color.set([0, 0, 0, 0]);
-    } else {
-      const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
-      const t = Math.pow(Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)), BURN_ALPHA_GAMMA);
-      const alpha = Math.round(255 * (BURN_ALPHA_BASE + (1 - BURN_ALPHA_BASE) * t));
-      color.set([...style.ylorrd_lut[idx], alpha]);
-    }
-  });
+  /* The burn-scar colour function is registered per mosaic-tile href by
+   * registerBurnScarColor (defined below); each tile shares these constants. */
 
   /* Current-season FWI operational overlay (the second axis). One EPSG:3857
    * display COG per component on Cloudflare R2; each is painted magma-on-value,
@@ -1128,32 +1256,30 @@ async function main() {
   }
 
   /* ----------------------------------------------------------------------- *
-   * Per-AOI model-INPUT raster layers (canopy height, slope, NBR-delta, fuel
-   * NFFL class) — the relative model INPUTS, hosted as EPSG:3857 display COGs
-   * on Cloudflare R2 (cog://https://wildfire.cheias.pt/...). One toggle per
-   * INPUT KIND drives whichever AOI is currently shown: the active AOI's COG
-   * for that kind is added lazily + made visible; switching AOIs swaps the COG
-   * under the same toggle. Honesty bar (non-negotiable #6): inputs, never a
-   * probability, score, or forecast.
+   * Model-INPUT raster colouring (canopy height, slope, NBR-delta, fuel NFFL
+   * class). The display COGs are EPSG:3857 on Cloudflare R2 (cog://...). The
+   * INPUTS group now serves FULL-IBERIA inputs (style.iberia_inputs); the mosaic
+   * tiles and per-AOI study-area input COGs reuse the SAME colour functions,
+   * keyed by href. Honesty bar (non-negotiable #6): inputs are relative /
+   * observed, never a probability, score, or forecast.
    *
    * Continuous kinds (canopy / slope / NBR-delta) paint a value→colour ramp
    * (the LUT + display range come from style.input_ramps, measured from the
-   * COGs — not invented); the categorical FUEL input reuses the existing fuel
-   * colour function (per-code tab10 + grey non-fuel), registered per-href.
-   * nodata (uint8 255 for canopy, NaN for slope / NBR-delta, the COG nodata tag
-   * for fuel) paints transparent so the basemap shows through. ----------- */
+   * COGs — not invented); the categorical FUEL input reuses the fuel colour
+   * function (per-code tab10 + grey non-fuel), registered per-href. nodata
+   * (uint8 255 for canopy, NaN for slope / NBR-delta, the COG nodata tag for
+   * fuel) paints transparent so the basemap shows through. ----------------- */
   const inputRamps = new Map((style.input_ramps || []).map((r) => [r.kind, r]));
   const INPUT_OPACITY = 0.8;
-  /* Track which input-COG hrefs already have a registered colour function so a
-   * lazily-added layer never double-registers (idempotent across AOI swaps). */
+  /* Track which COG hrefs already have a registered colour function so a lazily
+   * added layer never double-registers (idempotent across all COG layers). */
   const inputColorRegistered = new Set();
 
   function registerInputColor(kind, href) {
     if (inputColorRegistered.has(href)) return;
     inputColorRegistered.add(href);
     if (kind === "fuel_class") {
-      /* Reuse the pilot fuel colour function verbatim: per-code tab10 fill,
-       * grey non-fuel, transparent nodata / unknown / code 255. */
+      /* Per-code tab10 fill, grey non-fuel, transparent nodata / unknown / 255. */
       MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
         const code = pixel[0];
         if (code === metadata.noData || code === 255 || fuelColor.get(code) === undefined) {
@@ -1182,20 +1308,64 @@ async function main() {
     });
   }
 
-  map.on("load", () => {
-    /* Rasters first so vectors draw on top. Sources with visibility:none do
-     * not fetch tiles until toggled on. */
-    map.addSource("fuel", { type: "raster", url: `cog://${fuelUrl}`, tileSize: 256 });
-    map.addLayer({
-      id: "fuel", type: "raster", source: "fuel",
-      paint: { "raster-opacity": 0.75 },
-      layout: { visibility: "none" },
+  /* Burn-scar mosaic tiles reuse the pilot burn-scar value-driven-alpha colour
+   * function (YlOrRd, transparent below the floor) — register it per tile href.
+   * A relative model score, never a calibrated probability (non-negotiable #6). */
+  const burnScarColorRegistered = new Set();
+  function registerBurnScarColor(href) {
+    if (burnScarColorRegistered.has(href)) return;
+    burnScarColorRegistered.add(href);
+    MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
+      const p = pixel[0];
+      if (p === metadata.noData || !(p >= BURN_ALPHA_FLOOR)) {
+        color.set([0, 0, 0, 0]);
+      } else {
+        const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
+        const t = Math.pow(Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)), BURN_ALPHA_GAMMA);
+        const alpha = Math.round(255 * (BURN_ALPHA_BASE + (1 - BURN_ALPHA_BASE) * t));
+        color.set([...style.ylorrd_lut[idx], alpha]);
+      }
     });
+  }
 
+  /* FireScope reference COG: a uint8 0–254 relative-risk RANK painted with its
+   * own magma LUT (from style.firescope.lut); nodata 255 → transparent. A SOTA
+   * reference rank, NOT a probability (non-negotiable #6; caption is verbatim). */
+  const firescope = style.firescope || null;
+  const FIRESCOPE_OPACITY = 0.85;
+  let firescopeColorRegistered = false;
+  function registerFirescopeColor() {
+    if (firescopeColorRegistered || !firescope) return;
+    firescopeColorRegistered = true;
+    const lo = firescope.value_min;
+    const span = Math.max(1e-6, firescope.value_max - firescope.value_min);
+    MaplibreCOGProtocol.setColorFunction(firescope.href, (pixel, color, metadata) => {
+      const val = pixel[0];
+      if (!Number.isFinite(val) || val === metadata.noData || val === 255) {
+        color.set([0, 0, 0, 0]);
+      } else {
+        const t = Math.max(0, Math.min(1, (val - lo) / span));
+        const idx = Math.round(t * 255);
+        color.set([...firescope.lut[idx], Math.round(255 * FIRESCOPE_OPACITY)]);
+      }
+    });
+  }
+
+  map.on("load", () => {
+    /* The full-Iberia input COGs (fuel / slope / canopy), the mosaic tiles, the
+     * firescope COG, the burn-history GeoJSON and the merged Iberia exposure
+     * GeoJSON are all added lazily on first toggle (load-on-toggle) — nothing is
+     * fetched here. Vectors draw on top of rasters by add order. */
+
+    /* The pilot AOI outline source. The "aoi" layer is the camera-anchor outline
+     * used as a layer-order beforeId for everything that must sit under the
+     * vector asset layers. It starts hidden (the map opens on Iberia); the
+     * bookmark logic shows the pilot outline when the Pilot bookmark is picked. */
     map.addSource("aoi", { type: "geojson", data: aoiGj });
     map.addLayer({
       id: "aoi", type: "line", source: "aoi",
       paint: { "line-color": "#444444", "line-width": 1.6, "line-dasharray": [3, 2] },
+      layout: { visibility: "none" },
     });
 
     /* Register the per-class SDF glyphs once, before any symbol layer that
@@ -1239,20 +1409,26 @@ async function main() {
      * only the disc's ring visible). A thin white halo keeps the tinted glyph
      * legible over any basemap. */
     const rankColor = rankColorExpression(style.viridis_lut, v.n_assets);
+    /* PILOT per-AOI exposure layers. These start HIDDEN: the map opens framed on
+     * Iberia with the MERGED output layer on; the pilot exposure surfaces only
+     * when the "Pilot" bookmark is selected (the study areas are symmetric). */
     map.addLayer({
       id: "exposure-line", type: "line", source: "assets",
       filter: ["==", ["geometry-type"], "LineString"],
       paint: { "line-color": rankColor, "line-width": 2.2 },
+      layout: { visibility: "none" },
     });
     map.addLayer({
       id: "exposure-fill", type: "fill", source: "assets",
       filter: ["==", ["geometry-type"], "Polygon"],
       paint: { "fill-color": rankColor, "fill-opacity": 0.75, "fill-outline-color": "#333" },
+      layout: { visibility: "none" },
     });
     map.addLayer({
       id: "exposure-point", type: "symbol", source: "assets",
       filter: ["==", ["geometry-type"], "Point"],
       layout: {
+        visibility: "none",
         "icon-image": iconImage,
         "icon-size": ASSET_ICON_SIZE,
         "icon-allow-overlap": true,
@@ -1308,35 +1484,31 @@ async function main() {
     });
     map.on("mouseleave", "aoi", hideTip);
 
-    /* Raster pixel reads on the bare canvas (raster layers do not emit
-     * feature events). MaplibreCOGProtocol.locationValues issues a COG range
-     * request per call, so a 120 ms trailing debounce keeps fast cursor motion
-     * from saturating the tile hosts (local fuel COG + R2-hosted burn-scar COG).
+    /* Raster pixel reads on the bare canvas (raster layers do not emit feature
+     * events). MaplibreCOGProtocol.locationValues issues a COG range request per
+     * call, so a 120 ms trailing debounce keeps fast cursor motion from
+     * saturating the tile hosts. The "active raster" set is built dynamically
+     * from rasterReaders (every COG layer registers a reader on add) filtered to
+     * the currently-visible ones, in priority order — so hover reads whatever
+     * raster is on: firescope, the mosaic tiles, the Iberia inputs, or FWI.
      * Vector features take priority: if the cursor is over an asset/exposure or
-     * burn polygon, the vector mousemove handler owns the tooltip and we skip
-     * the raster read, so the label never flips between an asset and a pixel. */
+     * burn polygon, the vector mousemove handler owns the tooltip. */
     let rasterHoverTimer = null;
     const vectorHoverLayers = ["exposure-point", "exposure-fill", "exposure-line",
                                "assets-point", "assets-fill", "assets-line", "aoi"];
-    /* Which FWI component (if any) is currently the visible overlay. */
-    const activeFwiToken = () => {
-      for (const t of fwiByToken.keys()) {
-        const id = fwiLayerId(t);
-        if (map.getLayer(id) && map.getLayoutProperty(id, "visibility") === "visible") return t;
-      }
-      return null;
-    };
     map.on("mousemove", (e) => {
       if (!hoverEnabled) return;
-      const fuelOn = map.getLayer("fuel") &&
-        map.getLayoutProperty("fuel", "visibility") === "visible";
-      const burnScarOn = burnScarAdded && map.getLayer("burnscar") &&
-        map.getLayoutProperty("burnscar", "visibility") === "visible";
-      const fwiToken = activeFwiToken();
-      if (!fuelOn && !burnScarOn && !fwiToken) return;
+      const readers = activeRasterReaders();
+      if (!readers.length) return;
       const burnLayers = burnsAdded ? ["burns-fill"] : [];
+      const saVectorLayers = [];
+      for (const name of studyAreaAdded) saVectorLayers.push(...saInteractiveLayerIds(name));
+      for (const name of studyIcnfAdded) saVectorLayers.push(`sa-${name}-icnf-fill`);
+      const bhLayers = burnHistoryAdded ? ["burnhistory-icnf-fill", "burnhistory-effis-fill"] : [];
       const overVector = map.queryRenderedFeatures(e.point, {
-        layers: [...vectorHoverLayers, ...burnLayers].filter((id) => map.getLayer(id)),
+        layers: [...vectorHoverLayers, ...burnLayers, ...saVectorLayers, ...bhLayers].filter(
+          (id) => map.getLayer(id),
+        ),
       });
       if (overVector.length) return; // vector handler owns the tooltip
       if (rasterHoverTimer) clearTimeout(rasterHoverTimer);
@@ -1345,40 +1517,15 @@ async function main() {
       const zoom = map.getZoom();
       rasterHoverTimer = setTimeout(async () => {
         try {
-          /* Burn-scar takes precedence when both rasters are on (it is the
-           * detection layer of interest). Terminology guard (non-negotiable
-           * #6): an inference/detection score, never a calibrated probability. */
-          if (burnScarOn) {
-            const [score] = await MaplibreCOGProtocol.locationValues(
-              burnScarUrl, { latitude: lat, longitude: lng }, zoom,
-            );
-            if (score >= 0) {
-              showTip(oe, `Burn-scar inference score: ${score.toFixed(3)}\n` +
-                `(relative model score, not a calibrated probability)`);
-              return;
-            }
-          }
-          if (fuelOn) {
+          /* Walk the visible readers in priority order; the first finite value
+           * wins. Mosaic tiles share a reader-kind, so for those we try each
+           * visible tile's href until one covers the cursor. */
+          for (const r of readers) {
             const [val] = await MaplibreCOGProtocol.locationValues(
-              fuelUrl, { latitude: lat, longitude: lng }, zoom,
+              r.href, { latitude: lat, longitude: lng }, zoom,
             );
-            if (!isNaN(val)) {
-              const code = Math.round(val);
-              const label = fuelCodeToLabel.get(code) ?? `code ${code}`;
-              showTip(oe, `Fuel class: ${label}`);
-              return;
-            }
-          }
-          /* FWI value read (regional reanalysis index — not a per-asset score,
-           * not a probability, not a forecast). */
-          if (fwiToken) {
-            const c = fwiByToken.get(fwiToken);
-            const [val] = await MaplibreCOGProtocol.locationValues(
-              c.href, { latitude: lat, longitude: lng }, zoom,
-            );
-            if (!isNaN(val)) {
-              showTip(oe, `${c.label}: ${val.toFixed(1)}\n` +
-                `(observed reanalysis, valid ${fwiOverlay.valid_date}; regional, not a forecast)`);
+            if (Number.isFinite(val) && (r.allowNegative || val >= 0)) {
+              showTip(oe, r.describe(val));
               return;
             }
           }
@@ -1393,16 +1540,255 @@ async function main() {
     });
   });
 
+  /* ----------------------------------------------------------------------- *
+   * Active-raster registry for the hover tooltip. Every COG layer registers a
+   * reader keyed by its map layer id; the hover read walks the VISIBLE ones in
+   * priority order. describe(val) returns the honest, non-probability label. */
+  const rasterReaders = new Map(); // layerId -> {href, priority, allowNegative, describe}
+  function registerRasterReader(layerId, reader) {
+    rasterReaders.set(layerId, reader);
+  }
+  function activeRasterReaders() {
+    const out = [];
+    for (const [layerId, reader] of rasterReaders) {
+      if (!map.getLayer(layerId)) continue;
+      if (map.getLayoutProperty(layerId, "visibility") === "visible") out.push(reader);
+    }
+    out.sort((a, b) => a.priority - b.priority);
+    return out;
+  }
+
   /* R2-hosted layers (Cloudflare) load lazily on first toggle — large files
-   * served with CORS + byte-range from https://wildfire.cheias.pt. */
-  let burnScarAdded = false;
-  function addBurnScar() {
-    map.addSource("burnscar", { type: "raster", url: `cog://${burnScarUrl}`, tileSize: 256 });
+   * served with CORS + byte-range from https://wildfire.cheias.pt.
+   * beforeId helper: keep all new rasters UNDER the "aoi" outline layer (and
+   * thus under the vector asset/exposure layers) so vectors stay on top. */
+  const underAoi = () => (map.getLayer("aoi") ? "aoi" : undefined);
+
+  /* ---- Full-Iberia model INPUT COGs (fuel / slope / canopy) -------------- *
+   * One first-class toggle per kind; each loads its cog:// COG on first toggle
+   * and registers a colour function + a hover reader. hrefs come from
+   * style.iberia_inputs (never hardcoded). */
+  const iberiaInputAdded = new Set(); // kinds added
+  function iberiaInputLayerId(kind) { return `iberia-input-${kind}`; }
+  function addIberiaInput(kind) {
+    const desc = iberiaInputs.get(kind);
+    if (!desc) return false;
+    const id = iberiaInputLayerId(kind);
+    if (iberiaInputAdded.has(id)) return true;
+    registerInputColor(kind, desc.href);
+    map.addSource(id, { type: "raster", url: `cog://${desc.href}`, tileSize: 256 });
+    map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 1 } }, underAoi());
+    if (kind === "fuel_class") {
+      registerRasterReader(id, {
+        href: desc.href, priority: 40, allowNegative: false,
+        describe: (val) => {
+          const code = Math.round(val);
+          return `Fuel class: ${fuelCodeToLabel.get(code) ?? `code ${code}`}`;
+        },
+      });
+    } else {
+      const ramp = inputRamps.get(kind);
+      const unit = ramp && ramp.unit ? ` ${ramp.unit}` : "";
+      const label = ramp ? ramp.label : kind;
+      registerRasterReader(id, {
+        href: desc.href, priority: 40, allowNegative: true,
+        describe: (val) =>
+          `${label}: ${val.toFixed(2)}${unit}\n(relative model input, not a probability)`,
+      });
+    }
+    iberiaInputAdded.add(id);
+    return true;
+  }
+
+  /* ---- Interim MOSAICS (burn-scar / NBR-delta) --------------------------- *
+   * Each mosaic is 5 tiles (pilot + 4 study areas) under ONE toggle. Every tile
+   * is its own cog:// raster source/layer + colour function + hover reader, all
+   * sharing one mosaic id prefix so the toggle flips them together. */
+  const mosaics = new Map((style.mosaics || []).map((m) => [m.kind, m]));
+  const mosaicAdded = new Set(); // kinds added
+  function mosaicTileLayerId(kind, aoiName) { return `mosaic-${kind}-${aoiName}`; }
+  function mosaicLayerIds(kind) {
+    const m = mosaics.get(kind);
+    return m ? m.tiles.map((t) => mosaicTileLayerId(kind, t.aoi_name)) : [];
+  }
+  function addMosaic(kind) {
+    const m = mosaics.get(kind);
+    if (!m) return false;
+    if (mosaicAdded.has(kind)) return true;
+    const nbrRamp = inputRamps.get("nbr_delta");
+    for (const tile of m.tiles) {
+      const id = mosaicTileLayerId(kind, tile.aoi_name);
+      if (kind === "burn_scar") registerBurnScarColor(tile.href);
+      else registerInputColor("nbr_delta", tile.href);
+      map.addSource(id, { type: "raster", url: `cog://${tile.href}`, tileSize: 256 });
+      map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 1 } }, underAoi());
+      if (kind === "burn_scar") {
+        registerRasterReader(id, {
+          href: tile.href, priority: 10, allowNegative: false,
+          describe: (val) =>
+            `Burn-scar inference score: ${val.toFixed(3)}\n` +
+            `(relative model score, not a calibrated probability)`,
+        });
+      } else {
+        registerRasterReader(id, {
+          href: tile.href, priority: 20, allowNegative: true,
+          describe: (val) =>
+            `ΔNBR: ${val.toFixed(3)}\n(relative spectral input, not a probability or forecast)`,
+        });
+      }
+    }
+    mosaicAdded.add(kind);
+    return true;
+  }
+
+  /* ---- FireScope SOTA reference COG (uint8 0–254 risk RANK, magma) -------- */
+  let firescopeAdded = false;
+  function addFirescope() {
+    if (firescopeAdded || !firescope) return false;
+    registerFirescopeColor();
+    map.addSource("firescope", { type: "raster", url: `cog://${firescope.href}`, tileSize: 256 });
     map.addLayer(
-      { id: "burnscar", type: "raster", source: "burnscar", paint: { "raster-opacity": 0.75 } },
-      "aoi",
+      { id: "firescope", type: "raster", source: "firescope", paint: { "raster-opacity": 1 } },
+      underAoi(),
     );
-    burnScarAdded = true;
+    registerRasterReader("firescope", {
+      href: firescope.href, priority: 30, allowNegative: false,
+      describe: (val) =>
+        `FireScope risk rank: ${Math.round(val)} / 254\n` +
+        `(relative wildfire-risk rank, SOTA reference — not a probability)`,
+    });
+    firescopeAdded = true;
+    return true;
+  }
+
+  /* ---- Burn history (ICNF + EFFIS) GeoJSON, styled by source ------------- */
+  const burnHistory = style.burn_history || null;
+  let burnHistoryAdded = false;
+  const bhColor = new Map((burnHistory ? burnHistory.sources : []).map((s) => [s.source, s.color]));
+  const bhLabel = new Map((burnHistory ? burnHistory.sources : []).map((s) => [s.source, s.label]));
+  async function addBurnHistory() {
+    if (burnHistoryAdded || !burnHistory) return false;
+    const resp = await fetch(burnHistory.href);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching Iberia burn history from Cloudflare R2`);
+    const gj = await resp.json();
+    map.addSource("burnhistory", { type: "geojson", data: gj });
+    const icnfRgb = rgb(bhColor.get("ICNF") || [179, 0, 0]);
+    const effisRgb = rgb(bhColor.get("EFFIS") || [230, 159, 0]);
+    /* Two source-filtered fill+line pairs so the PT(ICNF)/ES(EFFIS) asymmetry
+     * reads by colour. Inserted under "aoi" so vectors/asset glyphs stay on top. */
+    map.addLayer(
+      {
+        id: "burnhistory-icnf-fill", type: "fill", source: "burnhistory",
+        filter: ["==", ["get", "source"], "ICNF"],
+        paint: { "fill-color": icnfRgb, "fill-opacity": 0.22, "fill-outline-color": icnfRgb },
+      },
+      underAoi(),
+    );
+    map.addLayer(
+      {
+        id: "burnhistory-effis-fill", type: "fill", source: "burnhistory",
+        filter: ["==", ["get", "source"], "EFFIS"],
+        paint: { "fill-color": effisRgb, "fill-opacity": 0.22, "fill-outline-color": effisRgb },
+      },
+      underAoi(),
+    );
+    for (const id of ["burnhistory-icnf-fill", "burnhistory-effis-fill"]) {
+      map.on("click", id, (e) => {
+        const p = e.features[0].properties;
+        const lab = bhLabel.get(p.source) || p.source;
+        new maplibregl.Popup()
+          .setLngLat(e.lngLat)
+          .setHTML(`Burn perimeter — <strong>${escapeHtml(String(p.source))}</strong><br>` +
+                   `${escapeHtml(lab)}<br>vintage ${p.vintage_year} · ${Number(p.area_ha).toFixed(1)} ha`)
+          .addTo(map);
+      });
+      map.on("mousemove", id, (e) => {
+        if (!hoverEnabled) return;
+        const p = e.features[0].properties;
+        showTip(e.originalEvent,
+          `Burn history (${p.source})\n${p.vintage_year} · ${Number(p.area_ha).toFixed(1)} ha`);
+      });
+      map.on("mouseleave", id, hideTip);
+    }
+    burnHistoryAdded = true;
+    return true;
+  }
+
+  /* ---- Merged full-Iberia exposed-infrastructure OUTPUT (impact severity) - *
+   * 16646 features (~9 MB R2 GeoJSON), loaded lazily on first toggle. Coloured
+   * by impact_severity in [0,1] (1 = brightest viridis). NOT an absolute
+   * cross-region risk or probability (non-negotiable #6). */
+  let exposureIberiaAdded = false;
+  function impactColorExpression(lut) {
+    const expr = ["interpolate", ["linear"], ["coalesce", ["get", "impact_severity"], 0]];
+    const stops = 16;
+    for (let k = 0; k <= stops; k++) {
+      expr.push(k / stops, rgb(lut[Math.round(255 * (k / stops))]));
+    }
+    return expr;
+  }
+  async function addExposureIberia() {
+    if (exposureIberiaAdded) return false;
+    const art = style.artifacts.exposure_assets_iberia;
+    if (!art) return false;
+    const resp = await fetch(art.href);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} fetching merged Iberia exposure from Cloudflare R2`);
+    }
+    const gj = await resp.json();
+    map.addSource("exposure-iberia", { type: "geojson", data: gj });
+    registerAssetIcons(map);
+    const iconImage = iconImageExpression();
+    const impactColor = impactColorExpression(style.viridis_lut);
+    map.addLayer({
+      id: "exposure-iberia-line", type: "line", source: "exposure-iberia",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: { "line-color": impactColor, "line-width": 2 },
+    });
+    map.addLayer({
+      id: "exposure-iberia-fill", type: "fill", source: "exposure-iberia",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "fill-color": impactColor, "fill-opacity": 0.7, "fill-outline-color": "#333" },
+    });
+    map.addLayer({
+      id: "exposure-iberia-point", type: "symbol", source: "exposure-iberia",
+      filter: ["==", ["geometry-type"], "Point"],
+      layout: {
+        "icon-image": iconImage,
+        "icon-size": ASSET_ICON_SIZE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+      paint: { "icon-color": impactColor, "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.4 },
+    });
+    const ibPopup = (props) => {
+      const osmUrl = `https://www.openstreetmap.org/${props.osm_type}/${props.osm_id}`;
+      return `<h4>${escapeHtml(props.asset_class)}</h4>
+        <em>${escapeHtml(props.aoi_name)} · merged Iberia output</em><br>
+        impact severity <strong>${Number(props.impact_severity).toFixed(3)}</strong>
+        (within-AOI exposure × criticality, normalised across study areas — not a probability)<br>
+        AOI-relative exposure rank ${props.exposure_rank}<br>
+        <a href="${osmUrl}" target="_blank" rel="noopener">${escapeHtml(String(props.asset_id))}</a>`;
+    };
+    for (const layerId of ["exposure-iberia-point", "exposure-iberia-fill", "exposure-iberia-line"]) {
+      map.on("click", layerId, (e) => {
+        const props = e.features[0].properties;
+        new maplibregl.Popup({ maxWidth: "320px" })
+          .setLngLat(e.lngLat)
+          .setHTML(ibPopup(props))
+          .addTo(map);
+      });
+      map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mousemove", layerId, (e) => {
+        if (!hoverEnabled) return;
+        const p = e.features[0].properties;
+        showTip(e.originalEvent,
+          `<strong>${p.asset_class}</strong>\nimpact severity ${Number(p.impact_severity).toFixed(3)} (${p.aoi_name})`);
+      });
+      map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; hideTip(); });
+    }
+    exposureIberiaAdded = true;
+    return true;
   }
 
   let burnsAdded = false;
@@ -1652,14 +2038,38 @@ async function main() {
     }
   }
 
-  /* Which study area is currently the selected/visible one (null = none, i.e.
-   * pilot-only). The AOI selector drives this: ONE study area is shown at a time,
-   * the rest are hidden — review feedback was "we are getting all AOIs all the
-   * time". */
-  let activeStudyArea = null;
+  /* Which AOI bookmark is currently selected (null = Whole Iberia). The bookmark
+   * dropdown drives this: ONE AOI's per-AOI exposure is shown at a time (the rest
+   * hidden); "iberia" hides them all and resets the camera. The pilot is treated
+   * as a bookmark symmetric with the study areas — its per-AOI exposure layers
+   * are "exposure-*" + the "aoi" outline. */
+  let activeAoi = null; // "pilot" | <study-area name> | null (=whole Iberia)
 
-  /* Hide every study area's exposure + outline + ICNF layers (those added). */
-  function saHideAll() {
+  // Per-AOI exposure + outline layer ids, for the pilot or a study area.
+  function aoiExposureLayerIds(name) {
+    return name === "pilot" ? ["exposure-line", "exposure-fill", "exposure-point"]
+                            : saExposureLayerIds(name);
+  }
+  function aoiOutlineLayerId(name) {
+    return name === "pilot" ? "aoi" : saOutlineLayerId(name);
+  }
+
+  /* Whether the "Exposure rank (selected AOI)" toggle is on. */
+  function exposureToggleOn() {
+    const el = document.getElementById("toggle-exposure");
+    return el ? el.checked : true;
+  }
+  /* Whether the per-AOI "AOI boundary" toggle is on. */
+  function aoiToggleOn() {
+    const el = document.getElementById("toggle-aoi");
+    return el ? el.checked : true;
+  }
+
+  /* Hide every AOI's exposure + outline + ICNF layers (those added). */
+  function aoiHideAll() {
+    setVisibility(["exposure-line", "exposure-fill", "exposure-point", "aoi",
+                   "assets-line", "assets-fill", "assets-point"], false);
+    if (burnsAdded) setVisibility(["burns-fill", "burns-2025"], false);
     for (const name of studyAreaAdded) {
       setVisibility([...saExposureLayerIds(name), saOutlineLayerId(name)], false);
     }
@@ -1668,40 +2078,57 @@ async function main() {
     }
   }
 
-  /* Show ONLY the named study area (adding it lazily on first reveal) and hide
-   * all the others. The active AOI's ICNF perimeters follow the ICNF toggle:
-   * if it is on, reveal them with the AOI (lazy R2 fetch on first reveal).
-   * Returns a promise (the R2-hosted monchique + ICNF fetches are async). */
-  async function saShowOnly(name) {
-    saHideAll();
-    activeStudyArea = name;
-    await saSetVisible(name, true);
+  /* Show ONLY the named AOI's per-AOI exposure (adding study areas lazily on
+   * first reveal) and hide all the others. The exposure layer follows the
+   * "Exposure rank" toggle; the outline follows the "AOI boundary" toggle; the
+   * AOI's ICNF perimeters follow the ICNF toggle (lazy R2 fetch). The pilot's
+   * exposure rows are already in the analyser; study-area rows are added by
+   * saAdd. Returns a promise (R2-hosted monchique / ICNF fetches are async). */
+  async function aoiShowOnly(name) {
+    aoiHideAll();
+    activeAoi = name;
+    if (name !== "pilot" && !studyAreaAdded.has(name)) {
+      await saAdd(name); // lazily add the study area's source + layers + analyser rows
+    }
+    setVisibility(aoiExposureLayerIds(name), exposureToggleOn());
+    setVisibility([aoiOutlineLayerId(name)], aoiToggleOn());
     const icnfOn = document.getElementById("toggle-study-icnf");
-    if (icnfOn && icnfOn.checked) await saSetIcnfVisible(name, true);
-    // Follow the active AOI with whichever input-raster toggles are on.
-    inputSyncActiveAoi();
+    if (icnfOn && icnfOn.checked) {
+      if (name === "pilot") {
+        if (!burnsAdded) await addBurns();
+        setVisibility(["burns-fill", "burns-2025"], true);
+      } else {
+        await saSetIcnfVisible(name, true);
+      }
+    }
+    // Scope the analyser table to this AOI.
+    const aoiSel = document.getElementById("filter-aoi");
+    if (aoiSel) {
+      aoiSel.value = name;
+      aoiSel.dispatchEvent(new Event("change"));
+    }
   }
 
-  /* Fly to a study area (or the pilot) and DRIVE map visibility: a study area is
-   * shown exclusively (others hidden); "pilot" hides all study areas. The master
-   * "Validation study areas" checkbox tracks whether a study area is shown. */
-  async function flyToArea(name) {
-    const studyToggle = document.getElementById("toggle-study-areas");
+  /* Fly to a bookmark and DRIVE map visibility. "iberia" resets to the whole
+   * peninsula and hides every per-AOI exposure (the merged Iberia OUTPUT layer
+   * is separate and unaffected). Any AOI bookmark flies + reveals exclusively. */
+  async function flyToBookmark(name) {
+    if (!name || name === "iberia") {
+      aoiHideAll();
+      activeAoi = null;
+      map.fitBounds(IBERIA_BOUNDS, { padding: 24, duration: 900 });
+      return;
+    }
     if (name === "pilot") {
-      saHideAll();
-      activeStudyArea = null;
-      studyToggle.checked = false;
-      // Follow back to the pilot with whichever input-raster toggles are on.
-      inputSyncActiveAoi();
-      map.fitBounds(bounds, { padding: 32, duration: 900 });
+      map.fitBounds(pilotBounds, { padding: 32, duration: 900 });
+      await aoiShowOnly("pilot");
       return;
     }
     const sa = studyAreaByName.get(name);
     if (!sa) return;
     const [minx, miny, maxx, maxy] = sa.bbox_4326;
     map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 32, duration: 900 });
-    studyToggle.checked = true;
-    await saShowOnly(name);
+    await aoiShowOnly(name);
   }
 
   /* FWI operational overlay: one raster source per component, added lazily and
@@ -1727,6 +2154,14 @@ async function main() {
       },
       "aoi",
     );
+    /* FWI hover reader (lowest priority — it is the de-emphasised regional axis).
+     * Observed reanalysis index, not a per-asset score / probability / forecast. */
+    registerRasterReader(srcId, {
+      href: c.href, priority: 90, allowNegative: true,
+      describe: (val) =>
+        `${c.label}: ${val.toFixed(1)}\n` +
+        `(observed reanalysis, valid ${fwiOverlay.valid_date}; regional, not a forecast)`,
+    });
     fwiAdded.add(token);
   }
   function fwiSetActive(token, on) {
@@ -1763,173 +2198,100 @@ async function main() {
   }
 
   /* ----------------------------------------------------------------------- *
-   * Per-AOI model-INPUT raster layers, synced to the AOI selector.
-   *
-   * ONE toggle per input KIND (canopy / slope / NBR-delta / fuel) drives
-   * whichever AOI is currently shown. The pilot's input COGs come from
-   * style.pilot_input_layers; each study area's from its own input_layers list
-   * — keyed by `kind`. A toggle-on adds (lazily) + shows the ACTIVE AOI's COG
-   * for that kind; switching AOIs (saShowOnly / flyToArea) re-runs the sync so
-   * the toggled-on kinds follow the new AOI. Each (kind, AOI) gets its own map
-   * layer id + raster source, inserted below "aoi" so the AOI outline and the
-   * vector layers stay on top.
-   *
-   * Note: the PILOT FUEL input is the dedicated `fuel` layer (toggle-fuel),
-   * not an input_layer here — so the pilot has no fuel entry and the canopy /
-   * slope / NBR-delta toggles cover its three input COGs. The per-study-area
-   * fuel COGs ARE wired here (the study areas have no dedicated fuel layer).
-   * Per-AOI BURN-SCAR is intentionally absent: those COGs are not yet produced
-   * (see the PENDING note in the UI); the pilot burn-scar layer is unchanged. */
-  const INPUT_KINDS = ["canopy_height", "slope", "nbr_delta", "fuel_class"];
-  const pilotInputLayers = style.pilot_input_layers || [];
-  const inputToggleOn = new Set(); // kinds currently toggled on
-  const inputAdded = new Set(); // (kind, aoi) layer ids already added to the map
+   * Full-Iberia model-INPUT raster toggles. Each kind (fuel / slope / canopy)
+   * is now a first-class toggle backed by ONE full-Iberia COG (style.iberia_-
+   * inputs) — no per-AOI swapping. A toggle-on lazily adds the Iberia COG layer
+   * (addIberiaInput) and shows its legend block. Continuous kinds map to a
+   * legend ramp block; the categorical fuel reuses #legend-fuel. */
 
-  // Active AOI key for the input layers: the active study area, or "pilot".
-  const activeInputAoi = () => activeStudyArea || "pilot";
-
-  // Descriptor (or null) for `kind` in `aoiName`. Pilot fuel is intentionally
-  // absent (the dedicated `fuel` layer covers it).
-  function inputLayerDesc(kind, aoiName) {
-    const list =
-      aoiName === "pilot"
-        ? pilotInputLayers
-        : (studyAreaByName.get(aoiName)?.input_layers ?? []);
-    return list.find((l) => l.kind === kind) || null;
-  }
-  function inputLayerId(kind, aoiName) {
-    return `input-${kind}-${aoiName}`;
-  }
-
-  // Add one (kind, AOI) input COG layer lazily (idempotent). Inserts below "aoi".
-  function inputAddLayer(kind, aoiName) {
-    const id = inputLayerId(kind, aoiName);
-    if (inputAdded.has(id)) return true;
-    const desc = inputLayerDesc(kind, aoiName);
-    if (!desc) return false;
-    registerInputColor(kind, desc.href);
-    map.addSource(id, { type: "raster", url: `cog://${desc.href}`, tileSize: 256 });
-    map.addLayer(
-      { id, type: "raster", source: id, paint: { "raster-opacity": 1 } },
-      map.getLayer("aoi") ? "aoi" : undefined,
-    );
-    inputAdded.add(id);
-    return true;
-  }
-
-  // Hide every added layer of `kind` across all AOIs (used before showing one).
-  function inputHideKind(kind) {
-    for (const aoiName of ["pilot", ...studyAreaByName.keys()]) {
-      const id = inputLayerId(kind, aoiName);
-      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
-    }
-  }
-
-  // Sync toggled-on input kinds to the ACTIVE AOI: for each on-kind, hide all
-  // its layers, then add+show the active AOI's COG (if that AOI has it). Called
-  // on toggle and whenever the active AOI changes.
-  function inputSyncActiveAoi() {
-    const aoiName = activeInputAoi();
-    for (const kind of INPUT_KINDS) {
-      inputHideKind(kind);
-      if (!inputToggleOn.has(kind)) continue;
-      if (inputAddLayer(kind, aoiName)) {
-        map.setLayoutProperty(inputLayerId(kind, aoiName), "visibility", "visible");
-      }
-      inputUpdateLegend(kind);
-    }
-  }
-
-  // Show/hide one input legend block, reflecting whether the kind is on AND the
-  // active AOI actually carries that COG (so e.g. pilot fuel-via-inputs, which
-  // does not exist, shows an honest "not published for this AOI" note instead).
-  function inputUpdateLegend(kind) {
-    const on = inputToggleOn.has(kind);
+  // Show/hide the legend block for one Iberia input kind, plus the layer.
+  function setIberiaInput(kind, on) {
+    if (on) addIberiaInput(kind);
+    const id = iberiaInputLayerId(kind);
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     if (kind === "fuel_class") {
-      /* The fuel input reuses the categorical #legend-fuel block (per-code
-       * tab10). Keep it visible while EITHER the pilot fuel layer or the fuel
-       * INPUT toggle is on, so toggling one off does not hide the other's
-       * legend. The per-AOI "not published" note still applies (pilot has no
-       * fuel input — its fuel is the dedicated layer). */
-      const fuelLayerOn = document.getElementById("toggle-fuel")?.checked;
-      document.getElementById("legend-fuel").hidden = !(on || fuelLayerOn);
+      document.getElementById("legend-fuel").hidden = !on;
+    } else {
+      const block = document.getElementById(`legend-input-${kind}`);
+      if (block) block.hidden = !on;
     }
-    const block = document.getElementById(`legend-input-${kind}`);
-    if (block) block.hidden = !on;
-    const note = document.getElementById(`legend-input-${kind}-aoinote`);
-    if (note) {
-      const has = !!inputLayerDesc(kind, activeInputAoi());
-      note.hidden = has;
-    }
-  }
-
-  // Toggle one input KIND on/off, then sync the active AOI's COG for it.
-  function inputSetKind(kind, on) {
-    if (on) inputToggleOn.add(kind);
-    else inputToggleOn.delete(kind);
-    if (!on) inputHideKind(kind);
-    inputSyncActiveAoi();
   }
 
   const toggles = {
-    "toggle-exposure": (on) =>
-      setVisibility(["exposure-point", "exposure-fill", "exposure-line"], on),
-    "toggle-aoi": (on) => setVisibility(["aoi"], on),
+    /* Per-AOI exposure rank (selected AOI). Shows whichever AOI is active; the
+     * pilot uses "exposure-*", study areas their "sa-*-*" layers. */
+    "toggle-exposure": (on) => {
+      if (!activeAoi) return; // nothing selected (Whole Iberia) — merged output is separate
+      setVisibility(aoiExposureLayerIds(activeAoi), on);
+    },
+    /* Merged full-Iberia exposed-infrastructure OUTPUT (impact severity).
+     * Default ON — lazily fetched on first toggle (~9 MB R2 GeoJSON). */
+    "toggle-exposure-iberia": async (on) => {
+      if (on && !exposureIberiaAdded) await addExposureIberia();
+      else if (exposureIberiaAdded) {
+        setVisibility(["exposure-iberia-point", "exposure-iberia-fill", "exposure-iberia-line"], on);
+      }
+      document.getElementById("legend-impact-iberia").hidden = !on;
+    },
+    "toggle-aoi": (on) => {
+      if (!activeAoi) return;
+      setVisibility([aoiOutlineLayerId(activeAoi)], on);
+    },
     "toggle-assets": (on) => setVisibility(["assets-point", "assets-fill", "assets-line"], on),
-    "toggle-fuel": (on) => {
-      setVisibility(["fuel"], on);
-      // Keep the categorical fuel legend visible if EITHER the pilot fuel layer
-      // or the per-AOI fuel INPUT toggle is on (they share #legend-fuel).
-      document.getElementById("legend-fuel").hidden = !(on || inputToggleOn.has("fuel_class"));
+    "toggle-assets": (on) => setVisibility(["assets-point", "assets-fill", "assets-line"], on),
+    /* Full-Iberia INPUT raster toggles. Each backs ONE full-Iberia COG from
+     * style.iberia_inputs and loads its cog:// COG on first toggle. */
+    "toggle-fuel": (on) => setIberiaInput("fuel_class", on),
+    "toggle-input-slope": (on) => setIberiaInput("slope", on),
+    "toggle-input-canopy": (on) => setIberiaInput("canopy_height", on),
+    /* INTERIM mosaics: ALL tiles (pilot + 4 study areas) under ONE toggle. */
+    "toggle-mosaic-burn_scar": (on) => {
+      if (on) addMosaic("burn_scar");
+      setVisibility(mosaicLayerIds("burn_scar"), on);
+      document.getElementById("legend-mosaic-burn_scar").hidden = !on;
     },
-    /* Per-AOI model-INPUT raster toggles (synced to the AOI selector): each
-     * shows the ACTIVE AOI's display COG for that input kind. Pilot fuel is the
-     * dedicated `fuel` layer above; the per-study-area fuel COG is wired here. */
-    "toggle-input-canopy_height": (on) => inputSetKind("canopy_height", on),
-    "toggle-input-slope": (on) => inputSetKind("slope", on),
-    "toggle-input-nbr_delta": (on) => inputSetKind("nbr_delta", on),
-    "toggle-input-fuel_class": (on) => inputSetKind("fuel_class", on),
-    "toggle-burnscar": (on) => {
-      if (on && !burnScarAdded) addBurnScar();
-      else if (burnScarAdded) setVisibility(["burnscar"], on);
-      document.getElementById("legend-burnscar").hidden = !on;
+    "toggle-mosaic-nbr_delta": (on) => {
+      if (on) addMosaic("nbr_delta");
+      setVisibility(mosaicLayerIds("nbr_delta"), on);
+      document.getElementById("legend-mosaic-nbr_delta").hidden = !on;
     },
+    /* VALIDATION: FireScope SOTA reference rank (magma COG, loads on toggle). */
+    "toggle-firescope": (on) => {
+      if (on) addFirescope();
+      if (firescopeAdded) setVisibility(["firescope"], on);
+      document.getElementById("legend-firescope").hidden = !on;
+    },
+    /* VALIDATION: Iberia-wide burn history (ICNF + EFFIS) GeoJSON. */
+    "toggle-burnhistory": async (on) => {
+      if (on && !burnHistoryAdded) await addBurnHistory();
+      else if (burnHistoryAdded) {
+        setVisibility(["burnhistory-icnf-fill", "burnhistory-effis-fill"], on);
+      }
+      document.getElementById("legend-burnhistory").hidden = !on;
+    },
+    /* VALIDATION: pilot ICNF burn perimeters (the per-AOI label set). */
     "toggle-burns": async (on) => {
       if (on && !burnsAdded) await addBurns();
       else if (burnsAdded) setVisibility(["burns-fill", "burns-2025"], on);
     },
+    /* OPERATIONAL: current FWI overlay (component selector, magma, low opacity). */
     "toggle-fwi": (on) => {
       const sel = document.getElementById("fwi-component");
       fwiSetActive(sel.value, on);
       document.getElementById("fwi-component-row").hidden = !on;
     },
-    /* Master toggle for the SELECTED validation study area (one at a time — the
-     * "Fly to" selector drives which). On: reveal the active study area (default
-     * to the first if none is selected yet, and keep the selector in sync). Off:
-     * hide all study areas. Committed AOIs load from docs/app/data; monchique
-     * streams from R2 — both lazily on first reveal. */
-    "toggle-study-areas": async (on) => {
-      if (!on) {
-        saHideAll();
-        activeStudyArea = null;
-        const flySel = document.getElementById("aoi-fly");
-        if (flySel) flySel.value = "pilot";
-        return;
-      }
-      const name = activeStudyArea || (studyAreas[0] && studyAreas[0].name);
-      if (!name) return;
-      const flySel = document.getElementById("aoi-fly");
-      if (flySel) flySel.value = name;
-      await saShowOnly(name);
-    },
-    /* Per-AOI ICNF Áreas Ardidas perimeters for the SELECTED validation study
-     * area (synced with the AOI selector — shown with whichever AOI is active).
-     * On: reveal the active AOI's ICNF (lazy R2 fetch). Off: hide it. When no
-     * AOI is active (pilot view) the toggle simply arms the state so the next
-     * AOI shown brings its ICNF up. */
+    /* Per-AOI ICNF Áreas Ardidas perimeters for the SELECTED AOI (synced with the
+     * bookmark — shown with whichever AOI is active). On: reveal the active AOI's
+     * ICNF (lazy R2 fetch). Off: hide it. For the pilot this is the pilot burns
+     * layer; for study areas the per-AOI ICNF GeoJSON. */
     "toggle-study-icnf": async (on) => {
-      if (!activeStudyArea) return;
-      await saSetIcnfVisible(activeStudyArea, on);
+      if (!activeAoi) return;
+      if (activeAoi === "pilot") {
+        if (on && !burnsAdded) await addBurns();
+        setVisibility(["burns-fill", "burns-2025"], on && burnsAdded);
+      } else {
+        await saSetIcnfVisible(activeAoi, on);
+      }
     },
   };
   for (const [id, fn] of Object.entries(toggles)) {
@@ -1964,20 +2326,24 @@ async function main() {
     row.hidden = false;
   }
 
-  /* Study-area UI: only revealed when the bundle carries study_areas. Populate
-   * the fly-to selector (pilot first, then the four validation AOIs) and the
-   * per-AOI legend list (honest per-AOI model_version + asset count). Flying to
-   * an AOI reveals its exposure layer and turns the bulk toggle on. */
-  if (studyAreas.length) {
+  /* AOI BOOKMARK dropdown: a fly-to list of the 5 scored AOIs (pilot + 4 study
+   * areas) plus a "Whole Iberia" reset. Selecting a bookmark flies the camera,
+   * shows that AOI's outline + per-AOI (AOI-relative) exposure, and scopes the
+   * analyser table to it; "Whole Iberia" resets the camera and hides the per-AOI
+   * exposure (the merged Iberia output layer is separate). The map opens on
+   * Whole Iberia. */
+  {
     const flySel = document.getElementById("aoi-fly");
     flySel.innerHTML =
-      `<option value="pilot">Pilot — Sever do Vouga (v0.3.1)</option>` +
+      `<option value="iberia">Whole Iberia (reset)</option>` +
+      `<option value="pilot">Pilot — Sever do Vouga (v${style.provenance_summary?.model_version ?? "0.3.1"})</option>` +
       studyAreas
-        .map((s) => `<option value="${s.name}">${s.label} (v${s.model_version})</option>`)
+        .map((s) => `<option value="${s.name}">${escapeHtml(s.label)} (v${s.model_version})</option>`)
         .join("");
+    flySel.value = "iberia";
     flySel.addEventListener("change", async (e) => {
       try {
-        await flyToArea(e.target.value);
+        await flyToBookmark(e.target.value);
       } catch (err) {
         showError(`Could not load ${e.target.value}: ${err.message}`);
       }
@@ -1985,7 +2351,7 @@ async function main() {
     document.getElementById("study-areas-list").innerHTML = studyAreas
       .map(
         (s) =>
-          `<li><strong>${s.label}</strong> — ${s.n_assets.toLocaleString("en")} assets, ` +
+          `<li><strong>${escapeHtml(s.label)}</strong> — ${s.n_assets.toLocaleString("en")} assets, ` +
           `model v${s.model_version}` +
           (s.icnf_n_perimeters != null
             ? ` · ${s.icnf_n_perimeters.toLocaleString("en")} ICNF perimeters`
@@ -1993,7 +2359,21 @@ async function main() {
           `${s.committed ? "" : " (streamed from R2)"}</li>`,
       )
       .join("");
-    document.getElementById("study-areas-row").hidden = false;
+  }
+
+  /* Show the merged Iberia OUTPUT layer on load (default ON in the markup), so
+   * the map shows something at the Iberia extent immediately. Wait for the map
+   * style + base layers first. */
+  if (document.getElementById("toggle-exposure-iberia")?.checked) {
+    mapReady
+      .then(() => addExposureIberia())
+      .then(() => {
+        document.getElementById("legend-impact-iberia").hidden = false;
+      })
+      .catch((err) => {
+        showError(`Merged Iberia exposure failed to load: ${err.message}. ` +
+                  `If the Cloudflare R2 host is unreachable, this layer has no data source.`);
+      });
   }
 
   /* Hover labels are wired separately (not in the toggles object) because they
@@ -2019,6 +2399,7 @@ async function main() {
    * the analyser so the reverse (map→table) binding can be exercised. */
   window.__mapForTest = map;
   window.__analyserForTest = analyser;
+  window.__styleForTest = style;
 }
 
 main().catch((e) => showError(`Initialisation failed: ${e.message}`));

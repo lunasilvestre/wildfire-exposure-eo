@@ -85,6 +85,8 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    MosaicLayer,
+    MosaicTile,
     ProvenanceSummary,
     ScoredAsset,
     StudyAreaLayer,
@@ -265,6 +267,36 @@ _BURN_HISTORY_CAPTION = (
     "Portugal (ICNF) is fine-resolution and goes back to 1990; Spain (EFFIS) is "
     "coarser and only from 2016 — a real PT/ES temporal + resolution asymmetry, "
     "not a modelling artefact. Observed history, not a probability or forecast."
+)
+
+#: INTERIM burn-scar mosaic tiles (pilot + the 4 study areas), each an existing
+#: EPSG:3857 display COG on R2. Shown as ONE toggle over all tiles at once (no
+#: per-AOI swap). The pilot reuses the canonical ``burn_scar_3857_<run>`` artefact
+#: (= ``artifacts["burn_scar"]``); the study areas use the ``burn_scar_<aoi>_3857``
+#: naming. Non-negotiable #1: these exact published filenames, never fabricated.
+_BURN_SCAR_MOSAIC_TILES: tuple[tuple[str, str], ...] = (
+    ("pilot", "burn_scar_3857_20260615T192025Z.tif"),
+    ("pedrogao_grande", "burn_scar_pedrogao_grande_3857_20260618T081749Z.tif"),
+    ("serra_da_estrela", "burn_scar_serra_da_estrela_3857_20260618T085108Z.tif"),
+    ("peneda_geres", "burn_scar_peneda_geres_3857_20260618T091008Z.tif"),
+    ("monchique", "burn_scar_monchique_3857_20260618T092543Z.tif"),
+)
+_BURN_SCAR_MOSAIC_CAPTION = (
+    "Prithvi-EO-2.0 burn-scar inference (de-grid p85 composite) across the pilot + "
+    "4 study areas, all tiles shown at once. Recent-scar DETECTION — spectral "
+    "signatures of fires that already happened — NOT a forecast or ignition "
+    "prediction (non-negotiable #6). A relative model score, not a calibrated "
+    "probability. Streamed from Cloudflare R2 (loads on toggle)."
+)
+
+#: INTERIM NBR-delta mosaic — the pilot tile (the 4 study-area NBR tiles are
+#: reused from ``study_areas[].input_layers``). Pilot ΔNBR display COG on R2.
+_NBR_DELTA_PILOT_COG = "nbr_delta_pilot_3857_20260617T222204Z.tif"
+_NBR_DELTA_MOSAIC_CAPTION = (
+    "Change in Normalized Burn Ratio (ΔNBR) over the scoring window across the "
+    "pilot + 4 study areas, all tiles shown at once. Positive (red) = vegetation "
+    "loss / burn-severity signal; negative (green) = regrowth. A relative spectral "
+    "input, not a probability and not a fire forecast. Loads on toggle from R2."
 )
 
 
@@ -676,7 +708,7 @@ def build_burn_history(asset_base: str, geojson_path: Path | None) -> BurnHistor
             if len(sub) == 0:
                 continue
             years = [int(y) for y in pd.Series(sub["vintage_year"]).dropna()]
-            measured[src] = (min(years), max(years), int(len(sub)))
+            measured[src] = (min(years), max(years), len(sub))
 
     # Documented fallback vintages (only used when the GeoJSON is not local; the
     # counts then stay 0 — surfaced as TODO(provenance), never invented).
@@ -703,6 +735,71 @@ def build_burn_history(asset_base: str, geojson_path: Path | None) -> BurnHistor
         sources=sources,
         caption=_BURN_HISTORY_CAPTION,
     )
+
+
+def build_mosaics(
+    asset_base: str,
+    pilot_input_layers: list[InputRasterLayer],
+    study_areas: list[StudyAreaLayer],
+) -> list[MosaicLayer]:
+    """INTERIM raster mosaics (burn-scar + NBR-delta), each ONE toggle over all tiles.
+
+    Burn-scar tiles are the published per-AOI display COGs (:data:`_BURN_SCAR_MOSAIC_TILES`,
+    pilot + 4 study areas). NBR-delta tiles reuse the EXISTING per-AOI hrefs already
+    in the bundle — the pilot ΔNBR COG plus each study area's ``nbr_delta`` input
+    layer — so nothing is re-warped or fabricated (non-negotiable #1). The thematic
+    pivot: shown all at once, no per-AOI swap.
+    """
+    # Burn-scar mosaic.
+    bs_tiles: list[MosaicTile] = []
+    for aoi_name, fname in _BURN_SCAR_MOSAIC_TILES:
+        # run-id is the trailing canonical stamp regardless of the aoi token.
+        run_id = fname.replace(".tif", "").split("_")[-1]
+        if not _RUN_ID_RE.match(run_id):
+            raise ValueError(f"burn-scar tile {fname!r}: filename lacks a canonical run-id")
+        bs_tiles.append(
+            MosaicTile(
+                aoi_name=aoi_name,
+                href=f"{asset_base}/{fname}",
+                crs="EPSG:3857",
+                run_id=run_id,
+            )
+        )
+
+    # NBR-delta mosaic: pilot tile + each study area's nbr_delta input layer.
+    nbr_run = _NBR_DELTA_PILOT_COG.replace("nbr_delta_pilot_3857_", "").replace(".tif", "")
+    if not _RUN_ID_RE.match(nbr_run):
+        raise ValueError(f"NBR pilot tile {_NBR_DELTA_PILOT_COG!r}: filename lacks a run-id")
+    nbr_tiles: list[MosaicTile] = [
+        MosaicTile(
+            aoi_name="pilot",
+            href=f"{asset_base}/{_NBR_DELTA_PILOT_COG}",
+            crs="EPSG:3857",
+            run_id=nbr_run,
+        )
+    ]
+    # Pilot's own nbr_delta input layer (if present) takes precedence — same href,
+    # but keeps the bundle self-consistent if the pilot run stamp ever changes.
+    for layer in pilot_input_layers:
+        if layer.kind == "nbr_delta":
+            nbr_tiles = [
+                MosaicTile(aoi_name="pilot", href=layer.href, crs=layer.crs, run_id=layer.run_id)
+            ]
+            break
+    for sa in study_areas:
+        for layer in sa.input_layers:
+            if layer.kind == "nbr_delta":
+                nbr_tiles.append(
+                    MosaicTile(
+                        aoi_name=sa.name, href=layer.href, crs=layer.crs, run_id=layer.run_id
+                    )
+                )
+                break
+
+    return [
+        MosaicLayer(kind="burn_scar", tiles=bs_tiles, caption=_BURN_SCAR_MOSAIC_CAPTION),
+        MosaicLayer(kind="nbr_delta", tiles=nbr_tiles, caption=_NBR_DELTA_MOSAIC_CAPTION),
+    ]
 
 
 def build_provenance_summary(
@@ -1115,6 +1212,7 @@ def main() -> int:
     firescope = None if smoke else build_firescope(asset_base)
     bh_local = _GEOBROWSER_DIR / _BURN_HISTORY_GEOJSON
     burn_history = None if smoke else build_burn_history(asset_base, bh_local)
+    mosaics = [] if smoke else build_mosaics(asset_base, pilot_input_layers, study_areas)
     provenance_summary = (
         None if smoke else build_provenance_summary(exposure_pq, metrics, fwi_overlay)
     )
@@ -1216,6 +1314,7 @@ def main() -> int:
         iberia_inputs=iberia_inputs,
         firescope=firescope,
         burn_history=burn_history,
+        mosaics=mosaics,
         provenance_summary=provenance_summary,
     )
     style_path = site_data / "style_data.json"

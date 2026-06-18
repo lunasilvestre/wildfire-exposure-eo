@@ -1,6 +1,6 @@
 {
- "generated_by": "scripts/15_make_geobrowser_data.py at bbf10f25f208503571b8ea6cc0e7129cef2e0ef3",
- "code_commit_sha": "bbf10f25f208503571b8ea6cc0e7129cef2e0ef3",
+ "generated_by": "scripts/15_make_geobrowser_data.py at c8bdfb2c178f776c91ee99214fd9bccad9030bfc",
+ "code_commit_sha": "c8bdfb2c178f776c91ee99214fd9bccad9030bfc",
  "viridis_lut": [
   [
    68,
@@ -8237,6 +8237,80 @@
   ],
   "caption": "Observed historical burned-area perimeters across Iberia, styled by source. Portugal (ICNF) is fine-resolution and goes back to 1990; Spain (EFFIS) is coarser and only from 2016 — a real PT/ES temporal + resolution asymmetry, not a modelling artefact. Observed history, not a probability or forecast."
  },
+ "mosaics": [
+  {
+   "kind": "burn_scar",
+   "tiles": [
+    {
+     "aoi_name": "pilot",
+     "href": "https://wildfire.cheias.pt/burn_scar_3857_20260615T192025Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260615T192025Z"
+    },
+    {
+     "aoi_name": "pedrogao_grande",
+     "href": "https://wildfire.cheias.pt/burn_scar_pedrogao_grande_3857_20260618T081749Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260618T081749Z"
+    },
+    {
+     "aoi_name": "serra_da_estrela",
+     "href": "https://wildfire.cheias.pt/burn_scar_serra_da_estrela_3857_20260618T085108Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260618T085108Z"
+    },
+    {
+     "aoi_name": "peneda_geres",
+     "href": "https://wildfire.cheias.pt/burn_scar_peneda_geres_3857_20260618T091008Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260618T091008Z"
+    },
+    {
+     "aoi_name": "monchique",
+     "href": "https://wildfire.cheias.pt/burn_scar_monchique_3857_20260618T092543Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260618T092543Z"
+    }
+   ],
+   "caption": "Prithvi-EO-2.0 burn-scar inference (de-grid p85 composite) across the pilot + 4 study areas, all tiles shown at once. Recent-scar DETECTION — spectral signatures of fires that already happened — NOT a forecast or ignition prediction (non-negotiable #6). A relative model score, not a calibrated probability. Streamed from Cloudflare R2 (loads on toggle)."
+  },
+  {
+   "kind": "nbr_delta",
+   "tiles": [
+    {
+     "aoi_name": "pilot",
+     "href": "https://wildfire.cheias.pt/nbr_delta_pilot_3857_20260617T222204Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260617T222204Z"
+    },
+    {
+     "aoi_name": "pedrogao_grande",
+     "href": "https://wildfire.cheias.pt/nbr_delta_pedrogao_grande_3857_20260617T221924Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260617T221924Z"
+    },
+    {
+     "aoi_name": "serra_da_estrela",
+     "href": "https://wildfire.cheias.pt/nbr_delta_serra_da_estrela_3857_20260617T221959Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260617T221959Z"
+    },
+    {
+     "aoi_name": "peneda_geres",
+     "href": "https://wildfire.cheias.pt/nbr_delta_peneda_geres_3857_20260617T222634Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260617T222634Z"
+    },
+    {
+     "aoi_name": "monchique",
+     "href": "https://wildfire.cheias.pt/nbr_delta_monchique_3857_20260617T222932Z.tif",
+     "crs": "EPSG:3857",
+     "run_id": "20260617T222932Z"
+    }
+   ],
+   "caption": "Change in Normalized Burn Ratio (ΔNBR) over the scoring window across the pilot + 4 study areas, all tiles shown at once. Positive (red) = vegetation loss / burn-severity signal; negative (green) = regrowth. A relative spectral input, not a probability and not a fire forecast. Loads on toggle from R2."
+  }
+ ],
  "provenance_summary": {
   "run_id": "20260617T035233Z",
   "model_version": "0.3.1",
