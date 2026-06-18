@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "name": "portugal_national",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "portugal_national",
+        "role": "fetch-extent",
+        "note": "Mainland Portugal bounding extent for the NATIONAL ICNF Areas Ardidas burned-area fetch (validation layer). NOT a scoring AOI."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-9.55, 36.8],
+            [-6.0, 36.8],
+            [-6.0, 42.2],
+            [-9.55, 42.2],
+            [-9.55, 36.8]
+          ]
+        ]
+      }
+    }
+  ]
+}
