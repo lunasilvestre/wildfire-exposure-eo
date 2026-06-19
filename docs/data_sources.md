@@ -93,7 +93,7 @@ For each source: URL, access mechanism, license, update cadence, known gaps, dec
 - **Cadence.** Annual publication, typically ~6–12 months after fire season ends. 2025 vintage already published as of 2026-05.
 - **Coverage.** 1975 to most recent published year.
 - **Known gaps.** Polygons aggregate to ≥1 ha burned area; small fires under that threshold are excluded. Pre-1990 vintages are coarser (some only at concelho level). The ~1-year publication lag is the motivation for the Stage 1b Prithvi burn-scar inference.
-- **Used for.** Validation ground truth (lift / Spearman / Brier against the exposure score); per-asset `historical_burn_count_25y`, `historical_burn_share` features.
+- **Used for.** Validation ground truth (lift / Spearman against the exposure score — no Brier/probability, non-negotiable #6); per-asset `historical_burn_count_25y`, `historical_burn_share` features; and the Portugal side of the Iberia burn-history overlay in the thematic geobrowser (fine 1990–2025 perimeters, 10 ha MMU floor for comparability with EFFIS) — see *Full-Iberia geobrowser layers* below.
 
 ### DGT COSc — `PRIMARY`
 
@@ -132,11 +132,12 @@ For each source: URL, access mechanism, license, update cadence, known gaps, dec
 
 - **Source.** JRC / Copernicus EFFIS — Pan-European fuel map, 42 vegetation complexes mapped to 13 NFFL fire-behavior model classes. Methodology in [Aragoneses et al. 2023 — *Classification and mapping of European fuels using a hierarchical, multipurpose fuel classification system*, ESSD](https://essd.copernicus.org/articles/15/1287/2023/).
 - **Technical background.** [EFFIS — Fuels](https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/fuels).
-- **Access.** Direct GeoTIFF download from [EFFIS Data and Services](https://forest-fire.emergency.copernicus.eu/applications/data-and-services); WMS endpoints also published from the same portal. No auth. Codified in `scripts/00_effis_fetch.sh`.
+- **Access.** Direct GeoTIFF (inside `FuelMap_LAEA.zip`) from [EFFIS Data and Services](https://forest-fire.emergency.copernicus.eu/applications/data-and-services); WMS endpoints also published from the same portal. No auth. Codified in `scripts/00_effis_fetch.sh` and the audited fetcher `wildfire_exposure_eo.static_rasters.fetch_effis_fuel_map`. **In-zip filename fix (task #13):** the GeoTIFF inside the zip was renamed upstream from `FuelMap_LAEA.tif` to `FuelMap2000_NFFL_LAEA.tif` (verified 2026-06-18 against the live download's zip namelist); the stale constant made a fresh fetch fail on extraction, now pinned in `static_rasters._EFFIS_TIFF_INSIDE_ZIP`. The entry URL has a valid cert but redirects to `data.effis.emergency.copernicus.eu`, which served an **expired SSL cert** (documented 2026-05-07), so the fetcher applies `verify=False` to that one fetch only.
 - **License.** Free, no auth; Copernicus open-data attribution required ("EFFIS / JRC, European Commission").
 - **Cadence.** Single-vintage 2023 publication; EFFIS does not currently announce a refresh schedule. Treat as a stable reference layer.
-- **Known gaps.** ~100 m grid is coarser than Sentinel-2 native resolution; class assignments are EU-wide statistical, not field-validated for Portuguese landscapes. The crosswalk to FBFM40 inherits both source uncertainties.
-- **Used for.** International readability — NFFL is the predecessor of FBFM40, so non-Portuguese reviewers can interpret the project's fuel classes without a Portugal-specific lookup. Also serves as a fallback fuel-class source if both DGT COSc and ICNF CCF were unavailable.
+- **Resolution / CRS.** ~250 m grid (NFFL class codes), EPSG:3035 (LAEA).
+- **Known gaps.** ~250 m grid is coarser than Sentinel-2 native resolution; class assignments are EU-wide statistical, not field-validated for Portuguese landscapes. The crosswalk to FBFM40 inherits both source uncertainties.
+- **Used for.** (a) International readability — NFFL is the predecessor of FBFM40, so non-Portuguese reviewers can interpret the project's fuel classes without a Portugal-specific lookup; also a fallback fuel-class source if both DGT COSc and ICNF CCF were unavailable. (b) The **full-Iberia fuel-class display layer** in the thematic geobrowser (raw EFFIS NFFL classes, no COSc refinement at peninsula scale) — see *Full-Iberia geobrowser layers* below; reproduced by `scripts/29_make_iberia_inputs.py`.
 
 ### Scott & Burgan FBFM40 — `REFERENCE` (no fetch needed)
 
@@ -150,11 +151,14 @@ For each source: URL, access mechanism, license, update cadence, known gaps, dec
 ### EFFIS Burned Area — `AUXILIARY`
 
 - **Source.** [JRC / Copernicus EFFIS — Current Situation Viewer](https://forest-fire.emergency.copernicus.eu/apps/effis_current_situation/) and [Statistics Portal](https://forest-fire.emergency.copernicus.eu/apps/effis.statistics/estimates).
-- **Access.** Download via [EFFIS Data and Services](https://forest-fire.emergency.copernicus.eu/applications/data-and-services); WMS endpoints also published.
-- **License.** Free, no auth.
-- **Cadence.** Updated daily during fire season (MODIS- and VIIRS-derived perimeters).
-- **Known gaps.** Coarser than ICNF Áreas Ardidas over Portugal (375 m VIIRS basis); useful for cross-border / EU-wide context but not as a primary PT validation source.
-- **Why auxiliary.** Cross-border validation, EU-wide future scope; for the PT pilot, ICNF Áreas Ardidas is authoritative.
+- **Access.** The download portal gates raw perimeters behind a manual Data Request Form; the public **OGC WFS** at `https://maps.effis.emergency.copernicus.eu/effis` (same mapserv endpoint as the WMS) serves `GetFeature` returning full GML polygon geometries with no auth. Per-year layers `modis.ba.poly.<year>` exist 2016–2025. **WFS 1.0.0** is used deliberately (lon,lat axis order; 1.1.0 swaps to lat,lon for EPSG:4326). Codified in `scripts/30_make_iberia_burn_history.py`. (Verified 2026-06-19. The GWIS WMS at `ies-ows.jrc.ec.europa.eu/gwis` is raster-only — no vector perimeter layer.)
+- **License.** EU Data License (Copernicus EMS / EFFIS) — free, no auth.
+- **Cadence.** Updated daily during fire season (MODIS- and VIIRS-derived perimeters); per-year poly layers from 2016.
+- **Resolution / temporal.** MODIS/VIIRS-era, ≥30 ha minimum mapping unit; perimeter layers 2016–2025 only — coarser and temporally shorter than ICNF.
+- **Known gaps.** Coarser than ICNF Áreas Ardidas over Portugal; useful for cross-border / EU-wide context but not as a primary PT validation source. The GML response carries no parseable `srsName`, so CRS is set explicitly to EPSG:4326 on read (non-negotiable #2).
+- **Why auxiliary.** Cross-border validation, EU-wide future scope; for the PT pilot, ICNF Áreas Ardidas is authoritative. **Used for** the Spain side of the Iberia burn-history overlay in the thematic geobrowser (mainland PT dropped so ICNF stays the single PT source of truth) — see *Full-Iberia geobrowser layers* above.
+
+<!-- generated by: scripts/30_make_iberia_burn_history.py at <commit> -->
 
 ### VIIRS NRT Active Fire — `AUXILIARY`
 
@@ -212,6 +216,37 @@ Models that *produce* per-asset feature inputs to the exposure score. Treated as
 - **Cadence.** Inference run on-demand against the trailing 12 months of Sentinel-2 L2A imagery. Re-runnable monthly without retraining; fine-tuning is out of scope for the pilot.
 - **Known gaps.** Trained primarily on HLS imagery; performance on native Sentinel-2 L2A in Atlantic-Iberian landscapes is the open empirical question — documented in `docs/burn_scar_audit.md` after Stage 1b ships. Pilot uses frozen-backbone inference only.
 - **Used for.** Per-asset `recent_burn_share_12mo` feature in Stage 2; fills the gap between the latest ICNF Áreas Ardidas vintage (annual, ~1-year lag) and "right now". See [`prompts/09_burn_scar_inference.md`](../prompts/09_burn_scar_inference.md).
+
+### FireScope `oracle_unet` — `VALIDATION / REFERENCE`
+
+- **Source.** FireScope (INSAIT Institute + ETH Zürich) — a Europe-wide deep-learning wildfire-*risk* raster `oracle_unet.tif`. Paper: [arXiv:2511.17171](https://arxiv.org/abs/2511.17171).
+- **Access.** Hugging Face dataset [`INSAIT-Institute/firescope-risk-2026`](https://huggingface.co/datasets/INSAIT-Institute/firescope-risk-2026), pinned revision `c387af41553015c6799ad0bcf116b14e464a6264`. The ~12.3 GB raster is read by GDAL `/vsicurl/` byte-range — never fully downloaded. Reader: `wildfire_exposure_eo.firescope`; benchmark: `scripts/28_firescope_benchmark.py`; Iberia display clip: `scripts/29_make_iberia_inputs.py --layer firescope`. (Verified 2026-06-19.)
+- **License.** CC-BY-4.0. Attribution travels with every derived artefact: "FireScope (INSAIT Institute + ETH Zürich), Europe-wide wildfire-risk raster oracle_unet.tif, Hugging Face dataset INSAIT-Institute/firescope-risk-2026 (revision c387af415530), CC-BY-4.0, arXiv:2511.17171."
+- **Resolution / CRS.** ~30 m, uint8 band 0..254, nodata 255, EPSG:3857. The band's units are **undocumented**, so it is treated strictly as a **relative wildfire-risk RANK** — never a probability and never an ignition forecast (non-negotiable #6). Our own exposure rank is likewise never converted to one.
+- **Temporal range.** Single 2026 release; no refresh schedule announced. Static reference.
+- **Known gaps.** Undocumented value semantics (rank only); a learned product whose inputs and failure modes are external to this repo. Used for cross-comparison, not as a project input.
+- **Used for.** Head-to-head benchmark against this repo's transparent exposure rank ([`docs/firescope_benchmark.md`](firescope_benchmark.md)) and the **Validation** tab of the thematic Iberia geobrowser — see *Full-Iberia geobrowser layers* below.
+
+<!-- generated by: scripts/28_firescope_benchmark.py at <commit> -->
+
+## Full-Iberia geobrowser layers
+
+The thematic Iberia geobrowser (Inputs / Interim / Output / Validation) renders four peninsula-scale display/validation rasters over the Iberia bbox `(-9.8, 35.9, 3.5, 44.0)` (`data/aoi/iberia.geojson`, EPSG:4326), plus an Iberia burn-history overlay. These are **display/validation derivatives of the sources above**, generated full-extent for the layer-centric viewer and served from Cloudflare R2 (`https://wildfire.cheias.pt/…`). All four COGs are a faithful, reproducible record in [`scripts/29_make_iberia_inputs.py`](../scripts/29_make_iberia_inputs.py) (`--layer fuel|slope|canopy|firescope|all`); each writes a provenance sidecar (`<artifact>.prov.json`) carrying source, run_id, code_commit_sha, fetched_at_utc, resolution, license, attribution. The burn-history overlay is [`scripts/30_make_iberia_burn_history.py`](../scripts/30_make_iberia_burn_history.py).
+
+| Layer | Tab | Source (see above) | CRS | Resolution | Resampling | License |
+|---|---|---|---|---|---|---|
+| Fuel class (NFFL) | Inputs | EFFIS European Fuel Map | EPSG:3857 (from 3035) | ~250 m | NEAREST (categorical) | EU open data (EFFIS/JRC) |
+| Slope (degrees) | Inputs | Copernicus DEM GLO-30 | EPSG:3857 (computed in 3035) | 30 m DEM → 40 m display | bilinear (continuous) | Cop-DEM ESA open data |
+| Canopy height | Inputs | ETH Global Canopy Height 2020 | EPSG:3857 (from 4326) | 10 m → ~30 m | AVERAGE (continuous) | CC-BY-4.0 |
+| FireScope risk rank | Validation | FireScope `oracle_unet` | EPSG:3857 | ~30 m | NEAREST (rank preserve) | CC-BY-4.0 |
+
+- **Fuel class — Inputs.** Raw EFFIS NFFL classes reprojected to the display grid. At peninsula scale there is **no DGT COSc refinement** (COSc is Portugal-only); the layer is honestly captioned as raw EFFIS, not the COSc-refined pilot fuel layer.
+- **Slope — Inputs.** Computed with `gdaldem slope` on the equal-area EPSG:3035 grid so degrees stay accurate across the three UTM zones Iberia spans, then warped to the 3857 display grid. Observed terrain steepness, not a forecast.
+- **Canopy height — Inputs.** ETH GCH 10 m 2020 mosaic over the Iberia 3-degree tiles (ocean tiles 404 and are skipped), downsampled to ~30 m ground (`-tr 40 -r average`). Observed 2020 estimate; underestimates the tallest stands per Lang et al.
+- **FireScope risk rank — Validation.** Iberia clip of `oracle_unet.tif`, a **relative risk RANK** (never a probability/forecast). Provided as an independent cross-comparison lens, not a project output.
+- **Burn history (Validation overlay).** ICNF (Portugal, fine perimeters, 1990–2025) + EFFIS WFS (Spain side, coarse MODIS/VIIRS-era, 2016–2025). The PT/ES resolution and temporal asymmetry is intrinsic and is labelled honestly in the layer and report. See the *ICNF Áreas Ardidas* and *EFFIS Burned Area* entries; reproduced by `scripts/30_make_iberia_burn_history.py`.
+
+> **Thematic geobrowser semantics.** The viewer's **Output** tab shows `impact_severity = exposure_rank × criticality`. `exposure_rank` stays **AOI-relative** (a percentile rank within the scored AOI, non-negotiable #6) — it is not rescaled to the peninsula and is never a probability. The Iberia layers above are display/validation context around the scored pilot AOI, not a re-scored Iberia-wide run.
 
 ## Cross-check — open-EO and utility-VM canonical practice
 
