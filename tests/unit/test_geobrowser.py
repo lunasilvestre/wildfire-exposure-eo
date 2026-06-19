@@ -11,7 +11,10 @@ from pydantic import ValidationError
 from shapely.geometry import Point
 
 from wildfire_exposure_eo.schemas import (
+    BurnHistoryLayer,
+    BurnHistorySourceStyle,
     ExposureFeatureProperties,
+    FirescopeLayer,
     FuelLegendEntry,
     FwiOverlay,
     FwiOverlayComponent,
@@ -19,6 +22,7 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    ProvenanceSummary,
     StudyAreaLayer,
     ValidationHeadline,
 )
@@ -122,6 +126,26 @@ def test_exposure_feature_properties_historical_burn_share_optional() -> None:
 def test_exposure_feature_properties_rejects_burn_share_above_one() -> None:
     with pytest.raises(ValidationError):
         ExposureFeatureProperties.model_validate(_exposure_props(historical_burn_share=1.2))
+
+
+def test_exposure_feature_properties_accepts_impact_severity() -> None:
+    # The merged full-extent (Iberia) layer carries the cross-AOI impact_severity.
+    p = ExposureFeatureProperties.model_validate(_exposure_props(impact_severity=0.42))
+    assert p.impact_severity == 0.42
+
+
+def test_exposure_feature_properties_impact_severity_optional() -> None:
+    # Per-AOI display copies omit it (the analyser derives score × weight client
+    # side); only the merged Iberia layer bakes in the normalised value.
+    props = _exposure_props()
+    assert "impact_severity" not in props
+    p = ExposureFeatureProperties.model_validate(props)
+    assert p.impact_severity is None
+
+
+def test_exposure_feature_properties_rejects_impact_severity_above_one() -> None:
+    with pytest.raises(ValidationError):
+        ExposureFeatureProperties.model_validate(_exposure_props(impact_severity=1.2))
 
 
 def test_style_data_round_trip() -> None:
@@ -562,6 +586,129 @@ def test_with_historical_burn_share_writes_json_null(tmp_path: Path) -> None:
     assert feats["osm:node/2"]["historical_burn_share"] is None
 
 
+def _scored_parquet(tmp_path: Path, name: str, rows: list[dict[str, object]]) -> Path:
+    """Write a ScoredAsset-valid scored GeoParquet (EPSG:4326) for merged-export.
+
+    Each ``rows`` entry overrides ``exposure_score`` / ``criticality_weight`` on
+    a complete, schema-valid base row (features + provenance serialised as JSON
+    strings, exactly as the real ``exposure_<run>.parquet`` stores them).
+    """
+    import json as _json
+
+    sha = "a" * 64
+    prov = {
+        "model_version": "0.3.0",
+        "config_sha": sha,
+        "crosswalk_sha": sha,
+        "run_id": "x",
+        "code_commit_sha": "deadbeef",
+        "aoi_path": "data/aoi/smoke.geojson",
+        "aoi_geometry_sha": sha,
+        "window_start": "2025-06-16",
+        "window_end": "2026-06-16",
+        "osm_parquet_sha": sha,
+        "burns_parquet_sha": sha,
+        "fuel_cog_sha": sha,
+        "gch_cache_sha": sha,
+        "burn_share_threshold": 0.5,
+    }
+    full_rows = []
+    geoms = []
+    for i, r in enumerate(rows):
+        pt = Point(-8.0 + i * 0.01, 40.0 + i * 0.01)
+        geoms.append(pt)
+        base: dict[str, object] = {
+            "asset_id": f"osm:node/{i + 1}",
+            "osm_type": "node",
+            "osm_id": i + 1,
+            "asset_class": "power.substation",
+            "criticality_weight": 1.0,
+            "centroid_lon": pt.x,
+            "centroid_lat": pt.y,
+            "geometry_wkb": pt.wkb,
+            "features": _json.dumps({"historical_burn_share": 0.0}),
+            "features_present": ["historical_burn_share"],
+            "exposure_score": 0.5,
+            "exposure_rank": i + 1,
+            "provenance": _json.dumps(prov),
+        }
+        base.update(r)
+        full_rows.append(base)
+    gdf = gpd.GeoDataFrame(full_rows, geometry=geoms, crs="EPSG:4326")
+    dst = tmp_path / f"exposure_{name}.parquet"
+    gdf.to_parquet(dst)
+    return dst
+
+
+def test_pooled_impact_severity_max_is_global(tmp_path: Path) -> None:
+    # Two AOIs; the pool's max severity (score × weight) is the global maximum.
+    a = _scored_parquet(
+        tmp_path,
+        "a",
+        [{"exposure_score": 0.8, "criticality_weight": 0.5}],  # 0.40
+    )
+    b = _scored_parquet(
+        tmp_path,
+        "b",
+        [{"exposure_score": 0.9, "criticality_weight": 0.9}],  # 0.81
+    )
+    gmax = geobrowser_mod.pooled_impact_severity_max([a, b])
+    assert abs(gmax - 0.81) < 1e-9
+
+
+def test_pooled_impact_severity_max_rejects_degenerate(tmp_path: Path) -> None:
+    z = _scored_parquet(tmp_path, "z", [{"exposure_score": 0.0, "criticality_weight": 1.0}])
+    with pytest.raises(ValueError, match="pooled impact-severity"):
+        geobrowser_mod.pooled_impact_severity_max([z])
+
+
+def test_export_merged_iberia_normalises_against_global_max(tmp_path: Path) -> None:
+    import json as _json
+
+    # pilot raw severity 1.0 × 0.8 = 0.80 (the global max); sa raw 0.5 × 0.8 = 0.40.
+    pilot = _scored_parquet(tmp_path, "pilot", [{"exposure_score": 1.0, "criticality_weight": 0.8}])
+    sa = _scored_parquet(tmp_path, "sa", [{"exposure_score": 0.5, "criticality_weight": 0.8}])
+    out = tmp_path / "merged.geojson"
+    n = geobrowser_mod.export_merged_iberia_geojson(
+        [("pilot", pilot), ("monchique", sa)],
+        out,
+        global_sev_max=0.80,
+        coord_precision=6,
+    )
+    assert n == 2
+    feats = {
+        f["properties"]["aoi_name"]: f["properties"]
+        for f in _json.loads(out.read_text())["features"]
+    }
+    # Global max row normalises to 1.0; the half-score row to 0.40/0.80 = 0.5.
+    assert abs(feats["pilot"]["impact_severity"] - 1.0) < 1e-9
+    assert abs(feats["monchique"]["impact_severity"] - 0.5) < 1e-9
+    # aoi_name is carried; the per-AOI rank is preserved verbatim.
+    assert feats["pilot"]["aoi_name"] == "pilot"
+    assert feats["monchique"]["exposure_rank"] == 1
+
+
+def test_export_merged_iberia_requires_explicit_crs(tmp_path: Path) -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "asset_id": ["osm:node/1"],
+            "osm_type": ["node"],
+            "osm_id": [1],
+            "asset_class": ["power.substation"],
+            "criticality_weight": [1.0],
+            "exposure_score": [0.5],
+            "exposure_rank": [1],
+        },
+        geometry=[Point(0, 0)],
+    )  # no CRS
+    src = tmp_path / "exposure_nocrs.parquet"
+    gdf.to_parquet(src)
+    with pytest.raises(ValueError, match="EPSG:4326"):
+        geobrowser_mod.export_merged_iberia_geojson(
+            [("pilot", src)], tmp_path / "m.geojson", global_sev_max=1.0, coord_precision=6
+        )
+
+
 def test_validation_headline_from_degenerate_metrics() -> None:
     metrics = {
         "full": {"n": 14, "n_burned": 0, "base_rate": 0.0, "degenerate": True},
@@ -572,3 +719,184 @@ def test_validation_headline_from_degenerate_metrics() -> None:
     v = geobrowser_mod.validation_headline("rid", metrics)
     assert v.degenerate is True
     assert v.spearman_rho is None
+
+
+# --------------------------------------------------------------------------- #
+# Thematic Iberia layers (firescope / burn-history / provenance summary)
+# --------------------------------------------------------------------------- #
+
+
+def test_firescope_layer_round_trips_in_style_data() -> None:
+    lut = [(0, 0, 0)] * 256
+    fs = FirescopeLayer(
+        href="https://wildfire.cheias.pt/firescope_iberia_3857_20260618T122124Z.tif",
+        crs="EPSG:3857",
+        run_id="20260618T122124Z",
+        value_min=0.0,
+        value_max=254.0,
+        cmap="magma",
+        lut=lut,
+        attribution="FireScope (CC-BY-4.0) — INSAIT-Institute + ETH, arXiv:2511.17171",
+        caption="Relative wildfire-risk RANK (SOTA reference), not a probability.",
+    )
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+        firescope=fs,
+    )
+    parsed = GeobrowserStyleData.model_validate_json(style.model_dump_json())
+    assert parsed.firescope is not None
+    assert parsed.firescope.value_max == 254.0
+    assert "arXiv:2511.17171" in parsed.firescope.attribution
+
+
+def test_burn_history_layer_round_trips_by_source() -> None:
+    bh = BurnHistoryLayer(
+        href="https://wildfire.cheias.pt/iberia_burn_history_20260618T131535Z.geojson",
+        crs="EPSG:4326",
+        run_id="20260618T131535Z",
+        sources=[
+            BurnHistorySourceStyle(
+                source="ICNF",
+                label="ICNF (Portugal — fine, 1990–2025)",
+                color=(179, 0, 0),
+                vintage_min=1990,
+                vintage_max=2025,
+                n_perimeters=25117,
+            ),
+            BurnHistorySourceStyle(
+                source="EFFIS",
+                label="EFFIS (Spain — coarse, 2016–2025)",
+                color=(230, 159, 0),
+                vintage_min=2016,
+                vintage_max=2025,
+                n_perimeters=10284,
+            ),
+        ],
+        caption="Observed history, not a forecast; PT/ES temporal+resolution asymmetry.",
+    )
+    parsed = BurnHistoryLayer.model_validate_json(bh.model_dump_json())
+    assert [s.source for s in parsed.sources] == ["ICNF", "EFFIS"]
+    assert parsed.sources[0].vintage_min == 1990
+    assert parsed.sources[1].vintage_min == 2016
+
+
+def test_burn_history_source_rejects_unknown_source() -> None:
+    with pytest.raises(ValidationError):
+        BurnHistorySourceStyle(
+            source="NASA",  # type: ignore[arg-type]
+            label="x",
+            color=(1, 2, 3),
+            vintage_min=2000,
+            vintage_max=2020,
+            n_perimeters=1,
+        )
+
+
+def test_provenance_summary_truncates_commit_sha() -> None:
+    ps = ProvenanceSummary(
+        run_id="20260617T035233Z",
+        model_version="0.3.1",
+        code_commit_sha="71681fe0508ce459728b9deb8232d8f80fa8c26b",
+        window_start="2023-12-31",
+        window_end="2024-12-31",
+        validation_years=[2025],
+        s2_item_count=56,
+        fwi_valid_date="2026-06-12",
+    )
+    assert len(ps.code_commit_sha) == 40
+    assert ps.s2_item_count == 56
+
+
+def test_provenance_summary_fwi_date_optional() -> None:
+    ps = ProvenanceSummary(
+        run_id="x",
+        model_version="0.3.1",
+        code_commit_sha="deadbeef",
+        window_start="2023-12-31",
+        window_end="2024-12-31",
+        validation_years=[2025],
+        s2_item_count=0,
+    )
+    assert ps.fwi_valid_date is None
+
+
+def test_style_data_thematic_fields_default_none_or_empty() -> None:
+    lut = [(0, 0, 0)] * 256
+    style = GeobrowserStyleData(
+        generated_by="x",
+        code_commit_sha="x",
+        viridis_lut=lut,
+        ylorrd_lut=lut,
+        fuel_legend=[],
+        validation=ValidationHeadline.model_validate(_headline()),
+        artifacts={},
+    )
+    assert style.iberia_inputs == []
+    assert style.firescope is None
+    assert style.burn_history is None
+    assert style.provenance_summary is None
+
+
+def test_build_iberia_inputs_uses_published_filenames() -> None:
+    layers = geobrowser_mod.build_iberia_inputs("https://wildfire.cheias.pt")
+    kinds = {layer.kind for layer in layers}
+    assert kinds == {"fuel_class", "slope", "canopy_height"}
+    for layer in layers:
+        assert layer.crs == "EPSG:3857"
+        assert layer.href.startswith("https://wildfire.cheias.pt/")
+        # run-id parsed from the published filename (canonical YYYYMMDDThhmmssZ)
+        assert geobrowser_mod._RUN_ID_RE.match(layer.run_id)
+
+
+def test_build_firescope_carries_attribution_and_range() -> None:
+    fs = geobrowser_mod.build_firescope("https://wildfire.cheias.pt")
+    assert fs.value_min == 0.0
+    assert fs.value_max == 254.0
+    assert fs.cmap == "magma"
+    assert len(fs.lut) == 256
+    assert "arXiv:2511.17171" in fs.attribution
+
+
+def test_build_full_nffl_fuel_legend_covers_all_codes() -> None:
+    legend = geobrowser_mod.full_nffl_fuel_legend()
+    codes = {e.code for e in legend}
+    # Non-fuel 0 plus every NFFL code in the crosswalk (1..13).
+    assert 0 in codes
+    assert {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}.issubset(codes)
+
+
+def test_build_mosaics_has_five_tiles_each() -> None:
+    # Both INTERIM mosaics span the pilot + 4 study areas (5 tiles), shown as one
+    # toggle each. NBR tiles reuse the study-area nbr_delta input-layer hrefs.
+    sa = [
+        _study_area(
+            name=name,
+            input_layers=[
+                _input_layer(
+                    kind="nbr_delta",
+                    href=f"https://wildfire.cheias.pt/nbr_delta_{name}_3857_20260101T000000Z.tif",
+                    run_id="20260101T000000Z",
+                )
+            ],
+        )
+        for name in ("pedrogao_grande", "serra_da_estrela", "peneda_geres", "monchique")
+    ]
+    mosaics = geobrowser_mod.build_mosaics("https://wildfire.cheias.pt", [], sa)
+    by_kind = {mo.kind: mo for mo in mosaics}
+    assert set(by_kind) == {"burn_scar", "nbr_delta"}
+    assert len(by_kind["burn_scar"].tiles) == 5
+    assert len(by_kind["nbr_delta"].tiles) == 5
+    # Pilot tile is present in both, first.
+    assert by_kind["burn_scar"].tiles[0].aoi_name == "pilot"
+    assert by_kind["nbr_delta"].tiles[0].aoi_name == "pilot"
+    # Every tile carries an explicit CRS (#2) and a canonical run-id.
+    for mo in mosaics:
+        for tile in mo.tiles:
+            assert tile.crs == "EPSG:3857"
+            assert geobrowser_mod._RUN_ID_RE.match(tile.run_id)

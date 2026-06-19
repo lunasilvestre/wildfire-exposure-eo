@@ -50,6 +50,17 @@ class ExposureFeatureProperties(BaseModel):
     #: ``None`` when the feature was not present for that run (the field is
     #: optional so display copies exported before this column existed stay valid).
     historical_burn_share: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: Cross-AOI-comparable triage severity in [0, 1] = ``exposure_score`` ×
+    #: ``criticality_weight``, then NORMALISED across the POOLED assets of every
+    #: published AOI (global max → 1). Drives the full-extent (Iberia) OUTPUT
+    #: layer's colour so the most-exposed important assets across all study areas
+    #: are comparable on one ramp. Honest scope (non-negotiable #6): "relative
+    #: within-AOI exposure × asset criticality, normalised across study areas" —
+    #: NOT an absolute cross-region risk or probability, NOT a forecast. The
+    #: per-AOI ``exposure_rank`` stays AOI-relative; this is the only cross-AOI
+    #: axis. ``None`` for display copies exported before this column existed (the
+    #: field is optional for back-compat).
+    impact_severity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class FuelLegendEntry(BaseModel):
@@ -198,6 +209,131 @@ class InputRampSpec(BaseModel):
     caption: str = Field(..., min_length=1)
 
 
+class MosaicTile(BaseModel):
+    """One AOI tile of an INTERIM mosaic (burn-scar or NBR-delta) display COG."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: AOI slug the tile covers (``pilot`` / ``monchique`` / …).
+    aoi_name: str = Field(..., min_length=1)
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    run_id: str = Field(..., min_length=1)
+
+
+class MosaicLayer(BaseModel):
+    """An INTERIM raster mosaic shown as ONE toggle over ALL its AOI tiles.
+
+    The thematic pivot for the interim rasters: instead of a per-AOI swap, every
+    tile is shown at once under a single toggle (burn-scar inference, or
+    NBR-delta). Honesty bar (non-negotiable #6): burn-scar is recent-scar
+    DETECTION (spectral signatures of fires that already happened), never a
+    forecast or ignition prediction; NBR-delta is a relative spectral change
+    input. ``kind`` selects the colour ramp the client paints these COGs with.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["burn_scar", "nbr_delta"]
+    #: AOI tiles composing the mosaic (display order; pilot first by convention).
+    tiles: list[MosaicTile] = Field(..., min_length=1)
+    #: Honest caption (terminology guard #6).
+    caption: str = Field(..., min_length=1)
+
+
+class FirescopeLayer(BaseModel):
+    """FireScope relative wildfire-risk RANK reference COG (a SOTA validation layer).
+
+    A full-Iberia uint8 relative-risk *rank* (0–254, nodata 255) warped to
+    EPSG:3857 on Cloudflare R2, shown as the VALIDATION reference. Honest scope
+    (non-negotiable #6): a relative wildfire-risk RANK, NOT a probability and NOT
+    a forecast. CC-BY-4.0 (INSAIT-Institute + ETH, arXiv:2511.17171) —
+    ``attribution`` is REQUIRED in the caption (non-negotiable #1).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    run_id: str = Field(..., min_length=1)
+    #: Inclusive display range of the relative-risk rank (0–254; 255 is nodata).
+    value_min: float
+    value_max: float
+    #: Matplotlib colormap the LUT was sampled from (provenance; LUT in ``lut``).
+    cmap: str = Field(..., min_length=1)
+    #: 256-step RGB LUT sampled from ``cmap``.
+    lut: list[Rgb] = Field(..., min_length=256, max_length=256)
+    #: Required attribution string (CC-BY-4.0, INSAIT/ETH, arXiv:2511.17171).
+    attribution: str = Field(..., min_length=1)
+    #: Honest legend caption (terminology guard #6).
+    caption: str = Field(..., min_length=1)
+
+
+class BurnHistorySourceStyle(BaseModel):
+    """Display style + provenance for one burn-history source (ICNF or EFFIS)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Source token as stored in the GeoJSON ``source`` column.
+    source: Literal["ICNF", "EFFIS"]
+    #: Human label shown in the legend (e.g. "ICNF (Portugal, fine)").
+    label: str = Field(..., min_length=1)
+    #: Fill / outline colour for this source (distinct per source).
+    color: Rgb
+    #: Earliest vintage year present for this source (measured, not invented).
+    vintage_min: int = Field(..., ge=1900, le=2100)
+    #: Latest vintage year present for this source.
+    vintage_max: int = Field(..., ge=1900, le=2100)
+    #: Perimeter count for this source (drives the legend/caption).
+    n_perimeters: int = Field(..., ge=0)
+
+
+class BurnHistoryLayer(BaseModel):
+    """Iberia historical burned-area perimeters (ICNF-PT + EFFIS-ES), styled by source.
+
+    A full-Iberia vector layer on Cloudflare R2 (too large to commit). Observed
+    historical burned-area perimeters (non-negotiable #6: never a probability or
+    forecast). The PT/ES temporal+resolution asymmetry (ICNF PT fine 1990–2025 vs
+    EFFIS ES coarse 2016–2025) is surfaced via the per-source styles + caption.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    href: str = Field(..., min_length=1)
+    crs: str = Field(..., min_length=1)
+    run_id: str = Field(..., min_length=1)
+    #: Per-source display styles (ICNF + EFFIS), each with its measured vintages.
+    sources: list[BurnHistorySourceStyle] = Field(..., min_length=1)
+    #: Honest caption noting the PT/ES temporal + resolution asymmetry.
+    caption: str = Field(..., min_length=1)
+
+
+class ProvenanceSummary(BaseModel):
+    """Temporal methodology summary powering the geobrowser process panel.
+
+    Read from the scored-parquet provenance + WU-7 metrics (non-negotiable #1 /
+    #3: nothing invented). Frames "the process as a deliverable, temporally":
+    the model version, the EO input windows, the FWI valid date, the validation
+    years, and the code commit the bundle was generated at (linked to GitHub).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str = Field(..., min_length=1)
+    model_version: str = Field(..., min_length=1)
+    #: Full 40-char git commit SHA the scored run was produced at.
+    code_commit_sha: str = Field(..., min_length=7, max_length=40)
+    #: Sentinel-2 input window (ISO dates) the rank was built from.
+    window_start: str = Field(..., min_length=1)
+    window_end: str = Field(..., min_length=1)
+    #: ICNF burn vintages the rank was validated against (strictly post-window).
+    validation_years: list[int]
+    #: Count of Sentinel-2 STAC items in the scored run's provenance.
+    s2_item_count: int = Field(..., ge=0)
+    #: EWDS FWI reanalysis valid date (ISO), or ``None`` when no FWI was wired.
+    fwi_valid_date: str | None = None
+
+
 class StudyAreaLayer(BaseModel):
     """One Wave-2 validation study area shown as a toggleable geobrowser layer.
 
@@ -277,3 +413,20 @@ class GeobrowserStyleData(BaseModel):
     #: Current-season FWI operational overlay; ``None`` when no EWDS COGs are
     #: wired (e.g. the smoke bundle or a tree built before the FWI pull).
     fwi_overlay: FwiOverlay | None = None
+    #: Full-Iberia model-INPUT display COGs (fuel / slope / canopy height), each a
+    #: first-class toggleable layer shown at Iberia extent (the thematic pivot —
+    #: inputs are no longer per-AOI swaps). They reuse ``input_ramps`` (slope /
+    #: canopy) and ``fuel_legend`` (fuel). Empty when no Iberia COGs are wired.
+    iberia_inputs: list[InputRasterLayer] = Field(default_factory=list)
+    #: FireScope relative wildfire-risk RANK reference COG (the SOTA VALIDATION
+    #: layer); ``None`` when not wired. CC-BY-4.0, attribution required.
+    firescope: FirescopeLayer | None = None
+    #: Iberia historical burned-area perimeters (ICNF-PT + EFFIS-ES), styled by
+    #: source; ``None`` when not wired. Observed history, never a forecast.
+    burn_history: BurnHistoryLayer | None = None
+    #: INTERIM raster mosaics (burn-scar, NBR-delta), each shown as ONE toggle
+    #: over all its AOI tiles at once (no per-AOI swap). Empty when none wired.
+    mosaics: list[MosaicLayer] = Field(default_factory=list)
+    #: Temporal methodology summary powering the process panel; ``None`` when the
+    #: scored-run provenance was unavailable (e.g. a smoke bundle).
+    provenance_summary: ProvenanceSummary | None = None

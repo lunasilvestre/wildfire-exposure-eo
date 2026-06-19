@@ -74,7 +74,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wildfire_exposure_eo.schemas import (
+    BurnHistoryLayer,
+    BurnHistorySourceStyle,
     ExposureFeatureProperties,
+    FirescopeLayer,
     FuelLegendEntry,
     FwiOverlay,
     FwiOverlayComponent,
@@ -82,6 +85,9 @@ from wildfire_exposure_eo.schemas import (
     GeobrowserStyleData,
     InputRampSpec,
     InputRasterLayer,
+    MosaicLayer,
+    MosaicTile,
+    ProvenanceSummary,
     ScoredAsset,
     StudyAreaLayer,
     ValidationHeadline,
@@ -132,6 +138,13 @@ _EXPORT_PROPS = [
     "historical_burn_share",
 ]
 
+#: GeoJSON feature properties for the MERGED full-extent (Iberia) exposure layer.
+#: Carries the per-AOI props plus ``aoi_name`` (which study area the row came
+#: from — the per-AOI rank stays AOI-relative) and ``impact_severity`` (the
+#: cross-AOI-comparable triage axis = score × criticality, normalised across the
+#: pooled assets of all AOIs). See :func:`export_merged_iberia_geojson`.
+_MERGED_EXPORT_PROPS = [*_EXPORT_PROPS, "aoi_name", "impact_severity"]
+
 #: Wave-2 validation study areas beyond the pilot, in display order. Each is
 #: scored independently (its own ``exposure_<aoi>_<run>.parquet``) and shown as
 #: a toggleable exposure layer + AOI outline. The model_version is read from the
@@ -170,7 +183,7 @@ _INPUT_RAMPS: tuple[tuple[str, str, str, str, float, float, str], ...] = (
         "m",
         "YlGn",
         0.0,
-        25.0,
+        35.0,
         "Sentinel-2 / GEDI canopy height (metres). Taller, denser canopy is more "
         "fuel-loaded — a relative model input, not a probability.",
     ),
@@ -180,7 +193,7 @@ _INPUT_RAMPS: tuple[tuple[str, str, str, str, float, float, str], ...] = (
         "°",
         "YlOrBr",
         0.0,
-        35.0,
+        45.0,
         "Terrain slope (degrees, from the Copernicus DEM). Steeper slopes carry "
         "fire faster uphill — a relative model input, not a probability.",
     ),
@@ -205,6 +218,86 @@ _INPUT_PREFIX = {
     "nbr_delta": "nbr_delta",
     "fuel_class": "fuel_class",
 }
+
+#: Full-Iberia thematic display COGs published on Cloudflare R2 (the thematic
+#: pivot: first-class layers at Iberia extent, no per-AOI input swap). Each is
+#: warped to EPSG:3857. The display range is the measured value spread (canopy /
+#: slope verified at coarse overview; FireScope is a documented 0–254 rank). The
+#: dict is the canonical manifest so a regen reproduces the SAME bundle even when
+#: the source COGs are absent locally (they live on R2); a full regen WITH the
+#: local source COGs would re-warp + re-measure to the same names. Non-negotiable
+#: #1: these exact filenames are the published artefacts, never fabricated.
+_IBERIA_INPUT_COGS: tuple[tuple[str, str], ...] = (
+    ("fuel_class", "fuel_class_iberia_3857_20260618T123103Z.tif"),
+    ("slope", "slope_iberia_3857_20260618T124721Z.tif"),
+    ("canopy_height", "canopy_height_iberia_3857_20260618T124520Z.tif"),
+)
+
+#: FireScope relative wildfire-risk RANK reference COG (full Iberia, R2). uint8
+#: 0–254 (nodata 255). CC-BY-4.0 (INSAIT-Institute + ETH, arXiv:2511.17171) —
+#: attribution REQUIRED in the caption (non-negotiable #1).
+_FIRESCOPE_COG = "firescope_iberia_3857_20260618T122124Z.tif"
+_FIRESCOPE_VALUE_MIN = 0.0
+_FIRESCOPE_VALUE_MAX = 254.0
+_FIRESCOPE_CMAP = "magma"
+_FIRESCOPE_ATTRIBUTION = (
+    "FireScope relative wildfire-risk rank (CC-BY-4.0) — INSAIT-Institute + ETH, arXiv:2511.17171"
+)
+_FIRESCOPE_CAPTION = (
+    "Relative wildfire-risk RANK (SOTA reference): a 0–254 relative-risk rank over "
+    "Iberia. A reference layer to read the exposure rank against — NOT a "
+    "probability and NOT a forecast. " + _FIRESCOPE_ATTRIBUTION
+)
+
+#: Iberia historical burned-area perimeters (ICNF-PT + EFFIS-ES) on R2. Observed
+#: history, never a forecast (non-negotiable #6). The per-source vintages +
+#: counts are MEASURED from the GeoJSON at build time (see build_burn_history).
+_BURN_HISTORY_GEOJSON = "iberia_burn_history_20260618T131535Z.geojson"
+#: Distinct per-source display colours (ICNF PT vs EFFIS ES).
+_BURN_HISTORY_COLORS: dict[str, tuple[int, int, int]] = {
+    "ICNF": (179, 0, 0),  # deep red (Portugal, fine)
+    "EFFIS": (230, 159, 0),  # amber (Spain, coarse)
+}
+_BURN_HISTORY_LABELS: dict[str, str] = {
+    "ICNF": "ICNF (Portugal — fine, 1990–2025)",
+    "EFFIS": "EFFIS (Spain — coarse, 2016–2025)",
+}
+_BURN_HISTORY_CAPTION = (
+    "Observed historical burned-area perimeters across Iberia, styled by source. "
+    "Portugal (ICNF) is fine-resolution and goes back to 1990; Spain (EFFIS) is "
+    "coarser and only from 2016 — a real PT/ES temporal + resolution asymmetry, "
+    "not a modelling artefact. Observed history, not a probability or forecast."
+)
+
+#: INTERIM burn-scar mosaic tiles (pilot + the 4 study areas), each an existing
+#: EPSG:3857 display COG on R2. Shown as ONE toggle over all tiles at once (no
+#: per-AOI swap). The pilot reuses the canonical ``burn_scar_3857_<run>`` artefact
+#: (= ``artifacts["burn_scar"]``); the study areas use the ``burn_scar_<aoi>_3857``
+#: naming. Non-negotiable #1: these exact published filenames, never fabricated.
+_BURN_SCAR_MOSAIC_TILES: tuple[tuple[str, str], ...] = (
+    ("pilot", "burn_scar_3857_20260615T192025Z.tif"),
+    ("pedrogao_grande", "burn_scar_pedrogao_grande_3857_20260618T081749Z.tif"),
+    ("serra_da_estrela", "burn_scar_serra_da_estrela_3857_20260618T085108Z.tif"),
+    ("peneda_geres", "burn_scar_peneda_geres_3857_20260618T091008Z.tif"),
+    ("monchique", "burn_scar_monchique_3857_20260618T092543Z.tif"),
+)
+_BURN_SCAR_MOSAIC_CAPTION = (
+    "Prithvi-EO-2.0 burn-scar inference (de-grid p85 composite) across the pilot + "
+    "4 study areas, all tiles shown at once. Recent-scar DETECTION — spectral "
+    "signatures of fires that already happened — NOT a forecast or ignition "
+    "prediction (non-negotiable #6). A relative model score, not a calibrated "
+    "probability. Streamed from Cloudflare R2 (loads on toggle)."
+)
+
+#: INTERIM NBR-delta mosaic — the pilot tile (the 4 study-area NBR tiles are
+#: reused from ``study_areas[].input_layers``). Pilot ΔNBR display COG on R2.
+_NBR_DELTA_PILOT_COG = "nbr_delta_pilot_3857_20260617T222204Z.tif"
+_NBR_DELTA_MOSAIC_CAPTION = (
+    "Change in Normalized Burn Ratio (ΔNBR) over the scoring window across the "
+    "pilot + 4 study areas, all tiles shown at once. Positive (red) = vegetation "
+    "loss / burn-severity signal; negative (green) = regrowth. A relative spectral "
+    "input, not a probability and not a fire forecast. Loads on toggle from R2."
+)
 
 
 #: Canonical published-artefact run-id: an ISO-ish UTC stamp YYYYMMDDTHHMMSSZ.
@@ -324,6 +417,87 @@ def export_study_area_geojson(parquet_path: Path, out_path: Path, *, coord_preci
     return len(out)
 
 
+def _impact_severity_raw(gdf: gpd.GeoDataFrame) -> pd.Series:  # type: ignore[type-arg]
+    """Per-row raw triage severity = ``exposure_score`` × ``criticality_weight``.
+
+    Both inputs are in [0, 1] (validated by ScoredAsset), so the product is too.
+    This is the UN-normalised severity; the cross-AOI-comparable
+    ``impact_severity`` divides it by the pooled global max (see
+    :func:`export_merged_iberia_geojson`). NO re-score — derived from the
+    existing scored parquet columns (non-negotiable #1 / #3).
+    """
+    return gdf["exposure_score"].astype(float) * gdf["criticality_weight"].astype(float)
+
+
+def pooled_impact_severity_max(parquet_paths: list[Path]) -> float:
+    """Global max of ``exposure_score`` × ``criticality_weight`` across all AOIs.
+
+    The normaliser for the cross-AOI ``impact_severity`` axis: pooling every
+    published AOI's assets and taking the single global max → 1 makes the
+    full-extent (Iberia) layer's severity comparable across study areas (while
+    the per-AOI ``exposure_rank`` stays AOI-relative — non-negotiable #6). Raises
+    if no positive severity is found (a degenerate pool would make the axis
+    meaningless).
+    """
+    gmax = 0.0
+    for p in parquet_paths:
+        gdf = gpd.read_parquet(p)
+        m = float(_impact_severity_raw(gdf).max())
+        gmax = max(gmax, m)
+    if not (gmax > 0.0):
+        raise ValueError(
+            f"pooled impact-severity max is {gmax} "
+            f"(no positive severity in {len(parquet_paths)} AOIs)"
+        )
+    return gmax
+
+
+def export_merged_iberia_geojson(
+    aoi_parquets: list[tuple[str, Path]],
+    out_path: Path,
+    *,
+    global_sev_max: float,
+    coord_precision: int,
+) -> int:
+    """Concatenate every AOI's scored assets → one full-extent (Iberia) GeoJSON.
+
+    Each row carries the per-AOI display props (AOI-relative ``exposure_rank``
+    untouched) plus ``aoi_name`` and ``impact_severity`` — the latter computed as
+    ``exposure_score`` × ``criticality_weight`` then divided by *global_sev_max*
+    (the pooled cross-AOI max), so the full-extent OUTPUT layer is coloured by a
+    single cross-AOI-comparable triage axis. Every source row is validated
+    against ``ScoredAsset`` first, and every merged feature against
+    ``ExposureFeatureProperties`` (so ``impact_severity`` stays in [0, 1]).
+    Honest scope (non-negotiable #6): a relative within-AOI exposure × asset
+    criticality, normalised across study areas — NOT an absolute cross-region
+    risk or probability.
+    """
+    parts: list[gpd.GeoDataFrame] = []
+    for aoi_name, parquet_path in aoi_parquets:
+        gdf = gpd.read_parquet(parquet_path)
+        if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+            raise ValueError(f"{parquet_path.name}: expected explicit EPSG:4326, got {gdf.crs}")
+        for row in gdf.drop(columns="geometry").to_dict(orient="records"):
+            ScoredAsset.model_validate(row)
+        gdf = _with_historical_burn_share(gdf)
+        gdf["aoi_name"] = aoi_name
+        # Cross-AOI severity, clipped to [0, 1] against float round-off at the max.
+        gdf["impact_severity"] = (_impact_severity_raw(gdf) / global_sev_max).clip(0.0, 1.0)
+        parts.append(gpd.GeoDataFrame(gdf[[*_MERGED_EXPORT_PROPS, "geometry"]], crs="EPSG:4326"))
+    merged = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs="EPSG:4326").sort_values(
+        "impact_severity", ascending=False
+    )
+    for props in merged.drop(columns="geometry").to_dict(orient="records"):
+        ExposureFeatureProperties.model_validate(
+            {k: v for k, v in props.items() if k != "aoi_name"}
+        )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    gpd.GeoDataFrame(merged, crs="EPSG:4326").to_file(
+        out_path, driver="GeoJSON", COORDINATE_PRECISION=coord_precision
+    )
+    return len(merged)
+
+
 def study_area_provenance_model_version(parquet_path: Path) -> str:
     """Read ``model_version`` VERBATIM from the parquet provenance (#1 / #3).
 
@@ -402,13 +576,9 @@ def _lut(cmap_name: str) -> list[tuple[int, int, int]]:
     ]
 
 
-def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
-    """Fuel legend matching fig2: tab10 over the codes present, grey non-fuel."""
+def _fuel_legend_for_codes(codes_present: list[int]) -> list[FuelLegendEntry]:
+    """Build the fuel legend (tab10 over *codes_present*, grey non-fuel) from a code set."""
     crosswalk = {int(e["effis_code"]): e for e in yaml.safe_load(_CROSSWALK.read_text())["entries"]}
-    with rasterio.open(fuel_cog_path) as src:
-        band = src.read(1)
-        nodata = src.nodata if src.nodata is not None else 255
-    codes_present = sorted({int(c) for c in np.unique(band) if c not in (0, nodata)})
     cmap_base = plt.get_cmap("tab10", max(len(codes_present), 1))
     entries = [FuelLegendEntry(code=0, label="Non-fuel (0)", color=(204, 204, 204))]
     for i, code in enumerate(codes_present):
@@ -417,6 +587,28 @@ def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
         rgb = tuple(round(c * 255) for c in cmap_base(i)[:3])
         entries.append(FuelLegendEntry(code=code, label=label, color=rgb))  # type: ignore[arg-type]
     return entries
+
+
+def fuel_legend(fuel_cog_path: Path) -> list[FuelLegendEntry]:
+    """Fuel legend matching fig2: tab10 over the codes present, grey non-fuel."""
+    with rasterio.open(fuel_cog_path) as src:
+        band = src.read(1)
+        nodata = src.nodata if src.nodata is not None else 255
+    codes_present = sorted({int(c) for c in np.unique(band) if c not in (0, nodata)})
+    return _fuel_legend_for_codes(codes_present)
+
+
+def full_nffl_fuel_legend() -> list[FuelLegendEntry]:
+    """Fuel legend covering EVERY NFFL code in the crosswalk (codes 1..13).
+
+    The full-Iberia fuel COG carries a wider code set than the pilot tile, so the
+    thematic bundle's legend must cover all NFFL classes (else an Iberia pixel
+    with a code absent from the pilot legend would paint transparent). Built from
+    the crosswalk codes (non-negotiable #1: real NFFL labels, never invented).
+    """
+    crosswalk = yaml.safe_load(_CROSSWALK.read_text())["entries"]
+    codes = sorted({int(e["effis_code"]) for e in crosswalk})
+    return _fuel_legend_for_codes(codes)
 
 
 def build_input_ramps() -> list[InputRampSpec]:
@@ -442,6 +634,195 @@ def build_input_ramps() -> list[InputRampSpec]:
             )
         )
     return ramps
+
+
+def build_iberia_inputs(asset_base: str) -> list[InputRasterLayer]:
+    """Full-Iberia model-INPUT display COGs (fuel / slope / canopy) → descriptors.
+
+    The thematic pivot: each is a first-class layer at Iberia extent (no per-AOI
+    swap). The run-id is parsed from the published filename
+    (``<prefix>_iberia_3857_<run_id>.tif``); CRS is explicit EPSG:3857 (#2). The
+    fuel layer reuses the categorical ``fuel_legend``; slope / canopy reuse the
+    continuous ``input_ramps``. Relative model inputs, never a probability (#6).
+    """
+    layers: list[InputRasterLayer] = []
+    for kind, fname in _IBERIA_INPUT_COGS:
+        prefix = _INPUT_PREFIX[kind]
+        run_id = fname.replace(f"{prefix}_iberia_3857_", "").replace(".tif", "")
+        if not _RUN_ID_RE.match(run_id):
+            raise ValueError(f"Iberia input {fname!r}: filename lacks a canonical run-id")
+        layers.append(
+            InputRasterLayer(
+                kind=kind,  # type: ignore[arg-type]
+                href=f"{asset_base}/{fname}",
+                crs="EPSG:3857",
+                run_id=run_id,
+            )
+        )
+    return layers
+
+
+def build_firescope(asset_base: str) -> FirescopeLayer:
+    """FireScope relative-risk RANK reference COG → :class:`FirescopeLayer`.
+
+    Full-Iberia uint8 0–254 rank (nodata 255) on R2, painted with the magma LUT.
+    CC-BY-4.0 attribution is carried verbatim (non-negotiable #1) and the caption
+    keeps the honesty bar (#6): a relative RANK, not a probability or forecast.
+    """
+    run_id = _FIRESCOPE_COG.replace("firescope_iberia_3857_", "").replace(".tif", "")
+    if not _RUN_ID_RE.match(run_id):
+        raise ValueError(f"FireScope COG {_FIRESCOPE_COG!r}: filename lacks a canonical run-id")
+    return FirescopeLayer(
+        href=f"{asset_base}/{_FIRESCOPE_COG}",
+        crs="EPSG:3857",
+        run_id=run_id,
+        value_min=_FIRESCOPE_VALUE_MIN,
+        value_max=_FIRESCOPE_VALUE_MAX,
+        cmap=_FIRESCOPE_CMAP,
+        lut=_lut(_FIRESCOPE_CMAP),
+        attribution=_FIRESCOPE_ATTRIBUTION,
+        caption=_FIRESCOPE_CAPTION,
+    )
+
+
+def build_burn_history(asset_base: str, geojson_path: Path | None) -> BurnHistoryLayer:
+    """Iberia burn-history layer → :class:`BurnHistoryLayer`, styled by source.
+
+    Per-source vintage range + perimeter count are MEASURED from *geojson_path*
+    when available (a local copy of the published GeoJSON), so the legend is not
+    invented (non-negotiable #1); when it is absent, the script falls back to the
+    documented vintages (ICNF 1990–2025, EFFIS 2016–2025) and leaves the counts
+    at 0 with a ``# TODO(provenance)`` so the gap is surfaced, never fabricated.
+    """
+    run_id = _BURN_HISTORY_GEOJSON.replace("iberia_burn_history_", "").replace(".geojson", "")
+    if not _RUN_ID_RE.match(run_id):
+        raise ValueError(
+            f"burn-history {_BURN_HISTORY_GEOJSON!r}: filename lacks a canonical run-id"
+        )
+
+    measured: dict[str, tuple[int, int, int]] = {}
+    if geojson_path is not None and geojson_path.exists():
+        gdf = gpd.read_file(geojson_path)
+        for src in ("ICNF", "EFFIS"):
+            sub = gdf[gdf["source"] == src]
+            if len(sub) == 0:
+                continue
+            years = [int(y) for y in pd.Series(sub["vintage_year"]).dropna()]
+            measured[src] = (min(years), max(years), len(sub))
+
+    # Documented fallback vintages (only used when the GeoJSON is not local; the
+    # counts then stay 0 — surfaced as TODO(provenance), never invented).
+    fallback = {"ICNF": (1990, 2025, 0), "EFFIS": (2016, 2025, 0)}
+    sources: list[BurnHistorySourceStyle] = []
+    for src in ("ICNF", "EFFIS"):
+        vmin, vmax, n = measured.get(src, fallback[src])
+        if src not in measured:
+            print(f"  # TODO(provenance): burn-history {src} count not measured (not local)")
+        sources.append(
+            BurnHistorySourceStyle(
+                source=src,  # type: ignore[arg-type]
+                label=_BURN_HISTORY_LABELS[src],
+                color=_BURN_HISTORY_COLORS[src],
+                vintage_min=vmin,
+                vintage_max=vmax,
+                n_perimeters=n,
+            )
+        )
+    return BurnHistoryLayer(
+        href=f"{asset_base}/{_BURN_HISTORY_GEOJSON}",
+        crs="EPSG:4326",
+        run_id=run_id,
+        sources=sources,
+        caption=_BURN_HISTORY_CAPTION,
+    )
+
+
+def build_mosaics(
+    asset_base: str,
+    pilot_input_layers: list[InputRasterLayer],
+    study_areas: list[StudyAreaLayer],
+) -> list[MosaicLayer]:
+    """INTERIM raster mosaics (burn-scar + NBR-delta), each ONE toggle over all tiles.
+
+    Burn-scar tiles are the published per-AOI display COGs (:data:`_BURN_SCAR_MOSAIC_TILES`,
+    pilot + 4 study areas). NBR-delta tiles reuse the EXISTING per-AOI hrefs already
+    in the bundle — the pilot ΔNBR COG plus each study area's ``nbr_delta`` input
+    layer — so nothing is re-warped or fabricated (non-negotiable #1). The thematic
+    pivot: shown all at once, no per-AOI swap.
+    """
+    # Burn-scar mosaic.
+    bs_tiles: list[MosaicTile] = []
+    for aoi_name, fname in _BURN_SCAR_MOSAIC_TILES:
+        # run-id is the trailing canonical stamp regardless of the aoi token.
+        run_id = fname.replace(".tif", "").split("_")[-1]
+        if not _RUN_ID_RE.match(run_id):
+            raise ValueError(f"burn-scar tile {fname!r}: filename lacks a canonical run-id")
+        bs_tiles.append(
+            MosaicTile(
+                aoi_name=aoi_name,
+                href=f"{asset_base}/{fname}",
+                crs="EPSG:3857",
+                run_id=run_id,
+            )
+        )
+
+    # NBR-delta mosaic: pilot tile + each study area's nbr_delta input layer.
+    nbr_run = _NBR_DELTA_PILOT_COG.replace("nbr_delta_pilot_3857_", "").replace(".tif", "")
+    if not _RUN_ID_RE.match(nbr_run):
+        raise ValueError(f"NBR pilot tile {_NBR_DELTA_PILOT_COG!r}: filename lacks a run-id")
+    nbr_tiles: list[MosaicTile] = [
+        MosaicTile(
+            aoi_name="pilot",
+            href=f"{asset_base}/{_NBR_DELTA_PILOT_COG}",
+            crs="EPSG:3857",
+            run_id=nbr_run,
+        )
+    ]
+    # Pilot's own nbr_delta input layer (if present) takes precedence — same href,
+    # but keeps the bundle self-consistent if the pilot run stamp ever changes.
+    for layer in pilot_input_layers:
+        if layer.kind == "nbr_delta":
+            nbr_tiles = [
+                MosaicTile(aoi_name="pilot", href=layer.href, crs=layer.crs, run_id=layer.run_id)
+            ]
+            break
+    for sa in study_areas:
+        for layer in sa.input_layers:
+            if layer.kind == "nbr_delta":
+                nbr_tiles.append(
+                    MosaicTile(
+                        aoi_name=sa.name, href=layer.href, crs=layer.crs, run_id=layer.run_id
+                    )
+                )
+                break
+
+    return [
+        MosaicLayer(kind="burn_scar", tiles=bs_tiles, caption=_BURN_SCAR_MOSAIC_CAPTION),
+        MosaicLayer(kind="nbr_delta", tiles=nbr_tiles, caption=_NBR_DELTA_MOSAIC_CAPTION),
+    ]
+
+
+def build_provenance_summary(
+    parquet_path: Path, metrics: dict[str, Any], fwi_overlay: FwiOverlay | None
+) -> ProvenanceSummary:
+    """Temporal methodology summary from the scored-parquet provenance + metrics.
+
+    Powers the process panel ("the process as a deliverable, framed temporally").
+    Everything is read from the scored run's provenance and the WU-7 metrics —
+    nothing invented (non-negotiable #1 / #3).
+    """
+    df = pd.read_parquet(parquet_path, columns=["provenance"])
+    prov = json.loads(str(df["provenance"].iloc[0]))
+    return ProvenanceSummary(
+        run_id=str(prov["run_id"]),
+        model_version=str(prov["model_version"]),
+        code_commit_sha=str(prov["code_commit_sha"])[:40],
+        window_start=str(prov["window_start"]),
+        window_end=str(prov["window_end"]),
+        validation_years=[int(y) for y in metrics["validation_years"]],
+        s2_item_count=len(prov.get("s2_item_ids", [])),
+        fwi_valid_date=fwi_overlay.valid_date if fwi_overlay is not None else None,
+    )
 
 
 def _input_cog_run(prefix: str, aoi: str) -> Path | None:
@@ -560,6 +941,29 @@ def build_fwi_overlay(manifest_path: Path, asset_base: str) -> FwiOverlay | None
     return overlay
 
 
+def _latest_study_area_parquet(name: str) -> Path | None:
+    """Latest canonical ``exposure_<name>_<run_id>.parquet`` (or None)."""
+    cands = sorted(_PARQUET_DIR.glob(f"exposure_{name}_*.parquet"))
+    cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"exposure_{name}_", ""))]
+    return cands[-1] if cands else None
+
+
+def resolve_aoi_parquets(pilot_parquet: Path) -> list[tuple[str, Path]]:
+    """Ordered ``[(aoi_name, parquet)]`` for the pilot + every study area present.
+
+    The pilot is first (``aoi_name == "pilot"``), then each study area in
+    :data:`_STUDY_AREAS` display order that has a scored parquet. This is the
+    pool the merged full-extent (Iberia) layer concatenates and the
+    cross-AOI ``impact_severity`` normaliser ranges over.
+    """
+    pairs: list[tuple[str, Path]] = [("pilot", pilot_parquet)]
+    for name, _label in _STUDY_AREAS:
+        pq = _latest_study_area_parquet(name)
+        if pq is not None:
+            pairs.append((name, pq))
+    return pairs
+
+
 def build_study_areas(
     *,
     site_data: Path,
@@ -580,12 +984,10 @@ def build_study_areas(
         return []
     layers: list[StudyAreaLayer] = []
     for name, label in _STUDY_AREAS:
-        cands = sorted(_PARQUET_DIR.glob(f"exposure_{name}_*.parquet"))
-        cands = [c for c in cands if _RUN_ID_RE.match(c.stem.replace(f"exposure_{name}_", ""))]
-        if not cands:
+        parquet = _latest_study_area_parquet(name)
+        if parquet is None:
             print(f"study area {name!r}: no exposure parquet — skipped")
             continue
-        parquet = cands[-1]
         run_id = parquet.stem.replace(f"exposure_{name}_", "")
         model_version = study_area_provenance_model_version(parquet)
 
@@ -745,6 +1147,42 @@ def main() -> int:
     )
     print(f"study areas: {len(study_areas)} wired ({', '.join(s.name for s in study_areas)})")
 
+    # MERGED full-extent (Iberia) exposure layer — the OUTPUT theme. Concatenates
+    # the pilot + every study area, each row carrying aoi_name + the cross-AOI
+    # impact_severity (score × criticality, normalised across the pooled assets of
+    # all AOIs → global max 1). Skipped in smoke (only the smoke tile is scored).
+    # Written to release_dir (R2) when it exceeds the committed-file cap — the
+    # repo's large-geodata pattern; committed under docs/app/data otherwise.
+    merged_href: str | None = None
+    merged_n = 0
+    if not smoke:
+        aoi_parquets = resolve_aoi_parquets(exposure_pq)
+        sev_max = pooled_impact_severity_max([p for _name, p in aoi_parquets])
+        merged_fname = f"exposure_assets_all_iberia_{run_id}.geojson"
+        merged_staged = release_dir / merged_fname
+        merged_n = export_merged_iberia_geojson(
+            aoi_parquets,
+            merged_staged,
+            global_sev_max=sev_max,
+            coord_precision=_STUDY_AREA_COORD_PRECISION,
+        )
+        merged_kb = merged_staged.stat().st_size / 1024
+        if merged_kb < _COMMITTED_FILE_CAP_KB:
+            (site_data / merged_fname).write_bytes(merged_staged.read_bytes())
+            merged_staged.unlink()
+            merged_href = f"app/data/{merged_fname}"
+            print(
+                f"merged Iberia exposure: {merged_n} assets across {len(aoi_parquets)} AOIs "
+                f"(sev_max {sev_max:.4f}) → committed ({merged_kb:.0f} kB)"
+            )
+        else:
+            merged_href = f"{asset_base}/{merged_fname}"
+            print(
+                f"merged Iberia exposure: {merged_n} assets across {len(aoi_parquets)} AOIs "
+                f"(sev_max {sev_max:.4f}) → R2 ({merged_kb:.0f} kB, "
+                f"over {_COMMITTED_FILE_CAP_KB} kB cap)"
+            )
+
     # Pilot model-INPUT display COGs: canopy / slope / NBR-delta (the pilot FUEL
     # input keeps its dedicated artifacts["fuel_class"] entry, so it is NOT
     # duplicated here). Warped to EPSG:3857 for R2 like the study-area inputs.
@@ -761,24 +1199,73 @@ def main() -> int:
     input_ramps = [] if smoke else build_input_ramps()
     print(f"pilot input layers: {len(pilot_input_layers)} wired")
 
+    # FWI overlay built once so it can feed BOTH the style bundle and the
+    # provenance summary's fwi_valid_date.
+    fwi_overlay = build_fwi_overlay(_FWI_MANIFEST, asset_base)
+
+    # Thematic full-Iberia layers (the pivot): first-class layers at Iberia
+    # extent, no per-AOI swap. Skipped in smoke (the smoke tile has no Iberia
+    # COGs). A local copy of the published burn-history GeoJSON lets the legend
+    # measure per-source counts/vintages; absent, it falls back to documented
+    # vintages (see build_burn_history).
+    iberia_inputs = [] if smoke else build_iberia_inputs(asset_base)
+    firescope = None if smoke else build_firescope(asset_base)
+    bh_local = _GEOBROWSER_DIR / _BURN_HISTORY_GEOJSON
+    burn_history = None if smoke else build_burn_history(asset_base, bh_local)
+    mosaics = [] if smoke else build_mosaics(asset_base, pilot_input_layers, study_areas)
+    provenance_summary = (
+        None if smoke else build_provenance_summary(exposure_pq, metrics, fwi_overlay)
+    )
+    print(
+        f"thematic Iberia layers: {len(iberia_inputs)} inputs, "
+        f"firescope={'yes' if firescope else 'no'}, "
+        f"burn_history={'yes' if burn_history else 'no'}"
+    )
+
+    # The thematic bundle's fuel legend must cover EVERY NFFL code (the full-Iberia
+    # fuel COG carries a wider code set than the pilot tile); the smoke bundle
+    # keeps the pilot-tile legend.
+    fuel_legend_entries = fuel_legend(fuel_cog) if smoke else full_nffl_fuel_legend()
+
+    artifacts: dict[str, GeobrowserArtifact] = {
+        "exposure_assets": GeobrowserArtifact(
+            href=f"app/data/exposure_assets_{run_id}.geojson",
+            crs="EPSG:4326",
+            run_id=run_id,
+            role="display",
+            description=(
+                "Scored assets (subset of the ScoredAsset columns; authoritative "
+                "GeoParquet with full per-row provenance is the STAC asset)"
+            ),
+        ),
+    }
+    # Merged full-extent (Iberia) exposure layer — the OUTPUT theme. Coloured by
+    # the cross-AOI impact_severity (score × criticality, normalised across the
+    # pooled assets of all AOIs). Present only for the real (non-smoke) bundle.
+    if merged_href is not None:
+        artifacts["exposure_assets_iberia"] = GeobrowserArtifact(
+            href=merged_href,
+            crs="EPSG:4326",
+            run_id=run_id,
+            role="display",
+            description=(
+                f"Merged full-extent exposure assets across {merged_n} rows / all "
+                "study areas; coloured by impact_severity = within-AOI exposure × "
+                "asset criticality, normalised across study areas (NOT an absolute "
+                "cross-region risk or probability). Per-AOI exposure_rank stays "
+                "AOI-relative."
+            ),
+        )
+
     style = GeobrowserStyleData(
         generated_by=f"scripts/15_make_geobrowser_data.py at {code_commit_sha(cwd=_ROOT)}",
         code_commit_sha=code_commit_sha(cwd=_ROOT),
         viridis_lut=_lut("viridis"),
         ylorrd_lut=_lut("YlOrRd"),
-        fuel_legend=fuel_legend(fuel_cog),
+        fuel_legend=fuel_legend_entries,
         validation=validation_headline(run_id, metrics),
         artifacts={
-            "exposure_assets": GeobrowserArtifact(
-                href=f"app/data/exposure_assets_{run_id}.geojson",
-                crs="EPSG:4326",
-                run_id=run_id,
-                role="display",
-                description=(
-                    "Scored assets (subset of the ScoredAsset columns; authoritative "
-                    "GeoParquet with full per-row provenance is the STAC asset)"
-                ),
-            ),
+            **artifacts,
             "aoi": GeobrowserArtifact(
                 href="app/data/aoi.geojson",
                 crs="EPSG:4326",
@@ -823,7 +1310,12 @@ def main() -> int:
         study_areas=study_areas,
         pilot_input_layers=pilot_input_layers,
         input_ramps=input_ramps,
-        fwi_overlay=build_fwi_overlay(_FWI_MANIFEST, asset_base),
+        fwi_overlay=fwi_overlay,
+        iberia_inputs=iberia_inputs,
+        firescope=firescope,
+        burn_history=burn_history,
+        mosaics=mosaics,
+        provenance_summary=provenance_summary,
     )
     style_path = site_data / "style_data.json"
     style_path.write_text(style.model_dump_json(indent=1) + "\n")

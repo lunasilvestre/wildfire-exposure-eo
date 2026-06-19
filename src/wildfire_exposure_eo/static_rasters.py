@@ -56,7 +56,12 @@ _EFFIS_URL = (
     "https://forest-fire.emergency.copernicus.eu"
     "/effis/applications/data-and-services/FuelMap_LAEA.zip"
 )
-_EFFIS_TIFF_INSIDE_ZIP = "FuelMap_LAEA.tif"
+# In-zip GeoTIFF name. EFFIS renamed it upstream from "FuelMap_LAEA.tif" to
+# "FuelMap2000_NFFL_LAEA.tif" (verified 2026-06-18 against the live download's
+# zip namelist). The stale constant made a fresh fetch raise from
+# _extract_from_zip (no name matched), so the EFFIS fuel map could not be
+# re-extracted on a clean cache (task #13).
+_EFFIS_TIFF_INSIDE_ZIP = "FuelMap2000_NFFL_LAEA.tif"
 _EFFIS_LICENSE = "Free, no auth (Copernicus open data)"
 _EFFIS_ATTRIBUTION = "EFFIS / JRC, European Commission"
 
