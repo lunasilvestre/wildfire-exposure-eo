@@ -278,8 +278,12 @@ class BurnHistorySourceStyle(BaseModel):
     source: Literal["ICNF", "EFFIS"]
     #: Human label shown in the legend (e.g. "ICNF (Portugal, fine)").
     label: str = Field(..., min_length=1)
-    #: Fill / outline colour for this source (distinct per source).
+    #: Fill (and legend swatch) colour for this source (distinct per source).
     color: Rgb
+    #: Outline / line colour for this source. A darker companion to ``color`` so
+    #: the perimeter edge reads on both the light OSM and the satellite basemap.
+    #: Optional for back-compat (older bundles reuse ``color`` for the outline).
+    line_color: Rgb | None = None
     #: Earliest vintage year present for this source (measured, not invented).
     vintage_min: int = Field(..., ge=1900, le=2100)
     #: Latest vintage year present for this source.

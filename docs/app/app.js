@@ -1266,11 +1266,16 @@ async function main() {
    * Continuous kinds (canopy / slope / NBR-delta) paint a value→colour ramp
    * (the LUT + display range come from style.input_ramps, measured from the
    * COGs — not invented); the categorical FUEL input reuses the fuel colour
-   * function (per-code tab10 + grey non-fuel), registered per-href. nodata
-   * (uint8 255 for canopy, NaN for slope / NBR-delta, the COG nodata tag for
-   * fuel) paints transparent so the basemap shows through. ----------------- */
+   * function (per-code tab10), registered per-href. nodata (uint8 255 for the
+   * canopy + north-up slope re-warp, NaN for NBR-delta, the COG nodata tag —
+   * which is 0 for the EFFIS fuel COG) paints transparent so the basemap shows
+   * through. ----------------------------------------------------------------- */
   const inputRamps = new Map((style.input_ramps || []).map((r) => [r.kind, r]));
-  const INPUT_OPACITY = 0.8;
+  /* Consistent ~0.85 raster opacity across the COG overlays (fuel / slope /
+   * canopy here; FireScope below) so the basemap reads through uniformly (live
+   * feedback). Baked into the colour-function alpha — the raster layer's
+   * raster-opacity stays 1 so per-pixel transparent nodata is preserved. */
+  const INPUT_OPACITY = 0.85;
   /* Track which COG hrefs already have a registered colour function so a lazily
    * added layer never double-registers (idempotent across all COG layers). */
   const inputColorRegistered = new Set();
@@ -1279,13 +1284,22 @@ async function main() {
     if (inputColorRegistered.has(href)) return;
     inputColorRegistered.add(href);
     if (kind === "fuel_class") {
-      /* Per-code tab10 fill, grey non-fuel, transparent nodata / unknown / 255. */
+      /* Per-code tab10 fill, transparent nodata / unknown. The full-Iberia EFFIS
+       * fuel COG tags nodata = 0 (ocean / outside the grid), so code 0 paints
+       * transparent — never a filled ocean blanket. 255 is also treated as
+       * nodata. Painted at ~0.85 (live feedback) so the basemap reads through. */
+      const a = Math.round(255 * INPUT_OPACITY);
       MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
         const code = pixel[0];
-        if (code === metadata.noData || code === 255 || fuelColor.get(code) === undefined) {
+        if (
+          code === metadata.noData ||
+          code === 0 ||
+          code === 255 ||
+          fuelColor.get(code) === undefined
+        ) {
           color.set([0, 0, 0, 0]);
         } else {
-          color.set([...fuelColor.get(code), 255]);
+          color.set([...fuelColor.get(code), a]);
         }
       });
       return;
@@ -1293,12 +1307,17 @@ async function main() {
     const ramp = inputRamps.get(kind);
     if (!ramp || !ramp.lut) return;
     const span = Math.max(1e-6, ramp.value_max - ramp.value_min);
+    /* uint8 inputs (canopy + the north-up slope re-warp) carry nodata 255 over
+     * ocean / outside the grid; that sentinel must paint transparent so the
+     * basemap shows through (never a filled ocean blanket). ΔNBR is float (NaN
+     * nodata) with values near 0, so the extra 255 guard is harmless there. */
+    const u8Nodata = kind === "canopy_height" || kind === "slope";
     MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
       const val = pixel[0];
-      /* Transparent nodata: NaN (slope / NBR-delta carry a NaN tag) or the
-       * COG's nodata sentinel (uint8 255 for canopy). Any in-range value paints
-       * the ramp colour at the input opacity. */
-      if (!Number.isFinite(val) || val === metadata.noData) {
+      /* Transparent nodata: NaN (ΔNBR carries a NaN tag), the COG's nodata
+       * sentinel, or the uint8 255 sentinel for canopy / slope. Any in-range
+       * value paints the ramp colour at the input opacity. */
+      if (!Number.isFinite(val) || val === metadata.noData || (u8Nodata && val === 255)) {
         color.set([0, 0, 0, 0]);
       } else {
         const t = Math.max(0, Math.min(1, (val - ramp.value_min) / span));
@@ -1665,6 +1684,12 @@ async function main() {
   const burnHistory = style.burn_history || null;
   let burnHistoryAdded = false;
   const bhColor = new Map((burnHistory ? burnHistory.sources : []).map((s) => [s.source, s.color]));
+  /* Outline colour: a darker companion to the fill (style.line_color) so the
+   * perimeter edge reads on BOTH the light OSM and the satellite basemap. Falls
+   * back to the fill colour for older bundles without a per-source line_color. */
+  const bhLineColor = new Map(
+    (burnHistory ? burnHistory.sources : []).map((s) => [s.source, s.line_color || s.color]),
+  );
   const bhLabel = new Map((burnHistory ? burnHistory.sources : []).map((s) => [s.source, s.label]));
   async function addBurnHistory() {
     if (burnHistoryAdded || !burnHistory) return false;
@@ -1672,15 +1697,21 @@ async function main() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching Iberia burn history from Cloudflare R2`);
     const gj = await resp.json();
     map.addSource("burnhistory", { type: "geojson", data: gj });
-    const icnfRgb = rgb(bhColor.get("ICNF") || [179, 0, 0]);
-    const effisRgb = rgb(bhColor.get("EFFIS") || [230, 159, 0]);
+    /* ICNF (Portugal) stays RED; EFFIS (Spain) is PURPLE (the earlier amber was
+     * invisible on both basemaps — live feedback). Fill = the lighter source
+     * colour, outline = the darker line_color, so each perimeter reads on the
+     * light OSM and the satellite basemap alike. */
+    const icnfFill = rgb(bhColor.get("ICNF") || [179, 0, 0]);
+    const icnfLine = rgb(bhLineColor.get("ICNF") || [179, 0, 0]);
+    const effisFill = rgb(bhColor.get("EFFIS") || [136, 86, 167]);
+    const effisLine = rgb(bhLineColor.get("EFFIS") || [94, 60, 153]);
     /* Two source-filtered fill+line pairs so the PT(ICNF)/ES(EFFIS) asymmetry
      * reads by colour. Inserted under "aoi" so vectors/asset glyphs stay on top. */
     map.addLayer(
       {
         id: "burnhistory-icnf-fill", type: "fill", source: "burnhistory",
         filter: ["==", ["get", "source"], "ICNF"],
-        paint: { "fill-color": icnfRgb, "fill-opacity": 0.22, "fill-outline-color": icnfRgb },
+        paint: { "fill-color": icnfFill, "fill-opacity": 0.22, "fill-outline-color": icnfLine },
       },
       underAoi(),
     );
@@ -1688,7 +1719,7 @@ async function main() {
       {
         id: "burnhistory-effis-fill", type: "fill", source: "burnhistory",
         filter: ["==", ["get", "source"], "EFFIS"],
-        paint: { "fill-color": effisRgb, "fill-opacity": 0.22, "fill-outline-color": effisRgb },
+        paint: { "fill-color": effisFill, "fill-opacity": 0.22, "fill-outline-color": effisLine },
       },
       underAoi(),
     );

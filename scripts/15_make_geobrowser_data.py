@@ -227,16 +227,20 @@ _INPUT_PREFIX = {
 #: the source COGs are absent locally (they live on R2); a full regen WITH the
 #: local source COGs would re-warp + re-measure to the same names. Non-negotiable
 #: #1: these exact filenames are the published artefacts, never fabricated.
+#: Slope is the north-up, water-masked uint8 (nodata 255) re-warp; it replaced an
+#: earlier tilted 3 GB float COG that rendered rotated in-browser (live feedback).
 _IBERIA_INPUT_COGS: tuple[tuple[str, str], ...] = (
     ("fuel_class", "fuel_class_iberia_3857_20260618T123103Z.tif"),
-    ("slope", "slope_iberia_3857_20260618T124721Z.tif"),
+    ("slope", "slope_iberia_3857_u8_20260620T183630Z.tif"),
     ("canopy_height", "canopy_height_iberia_3857_20260618T124520Z.tif"),
 )
 
 #: FireScope relative wildfire-risk RANK reference COG (full Iberia, R2). uint8
 #: 0–254 (nodata 255). CC-BY-4.0 (INSAIT-Institute + ETH, arXiv:2511.17171) —
-#: attribution REQUIRED in the caption (non-negotiable #1).
-_FIRESCOPE_COG = "firescope_iberia_3857_20260618T122124Z.tif"
+#: attribution REQUIRED in the caption (non-negotiable #1). The ``_lite`` COG is
+#: the smaller (~124 MB) browser-renderable re-export of the 1.2 GB original,
+#: which did not render in-browser (live feedback).
+_FIRESCOPE_COG = "firescope_iberia_lite_20260620T181702Z.tif"
 _FIRESCOPE_VALUE_MIN = 0.0
 _FIRESCOPE_VALUE_MAX = 254.0
 _FIRESCOPE_CMAP = "magma"
@@ -253,10 +257,18 @@ _FIRESCOPE_CAPTION = (
 #: history, never a forecast (non-negotiable #6). The per-source vintages +
 #: counts are MEASURED from the GeoJSON at build time (see build_burn_history).
 _BURN_HISTORY_GEOJSON = "iberia_burn_history_20260618T131535Z.geojson"
-#: Distinct per-source display colours (ICNF PT vs EFFIS ES).
+#: Distinct per-source FILL/swatch colours (ICNF PT vs EFFIS ES). EFFIS is purple
+#: (not the earlier amber, which was invisible on both basemaps — live feedback);
+#: ICNF stays red.
 _BURN_HISTORY_COLORS: dict[str, tuple[int, int, int]] = {
     "ICNF": (179, 0, 0),  # deep red (Portugal, fine)
-    "EFFIS": (230, 159, 0),  # amber (Spain, coarse)
+    "EFFIS": (136, 86, 167),  # purple #8856a7 (Spain, coarse) — visible on both basemaps
+}
+#: Per-source OUTLINE/line colours: a darker companion to the fill so perimeter
+#: edges read on both the light OSM and the satellite basemap.
+_BURN_HISTORY_LINE_COLORS: dict[str, tuple[int, int, int]] = {
+    "ICNF": (179, 0, 0),  # red outline, matching the fill
+    "EFFIS": (94, 60, 153),  # purple #5e3c99 outline
 }
 _BURN_HISTORY_LABELS: dict[str, str] = {
     "ICNF": "ICNF (Portugal — fine, 1990–2025)",
@@ -281,12 +293,17 @@ _BURN_SCAR_MOSAIC_TILES: tuple[tuple[str, str], ...] = (
     ("peneda_geres", "burn_scar_peneda_geres_3857_20260618T091008Z.tif"),
     ("monchique", "burn_scar_monchique_3857_20260618T092543Z.tif"),
 )
+#: The burn-scar mosaic is TEMPORARILY WITHDRAWN from the live site while the
+#: Prithvi inference is re-run to remove a ViT-tiling grid artefact (live
+#: feedback). The wiring + tiles are kept so it returns with a one-line caption
+#: swap once the de-gridded composite is published.
 _BURN_SCAR_MOSAIC_CAPTION = (
-    "Prithvi-EO-2.0 burn-scar inference (de-grid p85 composite) across the pilot + "
-    "4 study areas, all tiles shown at once. Recent-scar DETECTION — spectral "
-    "signatures of fires that already happened — NOT a forecast or ignition "
-    "prediction (non-negotiable #6). A relative model score, not a calibrated "
-    "probability. Streamed from Cloudflare R2 (loads on toggle)."
+    "Burn-scar mosaic temporarily withdrawn — de-grid fix in progress. The "
+    "Prithvi-EO-2.0 burn-scar inference is being re-run to remove a ViT-tiling "
+    "grid artefact; it will return once the de-gridded composite is published. "
+    "Recent-scar DETECTION — spectral signatures of fires that already happened "
+    "— NOT a forecast or ignition prediction (non-negotiable #6). A relative "
+    "model score, not a calibrated probability."
 )
 
 #: INTERIM NBR-delta mosaic — the pilot tile (the 4 study-area NBR tiles are
@@ -305,6 +322,24 @@ _NBR_DELTA_MOSAIC_CAPTION = (
 #: prefix and the run-id (e.g. ``burn_scar_wu10multi_p85_<run_id>.tif``); those
 #: must never be auto-selected for the published site.
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
+
+#: The trailing canonical run-id stamp anywhere at the end of a filename. Robust
+#: to descriptive infix tokens between the prefix and the stamp (e.g. the
+#: ``_u8`` in ``slope_iberia_3857_u8_<run_id>.tif`` or the ``lite`` in
+#: ``firescope_iberia_lite_<run_id>.tif``), which plain prefix-stripping mangles.
+_TRAILING_RUN_ID_RE = re.compile(r"(\d{8}T\d{6}Z)\.[A-Za-z0-9]+$")
+
+
+def _trailing_run_id(fname: str) -> str:
+    """Extract the canonical trailing run-id stamp from a published filename.
+
+    Raises ``ValueError`` when the filename does not end in a canonical
+    ``YYYYMMDDTHHMMSSZ`` stamp (non-negotiable #1: no fabricated run-ids).
+    """
+    m = _TRAILING_RUN_ID_RE.search(fname)
+    if not m:
+        raise ValueError(f"{fname!r}: filename lacks a canonical trailing run-id")
+    return m.group(1)
 
 
 def _latest(prefix: str, folder: Path, suffix: str, *, smoke: bool) -> Path:
@@ -647,10 +682,9 @@ def build_iberia_inputs(asset_base: str) -> list[InputRasterLayer]:
     """
     layers: list[InputRasterLayer] = []
     for kind, fname in _IBERIA_INPUT_COGS:
-        prefix = _INPUT_PREFIX[kind]
-        run_id = fname.replace(f"{prefix}_iberia_3857_", "").replace(".tif", "")
-        if not _RUN_ID_RE.match(run_id):
-            raise ValueError(f"Iberia input {fname!r}: filename lacks a canonical run-id")
+        # Trailing-stamp extraction tolerates descriptive infix tokens such as the
+        # ``_u8`` in the north-up uint8 slope re-warp.
+        run_id = _trailing_run_id(fname)
         layers.append(
             InputRasterLayer(
                 kind=kind,  # type: ignore[arg-type]
@@ -669,9 +703,7 @@ def build_firescope(asset_base: str) -> FirescopeLayer:
     CC-BY-4.0 attribution is carried verbatim (non-negotiable #1) and the caption
     keeps the honesty bar (#6): a relative RANK, not a probability or forecast.
     """
-    run_id = _FIRESCOPE_COG.replace("firescope_iberia_3857_", "").replace(".tif", "")
-    if not _RUN_ID_RE.match(run_id):
-        raise ValueError(f"FireScope COG {_FIRESCOPE_COG!r}: filename lacks a canonical run-id")
+    run_id = _trailing_run_id(_FIRESCOPE_COG)
     return FirescopeLayer(
         href=f"{asset_base}/{_FIRESCOPE_COG}",
         crs="EPSG:3857",
@@ -723,6 +755,7 @@ def build_burn_history(asset_base: str, geojson_path: Path | None) -> BurnHistor
                 source=src,  # type: ignore[arg-type]
                 label=_BURN_HISTORY_LABELS[src],
                 color=_BURN_HISTORY_COLORS[src],
+                line_color=_BURN_HISTORY_LINE_COLORS[src],
                 vintage_min=vmin,
                 vintage_max=vmax,
                 n_perimeters=n,
