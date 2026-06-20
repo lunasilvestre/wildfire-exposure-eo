@@ -51,7 +51,12 @@ inference:
   # Sliding-window size matches the 512x512 chips the fine-tune was trained
   # on; stride < size so terratorch's tiled_inference blends overlaps.
   tile_size: 512
-  tile_stride: 448
+  # WU-11 de-grid FIX: stride <= tile/2 so terratorch's cosine blend window spans
+  # the whole crop and divides out the per-crop ViT center-bias tent WITHIN each
+  # scene. The prior 448 stride left only 64px overlap (56px blend ramp) — the
+  # tent sat in the flat-weight 384px core and survived stitching (jitter+p85
+  # only halved it: autocorr 0.467->0.204). At 256 the blend reaches the tent.
+  tile_stride: 256
   # De-grid (WU-10). terratorch tiled_inference anchors a fixed axis-aligned
   # crop lattice (origin 0,0; stride tile_stride) on every scene. Each
   # Prithvi/ViT 512px crop has a tent-shaped class-1 response (~5x core/border)
