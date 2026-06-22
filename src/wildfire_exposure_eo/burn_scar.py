@@ -350,11 +350,11 @@ def query_recent_s2(
         collections=[S2_COLLECTION],
         intersects=mapping(aoi),
         datetime=f"{start.isoformat()}/{end.isoformat()}",
-        query={"eo:cloud_cover": {"lte": max_cloud_cover}},
     )
-    # PC's STAC API intermittently times out on large queries; retry the (lazy)
-    # item fetch with backoff so a transient timeout/5xx doesn't abort a long
-    # inference run before it even starts (observed 2026-06-22 on the pilot).
+    # Cloud cover is filtered CLIENT-SIDE (below), NOT via the STAC `query`
+    # extension: PC's server-side property filter times out on 12-month polygon
+    # searches (observed 2026-06-22/23 — minutes of timeouts), while the
+    # unfiltered search returns in ~1s. Retry the lazy fetch for transient 5xx.
     last_exc: Exception | None = None
     raw: list[pystac.Item] = []
     for attempt in range(1, 4):
@@ -369,10 +369,10 @@ def query_recent_s2(
                 collections=[S2_COLLECTION],
                 intersects=mapping(aoi),
                 datetime=f"{start.isoformat()}/{end.isoformat()}",
-                query={"eo:cloud_cover": {"lte": max_cloud_cover}},
             )
     else:
         raise RuntimeError("S2 STAC search failed after 3 attempts") from last_exc
+    raw = [it for it in raw if it.properties.get("eo:cloud_cover", 100.0) <= max_cloud_cover]
     items = sorted(raw, key=lambda it: (_item_datetime(it), it.id))
     logger.info(
         "[burn-scar] %s %s..%s cloud<=%d%%: %d candidate item(s)",
