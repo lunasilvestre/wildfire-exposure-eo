@@ -57,6 +57,9 @@ footer .caption, #validation-section .caption { margin-left: 0; }
 
 .layer-row { margin: 8px 0; }
 .layer-row label { font-weight: 600; cursor: pointer; }
+/* A temporarily-withdrawn layer toggle: dimmed and not interactive. */
+.layer-row label.disabled { cursor: not-allowed; opacity: 0.55; }
+.tag.withdrawn { background: #b5471f; color: #fff; }
 
 /* Thematic TOC groups: a labelled fieldset per pipeline stage (Inputs, Interim,
    Output, Validation, Operational). Light border + uppercase legend so the

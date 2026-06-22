@@ -6902,9 +6902,9 @@
   },
   {
    "kind": "slope",
-   "href": "https://wildfire.cheias.pt/slope_iberia_3857_20260618T124721Z.tif",
+   "href": "https://wildfire.cheias.pt/slope_iberia_3857_u8_20260620T183630Z.tif",
    "crs": "EPSG:3857",
-   "run_id": "20260618T124721Z"
+   "run_id": "20260620T183630Z"
   },
   {
    "kind": "canopy_height",
@@ -6914,9 +6914,9 @@
   }
  ],
  "firescope": {
-  "href": "https://wildfire.cheias.pt/firescope_iberia_3857_20260618T122124Z.tif",
+  "href": "https://wildfire.cheias.pt/firescope_iberia_lite_20260620T181702Z.tif",
   "crs": "EPSG:3857",
-  "run_id": "20260618T122124Z",
+  "run_id": "20260620T181702Z",
   "value_min": 0.0,
   "value_max": 254.0,
   "cmap": "magma",
@@ -8218,6 +8218,11 @@
      0,
      0
     ],
+    "line_color": [
+     179,
+     0,
+     0
+    ],
     "vintage_min": 1990,
     "vintage_max": 2025,
     "n_perimeters": 25117
@@ -8226,9 +8231,14 @@
     "source": "EFFIS",
     "label": "EFFIS (Spain — coarse, 2016–2025)",
     "color": [
-     230,
-     159,
-     0
+     136,
+     86,
+     167
+    ],
+    "line_color": [
+     94,
+     60,
+     153
     ],
     "vintage_min": 2016,
     "vintage_max": 2025,
@@ -8272,7 +8282,7 @@
      "run_id": "20260618T092543Z"
     }
    ],
-   "caption": "Prithvi-EO-2.0 burn-scar inference (de-grid p85 composite) across the pilot + 4 study areas, all tiles shown at once. Recent-scar DETECTION — spectral signatures of fires that already happened — NOT a forecast or ignition prediction (non-negotiable #6). A relative model score, not a calibrated probability. Streamed from Cloudflare R2 (loads on toggle)."
+   "caption": "Burn-scar mosaic temporarily withdrawn — de-grid fix in progress. The Prithvi-EO-2.0 burn-scar inference is being re-run to remove a ViT-tiling grid artefact; it will return once the de-gridded composite is published. Recent-scar DETECTION — spectral signatures of fires that already happened — NOT a forecast or ignition prediction (non-negotiable #6). A relative model score, not a calibrated probability."
   },
   {
    "kind": "nbr_delta",
