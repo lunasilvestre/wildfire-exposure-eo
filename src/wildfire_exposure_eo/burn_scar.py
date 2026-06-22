@@ -352,7 +352,28 @@ def query_recent_s2(
         datetime=f"{start.isoformat()}/{end.isoformat()}",
         query={"eo:cloud_cover": {"lte": max_cloud_cover}},
     )
-    items = sorted(search.items(), key=lambda it: (_item_datetime(it), it.id))
+    # PC's STAC API intermittently times out on large queries; retry the (lazy)
+    # item fetch with backoff so a transient timeout/5xx doesn't abort a long
+    # inference run before it even starts (observed 2026-06-22 on the pilot).
+    last_exc: Exception | None = None
+    raw: list[pystac.Item] = []
+    for attempt in range(1, 4):
+        try:
+            raw = list(search.items())
+            break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("[burn-scar] S2 search attempt %d/3 failed (%s); retrying", attempt, exc)
+            time.sleep(15 * attempt)
+            search = cli.search(
+                collections=[S2_COLLECTION],
+                intersects=mapping(aoi),
+                datetime=f"{start.isoformat()}/{end.isoformat()}",
+                query={"eo:cloud_cover": {"lte": max_cloud_cover}},
+            )
+    else:
+        raise RuntimeError("S2 STAC search failed after 3 attempts") from last_exc
+    items = sorted(raw, key=lambda it: (_item_datetime(it), it.id))
     logger.info(
         "[burn-scar] %s %s..%s cloud<=%d%%: %d candidate item(s)",
         S2_COLLECTION,
