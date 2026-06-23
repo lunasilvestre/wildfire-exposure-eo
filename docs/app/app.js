@@ -1193,19 +1193,18 @@ async function main() {
    * pilot COG). Its colour function is registered by registerInputColor below. */
   const fuelUrl = iberiaInputs.get("fuel_class") ? iberiaInputs.get("fuel_class").href : null;
 
-  /* Burn-scar display: value-driven alpha. The COG stays a continuous
-   * inference-score raster in [0, 1]; we only change how it is painted.
-   * Scores below BURN_ALPHA_FLOOR are fully transparent (kills the low-score
-   * "wash"); at/above it the YlOrRd hue is kept and opacity =
-   * BASE + (1-BASE)*t^GAMMA with t = (p-floor)/(1-floor). The BASE floor-opacity
-   * and GAMMA<1 lift the 0.25-0.5 band so the full recent-scar extent shows
-   * (~78% of the ICNF 2023-25 burns), not just the saturated cores. Keep in sync
-   * with scripts/17_burn_scar_optimization_figures.py (ALPHA_FLOOR/BASE/GAMMA).
+  /* Burn-scar display: value-driven LINEAR alpha-ramp on the de-gridded COGs.
+   * The COG stays a continuous inference-score raster in [0, 1]; we only change
+   * how it is painted. alpha = clamp((score - START) / SPAN, 0, 1): fully
+   * transparent below START (0.40 — the faint stride-256 residual + low-score
+   * "wash" live there), ramping to fully opaque by START+SPAN (0.70), so only
+   * confident detections read. Colour stays YlOrRd(score). nodata (-9999) paints
+   * fully transparent. The raster layer carries raster-opacity ~0.85 to match the
+   * other COG overlays (the alpha here is the per-pixel ramp, multiplied by that).
    * The score is a relative model output, never a calibrated probability or a
-   * forecast. */
-  const BURN_ALPHA_FLOOR = 0.25;
-  const BURN_ALPHA_BASE = 0.3;
-  const BURN_ALPHA_GAMMA = 0.6;
+   * forecast (non-negotiable #6). */
+  const BURN_ALPHA_START = 0.4;
+  const BURN_ALPHA_SPAN = 0.3;
   /* The burn-scar colour function is registered per mosaic-tile href by
    * registerBurnScarColor (defined below); each tile shares these constants. */
 
@@ -1327,23 +1326,29 @@ async function main() {
     });
   }
 
-  /* Burn-scar mosaic tiles reuse the pilot burn-scar value-driven-alpha colour
-   * function (YlOrRd, transparent below the floor) — register it per tile href.
-   * A relative model score, never a calibrated probability (non-negotiable #6). */
+  /* De-gridded burn-scar mosaic tiles share a value-driven LINEAR alpha-ramp
+   * colour function (YlOrRd hue, alpha fades in over [START, START+SPAN]) —
+   * register it per tile href. nodata (-9999) and any non-finite value paint
+   * fully transparent. A relative model score, never a calibrated probability
+   * (non-negotiable #6). */
   const burnScarColorRegistered = new Set();
   function registerBurnScarColor(href) {
     if (burnScarColorRegistered.has(href)) return;
     burnScarColorRegistered.add(href);
     MaplibreCOGProtocol.setColorFunction(href, (pixel, color, metadata) => {
       const p = pixel[0];
-      if (p === metadata.noData || !(p >= BURN_ALPHA_FLOOR)) {
+      /* nodata sentinel (-9999) / NaN -> fully transparent. */
+      if (!Number.isFinite(p) || p === metadata.noData) {
         color.set([0, 0, 0, 0]);
-      } else {
-        const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
-        const t = Math.pow(Math.min(1, (p - BURN_ALPHA_FLOOR) / (1 - BURN_ALPHA_FLOOR)), BURN_ALPHA_GAMMA);
-        const alpha = Math.round(255 * (BURN_ALPHA_BASE + (1 - BURN_ALPHA_BASE) * t));
-        color.set([...style.ylorrd_lut[idx], alpha]);
+        return;
       }
+      const a = Math.max(0, Math.min(1, (p - BURN_ALPHA_START) / BURN_ALPHA_SPAN));
+      if (a <= 0) {
+        color.set([0, 0, 0, 0]);
+        return;
+      }
+      const idx = Math.max(0, Math.min(255, Math.round(p * 255)));
+      color.set([...style.ylorrd_lut[idx], Math.round(255 * a)]);
     });
   }
 
@@ -1640,7 +1645,14 @@ async function main() {
       if (kind === "burn_scar") registerBurnScarColor(tile.href);
       else registerInputColor("nbr_delta", tile.href);
       map.addSource(id, { type: "raster", url: `cog://${tile.href}`, tileSize: 256 });
-      map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 1 } }, underAoi());
+      /* Burn-scar tiles render at raster-opacity ~0.85 to match the other COG
+       * overlays (the per-pixel alpha-ramp multiplies with this); NBR-delta keeps
+       * full raster-opacity and bakes its opacity into the colour function. */
+      const rasterOpacity = kind === "burn_scar" ? 0.85 : 1;
+      map.addLayer(
+        { id, type: "raster", source: id, paint: { "raster-opacity": rasterOpacity } },
+        underAoi(),
+      );
       if (kind === "burn_scar") {
         registerRasterReader(id, {
           href: tile.href, priority: 10, allowNegative: false,

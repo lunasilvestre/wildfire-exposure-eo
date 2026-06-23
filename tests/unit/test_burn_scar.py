@@ -179,10 +179,16 @@ def test_query_recent_s2_orders_deterministically() -> None:
     from shapely.geometry import box
 
     items = [
-        _FakeItem("S2B_LATER", datetime(2026, 5, 2, 11, 0, tzinfo=UTC)),
-        _FakeItem("S2A_SAME_TS_B", datetime(2026, 5, 1, 11, 0, tzinfo=UTC)),
-        _FakeItem("S2A_SAME_TS_A", datetime(2026, 5, 1, 11, 0, tzinfo=UTC)),
-        _FakeItem("S2A_EARLIEST", datetime(2026, 4, 30, 11, 0, tzinfo=UTC)),
+        _FakeItem("S2B_LATER", datetime(2026, 5, 2, 11, 0, tzinfo=UTC), {"eo:cloud_cover": 10.0}),
+        _FakeItem(
+            "S2A_SAME_TS_B", datetime(2026, 5, 1, 11, 0, tzinfo=UTC), {"eo:cloud_cover": 5.0}
+        ),
+        _FakeItem(
+            "S2A_SAME_TS_A", datetime(2026, 5, 1, 11, 0, tzinfo=UTC), {"eo:cloud_cover": 5.0}
+        ),
+        _FakeItem(
+            "S2A_EARLIEST", datetime(2026, 4, 30, 11, 0, tzinfo=UTC), {"eo:cloud_cover": 0.0}
+        ),
     ]
     client = _FakeClient(items)
     out = burn_scar.query_recent_s2(
@@ -200,15 +206,38 @@ def test_query_recent_s2_orders_deterministically() -> None:
     ]
     assert client.search_kwargs["collections"] == ["sentinel-2-l2a"]
     assert client.search_kwargs["datetime"] == "2026-03-09/2026-06-09"
-    assert client.search_kwargs["query"] == {"eo:cloud_cover": {"lte": 30}}
+    # Cloud cover is filtered CLIENT-side (PC's server-side `query` extension
+    # times out on 12-month polygon searches), so no `query` kwarg is sent.
+    assert "query" not in client.search_kwargs
+
+
+def test_query_recent_s2_filters_cloud_cover_client_side() -> None:
+    from shapely.geometry import box
+
+    items = [
+        _FakeItem("S2_CLEAR", datetime(2026, 5, 1, tzinfo=UTC), {"eo:cloud_cover": 12.0}),
+        _FakeItem("S2_CLOUDY", datetime(2026, 5, 2, tzinfo=UTC), {"eo:cloud_cover": 80.0}),
+        _FakeItem("S2_NO_PROP", datetime(2026, 5, 3, tzinfo=UTC)),  # missing -> 100.0 default
+    ]
+    client = _FakeClient(items)
+    out = burn_scar.query_recent_s2(
+        box(-8.6, 40.6, -8.2, 40.9),
+        1,
+        max_cloud_cover=30,
+        window_end=date(2026, 6, 9),
+        client=client,  # pyright: ignore[reportArgumentType]
+    )
+    # Only the under-threshold scene survives; no server-side query is sent.
+    assert [it.id for it in out] == ["S2_CLEAR"]
+    assert "query" not in client.search_kwargs
 
 
 def test_query_recent_s2_is_stable_across_input_order() -> None:
     from shapely.geometry import box
 
     items = [
-        _FakeItem("S2_B", datetime(2026, 5, 1, tzinfo=UTC)),
-        _FakeItem("S2_A", datetime(2026, 5, 1, tzinfo=UTC)),
+        _FakeItem("S2_B", datetime(2026, 5, 1, tzinfo=UTC), {"eo:cloud_cover": 5.0}),
+        _FakeItem("S2_A", datetime(2026, 5, 1, tzinfo=UTC), {"eo:cloud_cover": 5.0}),
     ]
     aoi = box(-8.6, 40.6, -8.2, 40.9)
     first = burn_scar.query_recent_s2(

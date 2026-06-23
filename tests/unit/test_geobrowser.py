@@ -871,9 +871,11 @@ def test_build_full_nffl_fuel_legend_covers_all_codes() -> None:
     assert {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}.issubset(codes)
 
 
-def test_build_mosaics_has_five_tiles_each() -> None:
-    # Both INTERIM mosaics span the pilot + 4 study areas (5 tiles), shown as one
-    # toggle each. NBR tiles reuse the study-area nbr_delta input-layer hrefs.
+def test_build_mosaics_tile_counts() -> None:
+    # Asymmetric by design: NBR-delta spans the pilot + 4 study areas (5 tiles),
+    # but the burn-scar mosaic serves only the 4 DE-GRIDDED study areas — the
+    # pilot's burn-scar tile is WITHHELD (residual ViT-tiling artifact its dense
+    # scene coverage leaves). NBR tiles reuse the study-area nbr_delta hrefs.
     sa = [
         _study_area(
             name=name,
@@ -890,10 +892,17 @@ def test_build_mosaics_has_five_tiles_each() -> None:
     mosaics = geobrowser_mod.build_mosaics("https://wildfire.cheias.pt", [], sa)
     by_kind = {mo.kind: mo for mo in mosaics}
     assert set(by_kind) == {"burn_scar", "nbr_delta"}
-    assert len(by_kind["burn_scar"].tiles) == 5
+    # Burn-scar: 4 de-gridded study-area tiles, NO pilot.
+    assert len(by_kind["burn_scar"].tiles) == 4
+    assert {t.aoi_name for t in by_kind["burn_scar"].tiles} == {
+        "pedrogao_grande",
+        "serra_da_estrela",
+        "peneda_geres",
+        "monchique",
+    }
+    assert all("degrid" in t.href for t in by_kind["burn_scar"].tiles)
+    # NBR-delta: pilot + 4 study areas (5 tiles), pilot first.
     assert len(by_kind["nbr_delta"].tiles) == 5
-    # Pilot tile is present in both, first.
-    assert by_kind["burn_scar"].tiles[0].aoi_name == "pilot"
     assert by_kind["nbr_delta"].tiles[0].aoi_name == "pilot"
     # Every tile carries an explicit CRS (#2) and a canonical run-id.
     for mo in mosaics:

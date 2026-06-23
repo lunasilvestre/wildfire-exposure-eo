@@ -8252,37 +8252,31 @@
    "kind": "burn_scar",
    "tiles": [
     {
-     "aoi_name": "pilot",
-     "href": "https://wildfire.cheias.pt/burn_scar_3857_20260615T192025Z.tif",
-     "crs": "EPSG:3857",
-     "run_id": "20260615T192025Z"
-    },
-    {
      "aoi_name": "pedrogao_grande",
-     "href": "https://wildfire.cheias.pt/burn_scar_pedrogao_grande_3857_20260618T081749Z.tif",
+     "href": "https://wildfire.cheias.pt/burn_scar_pedrogao_grande_degrid_3857_20260620T185302Z.tif",
      "crs": "EPSG:3857",
-     "run_id": "20260618T081749Z"
+     "run_id": "20260620T185302Z"
     },
     {
      "aoi_name": "serra_da_estrela",
-     "href": "https://wildfire.cheias.pt/burn_scar_serra_da_estrela_3857_20260618T085108Z.tif",
+     "href": "https://wildfire.cheias.pt/burn_scar_serra_da_estrela_degrid_3857_20260622T123744Z.tif",
      "crs": "EPSG:3857",
-     "run_id": "20260618T085108Z"
+     "run_id": "20260622T123744Z"
     },
     {
      "aoi_name": "peneda_geres",
-     "href": "https://wildfire.cheias.pt/burn_scar_peneda_geres_3857_20260618T091008Z.tif",
+     "href": "https://wildfire.cheias.pt/burn_scar_peneda_geres_degrid_3857_20260622T131029Z.tif",
      "crs": "EPSG:3857",
-     "run_id": "20260618T091008Z"
+     "run_id": "20260622T131029Z"
     },
     {
      "aoi_name": "monchique",
-     "href": "https://wildfire.cheias.pt/burn_scar_monchique_3857_20260618T092543Z.tif",
+     "href": "https://wildfire.cheias.pt/burn_scar_monchique_degrid_3857_20260622T133547Z.tif",
      "crs": "EPSG:3857",
-     "run_id": "20260618T092543Z"
+     "run_id": "20260622T133547Z"
     }
    ],
-   "caption": "Burn-scar mosaic temporarily withdrawn — de-grid fix in progress. The Prithvi-EO-2.0 burn-scar inference is being re-run to remove a ViT-tiling grid artefact; it will return once the de-gridded composite is published. Recent-scar DETECTION — spectral signatures of fires that already happened — NOT a forecast or ignition prediction (non-negotiable #6). A relative model score, not a calibrated probability."
+   "caption": "Burn-scar mosaic — recent-scar DETECTION (de-gridded, Prithvi stride-256 + low-value alpha-ramp), 4 study areas. The pilot's tile is withheld: its dense scene coverage leaves a residual ViT-tiling artifact the model's strong centre-bias prevents removing without losing real detection. A relative model score, not a probability/forecast."
   },
   {
    "kind": "nbr_delta",

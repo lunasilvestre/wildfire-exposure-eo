@@ -111,11 +111,12 @@
         <p class="caption group-caption">Intermediate spectral detections across the pilot + 4 study
           areas (all tiles shown under one toggle). Streamed from Cloudflare R2 on toggle.</p>
         <div class="layer-row">
-          <label class="disabled"><input type="checkbox" id="toggle-mosaic-burn_scar" disabled> Burn-scar mosaic <span class="tag input">withdrawn</span></label>
-          <p class="caption" id="caption-mosaic-burn_scar">Burn-scar mosaic temporarily withdrawn — de-grid fix
-            in progress. The Prithvi-EO-2.0 burn-scar inference is being re-run to remove a ViT-tiling grid
-            artefact; it will return once the de-gridded composite is published. Use the NBR-delta mosaic
-            below in the meantime.</p>
+          <label><input type="checkbox" id="toggle-mosaic-burn_scar"> Burn-scar mosaic <span class="tag input">interim</span></label>
+          <p class="caption" id="caption-mosaic-burn_scar">Burn-scar mosaic — recent-scar DETECTION
+            (de-gridded, Prithvi stride-256 + low-value alpha-ramp), 4 study areas. The pilot's tile is
+            withheld: its dense scene coverage leaves a residual ViT-tiling artifact the model's strong
+            centre-bias prevents removing without losing real detection. A relative model score, not a
+            probability/forecast.</p>
         </div>
         <div class="layer-row">
           <label><input type="checkbox" id="toggle-mosaic-nbr_delta"> NBR-delta (ΔNBR) mosaic <span class="tag input">interim</span></label>
@@ -211,7 +212,7 @@
       <div id="legend-mosaic-burn_scar" hidden>
         <h3>Burn-scar inference score</h3>
         <canvas id="ramp-ylorrd" width="220" height="12"></canvas>
-        <div class="ramp-labels"><span>0.3 (display floor)</span><span>1 (relative model score)</span></div>
+        <div class="ramp-labels"><span>0.4 (alpha-ramp start)</span><span>1 (relative model score)</span></div>
       </div>
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>

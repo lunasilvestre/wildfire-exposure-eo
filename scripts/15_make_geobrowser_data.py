@@ -281,29 +281,30 @@ _BURN_HISTORY_CAPTION = (
     "not a modelling artefact. Observed history, not a probability or forecast."
 )
 
-#: INTERIM burn-scar mosaic tiles (pilot + the 4 study areas), each an existing
-#: EPSG:3857 display COG on R2. Shown as ONE toggle over all tiles at once (no
-#: per-AOI swap). The pilot reuses the canonical ``burn_scar_3857_<run>`` artefact
-#: (= ``artifacts["burn_scar"]``); the study areas use the ``burn_scar_<aoi>_3857``
-#: naming. Non-negotiable #1: these exact published filenames, never fabricated.
+#: INTERIM burn-scar mosaic tiles — the 4 study areas, each a DE-GRIDDED EPSG:3857
+#: display COG on R2 (Prithvi stride-256 re-run: genuine >=50% crop overlap blends
+#: the ViT per-crop centre-bias tent away). Shown as ONE toggle over all tiles at
+#: once (no per-AOI swap). The PILOT tile is WITHHELD: its dense scene coverage
+#: (184 scenes) accumulates a residual grid the model's strong centre-bias prevents
+#: removing without losing real detection (every inference-side lever exhausted —
+#: median/center-bias kill recall, more overlap worsens it). Non-negotiable #1:
+#: these exact published filenames, never fabricated.
 _BURN_SCAR_MOSAIC_TILES: tuple[tuple[str, str], ...] = (
-    ("pilot", "burn_scar_3857_20260615T192025Z.tif"),
-    ("pedrogao_grande", "burn_scar_pedrogao_grande_3857_20260618T081749Z.tif"),
-    ("serra_da_estrela", "burn_scar_serra_da_estrela_3857_20260618T085108Z.tif"),
-    ("peneda_geres", "burn_scar_peneda_geres_3857_20260618T091008Z.tif"),
-    ("monchique", "burn_scar_monchique_3857_20260618T092543Z.tif"),
+    ("pedrogao_grande", "burn_scar_pedrogao_grande_degrid_3857_20260620T185302Z.tif"),
+    ("serra_da_estrela", "burn_scar_serra_da_estrela_degrid_3857_20260622T123744Z.tif"),
+    ("peneda_geres", "burn_scar_peneda_geres_degrid_3857_20260622T131029Z.tif"),
+    ("monchique", "burn_scar_monchique_degrid_3857_20260622T133547Z.tif"),
 )
-#: The burn-scar mosaic is TEMPORARILY WITHDRAWN from the live site while the
-#: Prithvi inference is re-run to remove a ViT-tiling grid artefact (live
-#: feedback). The wiring + tiles are kept so it returns with a one-line caption
-#: swap once the de-gridded composite is published.
+#: Caption for the RE-ENABLED de-gridded burn-scar mosaic. Honest about both the
+#: fix (stride-256 + low-value alpha-ramp) and the withheld pilot tile
+#: (non-negotiable #6: detection of fires that already happened, a relative model
+#: score — never a probability or forecast).
 _BURN_SCAR_MOSAIC_CAPTION = (
-    "Burn-scar mosaic temporarily withdrawn — de-grid fix in progress. The "
-    "Prithvi-EO-2.0 burn-scar inference is being re-run to remove a ViT-tiling "
-    "grid artefact; it will return once the de-gridded composite is published. "
-    "Recent-scar DETECTION — spectral signatures of fires that already happened "
-    "— NOT a forecast or ignition prediction (non-negotiable #6). A relative "
-    "model score, not a calibrated probability."
+    "Burn-scar mosaic — recent-scar DETECTION (de-gridded, Prithvi stride-256 + "
+    "low-value alpha-ramp), 4 study areas. The pilot's tile is withheld: its dense "
+    "scene coverage leaves a residual ViT-tiling artifact the model's strong "
+    "centre-bias prevents removing without losing real detection. A relative model "
+    "score, not a probability/forecast."
 )
 
 #: INTERIM NBR-delta mosaic — the pilot tile (the 4 study-area NBR tiles are
