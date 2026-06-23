@@ -66,7 +66,10 @@
           <label class="study-icnf-label"><input type="checkbox" id="toggle-study-icnf"> ICNF burns for this AOI <span class="tag input">input</span></label>
           <p class="caption">ICNF <em>Áreas Ardidas</em> perimeters (1990–2025) for the selected AOI,
             shown <strong>with</strong> it (2025 vintage outlined). Observed historical burned-area
-            polygons (© ICNF) — not a probability, not a forecast. Streamed from Cloudflare R2 on demand.</p>
+            polygons (© ICNF) — not a probability, not a forecast. This is <strong>35 years of
+            cumulative</strong> burned area (it covers much of each AOI); it is <em>not</em> directly
+            comparable to the burn-scar layer, which detects only scars still spectrally visible in
+            recent imagery. Streamed from Cloudflare R2 on demand.</p>
           <ul id="study-areas-list" class="caption"></ul>
         </div>
       </fieldset>
@@ -112,11 +115,12 @@
           areas (all tiles shown under one toggle). Streamed from Cloudflare R2 on toggle.</p>
         <div class="layer-row">
           <label><input type="checkbox" id="toggle-mosaic-burn_scar"> Burn-scar mosaic <span class="tag input">interim</span></label>
-          <p class="caption" id="caption-mosaic-burn_scar">Burn-scar mosaic — recent-scar DETECTION
-            (de-gridded, Prithvi stride-256 + low-value alpha-ramp), 4 study areas. The pilot's tile is
-            withheld: its dense scene coverage leaves a residual ViT-tiling artifact the model's strong
-            centre-bias prevents removing without losing real detection. A relative model score, not a
-            probability/forecast.</p>
+          <p class="caption" id="caption-mosaic-burn_scar">Burn-scar mosaic — recent-scar DETECTION from
+            Sentinel-2 (Prithvi, de-gridded stride-256; painted only where score ≥ 0.60, which suppresses
+            the low-score wash), 3 study areas. Detects fire scars still spectrally visible in recent
+            imagery — <strong>not</strong> cumulative history, so compare against recent ICNF vintages, not
+            the full 1990–2025 perimeters. Monchique and the pilot tiles are withheld (residual ViT-tiling /
+            a wash with no coherent recent footprint). A relative model score, not a probability/forecast.</p>
         </div>
         <div class="layer-row">
           <label><input type="checkbox" id="toggle-mosaic-nbr_delta"> NBR-delta (ΔNBR) mosaic <span class="tag input">interim</span></label>
@@ -212,7 +216,7 @@
       <div id="legend-mosaic-burn_scar" hidden>
         <h3>Burn-scar inference score</h3>
         <canvas id="ramp-ylorrd" width="220" height="12"></canvas>
-        <div class="ramp-labels"><span>0.4 (alpha-ramp start)</span><span>1 (relative model score)</span></div>
+        <div class="ramp-labels"><span>0.6 (alpha-ramp start)</span><span>1 (relative model score)</span></div>
       </div>
       <div id="legend-fuel" hidden>
         <h3>Fuel classes (EFFIS NFFL)</h3>

@@ -892,13 +892,14 @@ def test_build_mosaics_tile_counts() -> None:
     mosaics = geobrowser_mod.build_mosaics("https://wildfire.cheias.pt", [], sa)
     by_kind = {mo.kind: mo for mo in mosaics}
     assert set(by_kind) == {"burn_scar", "nbr_delta"}
-    # Burn-scar: 4 de-gridded study-area tiles, NO pilot.
-    assert len(by_kind["burn_scar"].tiles) == 4
+    # Burn-scar: 3 de-gridded study-area tiles, NO pilot and NO monchique.
+    # Monchique was withheld (2026-06-23 validation vs ICNF: a diffuse wash with no
+    # coherent recent footprint even at score>=0.60). See scripts/32.
+    assert len(by_kind["burn_scar"].tiles) == 3
     assert {t.aoi_name for t in by_kind["burn_scar"].tiles} == {
         "pedrogao_grande",
         "serra_da_estrela",
         "peneda_geres",
-        "monchique",
     }
     assert all("degrid" in t.href for t in by_kind["burn_scar"].tiles)
     # NBR-delta: pilot + 4 study areas (5 tiles), pilot first.

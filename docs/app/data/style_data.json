@@ -8268,15 +8268,9 @@
      "href": "https://wildfire.cheias.pt/burn_scar_peneda_geres_degrid_3857_20260622T131029Z.tif",
      "crs": "EPSG:3857",
      "run_id": "20260622T131029Z"
-    },
-    {
-     "aoi_name": "monchique",
-     "href": "https://wildfire.cheias.pt/burn_scar_monchique_degrid_3857_20260622T133547Z.tif",
-     "crs": "EPSG:3857",
-     "run_id": "20260622T133547Z"
     }
    ],
-   "caption": "Burn-scar mosaic — recent-scar DETECTION (de-gridded, Prithvi stride-256 + low-value alpha-ramp), 4 study areas. The pilot's tile is withheld: its dense scene coverage leaves a residual ViT-tiling artifact the model's strong centre-bias prevents removing without losing real detection. A relative model score, not a probability/forecast."
+   "caption": "Burn-scar mosaic — recent-scar DETECTION from Sentinel-2 (Prithvi, de-gridded stride-256; painted only where score >=0.60, which suppresses the low-score wash), 3 study areas. Detects fire scars still spectrally visible in recent imagery — NOT cumulative history, so compare against recent ICNF vintages, not the full 1990-2025 perimeters. Monchique and the pilot tiles are withheld (residual ViT-tiling / a wash with no coherent recent footprint). A relative model score, not a probability/forecast."
   },
   {
    "kind": "nbr_delta",

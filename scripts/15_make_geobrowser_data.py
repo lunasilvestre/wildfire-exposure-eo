@@ -281,30 +281,36 @@ _BURN_HISTORY_CAPTION = (
     "not a modelling artefact. Observed history, not a probability or forecast."
 )
 
-#: INTERIM burn-scar mosaic tiles — the 4 study areas, each a DE-GRIDDED EPSG:3857
-#: display COG on R2 (Prithvi stride-256 re-run: genuine >=50% crop overlap blends
-#: the ViT per-crop centre-bias tent away). Shown as ONE toggle over all tiles at
-#: once (no per-AOI swap). The PILOT tile is WITHHELD: its dense scene coverage
-#: (184 scenes) accumulates a residual grid the model's strong centre-bias prevents
-#: removing without losing real detection (every inference-side lever exhausted —
-#: median/center-bias kill recall, more overlap worsens it). Non-negotiable #1:
-#: these exact published filenames, never fabricated.
+#: INTERIM burn-scar mosaic tiles — the 3 study areas that carry a COHERENT recent
+#: burn footprint, each a DE-GRIDDED EPSG:3857 display COG on R2 (Prithvi stride-256
+#: re-run: genuine >=50% crop overlap blends the ViT per-crop centre-bias tent away).
+#: Shown as ONE toggle over all tiles at once (no per-AOI swap). Two AOIs are
+#: WITHHELD: the PILOT (its dense 184-scene coverage accumulates a residual grid the
+#: model's strong centre-bias prevents removing without losing real detection) and
+#: MONCHIQUE (validated 2026-06-23 vs ICNF: even at score>=0.60 it is a diffuse wash
+#: with no coherent footprint — its genuine 2024-25 burn is ~64 ha, so almost all
+#: firing is spectral-confusion over-prediction, precision vs recent ICNF ~0.13).
+#: See scripts/32_validate_burnscar_vs_icnf.py. Non-negotiable #1: these exact
+#: published filenames, never fabricated.
 _BURN_SCAR_MOSAIC_TILES: tuple[tuple[str, str], ...] = (
     ("pedrogao_grande", "burn_scar_pedrogao_grande_degrid_3857_20260620T185302Z.tif"),
     ("serra_da_estrela", "burn_scar_serra_da_estrela_degrid_3857_20260622T123744Z.tif"),
     ("peneda_geres", "burn_scar_peneda_geres_degrid_3857_20260622T131029Z.tif"),
-    ("monchique", "burn_scar_monchique_degrid_3857_20260622T133547Z.tif"),
 )
-#: Caption for the RE-ENABLED de-gridded burn-scar mosaic. Honest about both the
-#: fix (stride-256 + low-value alpha-ramp) and the withheld pilot tile
-#: (non-negotiable #6: detection of fires that already happened, a relative model
-#: score — never a probability or forecast).
+#: Caption for the RE-ENABLED de-gridded burn-scar mosaic. Honest about the fix
+#: (stride-256 + a >=0.60 alpha-ramp floor that suppresses the low-score wash), the
+#: TEMPORAL SCOPE (recent visible scars, NOT cumulative history — not comparable to
+#: the 1990-2025 ICNF perimeters), and the two withheld AOIs (non-negotiable #6:
+#: detection of fires that already happened, a relative model score — never a
+#: probability or forecast).
 _BURN_SCAR_MOSAIC_CAPTION = (
-    "Burn-scar mosaic — recent-scar DETECTION (de-gridded, Prithvi stride-256 + "
-    "low-value alpha-ramp), 4 study areas. The pilot's tile is withheld: its dense "
-    "scene coverage leaves a residual ViT-tiling artifact the model's strong "
-    "centre-bias prevents removing without losing real detection. A relative model "
-    "score, not a probability/forecast."
+    "Burn-scar mosaic — recent-scar DETECTION from Sentinel-2 (Prithvi, de-gridded "
+    "stride-256; painted only where score >=0.60, which suppresses the low-score "
+    "wash), 3 study areas. Detects fire scars still spectrally visible in recent "
+    "imagery — NOT cumulative history, so compare against recent ICNF vintages, not "
+    "the full 1990-2025 perimeters. Monchique and the pilot tiles are withheld "
+    "(residual ViT-tiling / a wash with no coherent recent footprint). A relative "
+    "model score, not a probability/forecast."
 )
 
 #: INTERIM NBR-delta mosaic — the pilot tile (the 4 study-area NBR tiles are

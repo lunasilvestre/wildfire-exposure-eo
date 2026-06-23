@@ -1196,15 +1196,18 @@ async function main() {
   /* Burn-scar display: value-driven LINEAR alpha-ramp on the de-gridded COGs.
    * The COG stays a continuous inference-score raster in [0, 1]; we only change
    * how it is painted. alpha = clamp((score - START) / SPAN, 0, 1): fully
-   * transparent below START (0.40 — the faint stride-256 residual + low-score
-   * "wash" live there), ramping to fully opaque by START+SPAN (0.70), so only
-   * confident detections read. Colour stays YlOrRd(score). nodata (-9999) paints
-   * fully transparent. The raster layer carries raster-opacity ~0.85 to match the
-   * other COG overlays (the alpha here is the per-pixel ramp, multiplied by that).
-   * The score is a relative model output, never a calibrated probability or a
-   * forecast (non-negotiable #6). */
-  const BURN_ALPHA_START = 0.4;
-  const BURN_ALPHA_SPAN = 0.3;
+   * transparent below START (0.60), ramping to fully opaque by START+SPAN (0.85),
+   * so only confident detections read. START was raised 0.40 -> 0.60 after the
+   * 2026-06-23 validation vs ICNF (scripts/32_validate_burnscar_vs_icnf.py): at
+   * 0.40 the painted layer covered 29-43% of each AOI — a low-score "wash" that
+   * over-stated burned area; at 0.60 it covers 9-23% and precision against recent
+   * (2023-25) ICNF roughly doubles, leaving the coherent footprints. Colour stays
+   * YlOrRd(score). nodata (-9999) paints fully transparent. The raster layer
+   * carries raster-opacity ~0.85 to match the other COG overlays (the alpha here
+   * is the per-pixel ramp, multiplied by that). The score is a relative model
+   * output, never a calibrated probability or a forecast (non-negotiable #6). */
+  const BURN_ALPHA_START = 0.6;
+  const BURN_ALPHA_SPAN = 0.25;
   /* The burn-scar colour function is registered per mosaic-tile href by
    * registerBurnScarColor (defined below); each tile shares these constants. */
 
